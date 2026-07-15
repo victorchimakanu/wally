@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.env.local
+.env
+*.db
+*.db-shm
+*.db-wal
+wdk.config.json
+
+# internal working material (design explorations, demo prep)
+internal/
+
+# docs site artifacts
+docs-site/node_modules/
+docs-site/build/
+docs-site/.docusaurus/

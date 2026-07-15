@@ -1,0 +1,20 @@
+{
+  "$note": "Copy to wdk.config.json (gitignored), fill the three PASTE_ values from your bundler/paymaster provider (e.g. Pimlico), set WDK_CONFIG=./wdk.config.json and WALLY_GASLESS_CHAINS=arbitrum in .env.local, restart. The arbitrum wallet becomes a Safe smart account (new address) that pays gas in USDT.",
+  "chains": {
+    "arbitrum": {
+      "module": "@tetherto/wdk-wallet-evm-erc-4337",
+      "config": {
+        "chainId": 42161,
+        "provider": "https://arbitrum-one-rpc.publicnode.com",
+        "bundlerUrl": "PASTE_BUNDLER_URL",
+        "paymasterUrl": "PASTE_PAYMASTER_URL",
+        "paymasterAddress": "PASTE_PAYMASTER_CONTRACT_ADDRESS",
+        "paymasterToken": {
+          "address": "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9"
+        },
+        "entryPointAddress": "0x0000000071727De22E5E9d8BAf0edAc6f37da032",
+        "safeModulesVersion": "0.3.0"
+      }
+    }
+  }
+}

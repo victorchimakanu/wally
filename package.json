@@ -1,0 +1,49 @@
+{
+  "name": "wally",
+  "version": "1.0.0",
+  "description": "Agentic finance chat interface: QVAC local inference + WDK self-custodial wallet",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc && cp src/db/schema.sql dist/db/schema.sql",
+    "start": "node dist/server.js",
+    "dev": "tsx src/server.ts",
+    "dev:watch": "tsx watch src/server.ts",
+    "cli": "tsx src/cli.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "@qvac/sdk": "0.13.5",
+    "@tetherto/wdk-mcp-toolkit": "git+https://github.com/tetherto/wdk-mcp-toolkit.git",
+    "@tetherto/wdk-wallet-evm": "1.0.0-beta.14",
+    "@tetherto/wdk-wallet-btc": "1.0.0-beta.10",
+    "@tetherto/wdk-protocol-swap-velora-evm": "1.0.0-beta.4",
+    "@tetherto/wdk-protocol-bridge-usdt0-evm": "1.0.0-beta.4",
+    "@tetherto/wdk-protocol-lending-aave-evm": "1.0.0-beta.4",
+    "better-sqlite3": "12.11.1",
+    "dotenv": "^16.4.7",
+    "fastify": "5.9.0",
+    "pino": "10.3.1",
+    "uuid": "^10.0.0",
+    "ws": "8.21.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.0.0",
+    "@types/uuid": "^10.0.0",
+    "@types/ws": "^8.5.14",
+    "tsx": "^4.19.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.0.0"
+  },
+  "overrides": {
+    "@tetherto/wdk-wallet": "1.0.0-beta.9"
+  }
+}

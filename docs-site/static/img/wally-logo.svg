@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none">
+  <!-- the bird, just out of reach -->
+  <path d="M26 10 C30 4.5, 33.5 4.5, 35.5 8.5 C37.5 4.5, 41 4.5, 45 10" stroke="#F2A03D" stroke-width="2.4" stroke-linecap="round"/>
+  <!-- the reaching arm -->
+  <path d="M20 26 C22 21, 25 17, 29 14" stroke="#3DD68C" stroke-width="2.6" stroke-linecap="round"/>
+  <circle cx="29.6" cy="13.4" r="2" fill="#3DD68C"/>
+  <!-- robot body -->
+  <rect x="6" y="26" width="17" height="13" rx="3.5" fill="#16301F" stroke="#3DD68C" stroke-width="2"/>
+  <!-- robot dome head -->
+  <path d="M8.5 26 a6.5 6.5 0 0 1 12 0 Z" fill="#16301F" stroke="#3DD68C" stroke-width="2"/>
+  <!-- eye lens -->
+  <circle cx="14.5" cy="23" r="1.9" fill="#F2A03D"/>
+  <!-- treads -->
+  <rect x="8.5" y="40.5" width="12" height="3.4" rx="1.7" fill="#1E9E62"/>
+</svg>
