@@ -1,72 +1,104 @@
-# Gasless transfers — pay gas in USDT, never hold ETH
+# Gasless USDT: the intended Wally setup
 
-Wally's standard wallet is a plain EOA (externally owned account): every token
-transfer needs ETH on the same chain for gas. This guide switches the Arbitrum
-wallet to an **ERC-4337 Safe smart account** where a paymaster fronts the gas
-and takes payment **in USDT**. Result: you can receive USDT and send USDT
-without the address ever holding ETH.
+This is Wally's default story: **you hold USDT, you send USDT, and the network fee comes out
+in USDT.** The wallet never holds ETH. This guide takes about ten minutes, and at the end your
+Arbitrum wallet is a smart account (ERC-4337) whose gas is paid by a paymaster and charged
+back to you in USDT.
 
-## How it works
+Every value in the config below is verified and correct as shipped. The only thing you supply
+is one free API key.
 
-- WDK ships `@tetherto/wdk-wallet-evm-erc-4337` (built on Safe's relay kit).
-  Instead of signing a raw transaction, the wallet signs a **user operation**.
-- A **bundler** (an external service) wraps user operations into real
-  transactions and pays the ETH gas itself.
-- A **paymaster** (usually the same provider) reimburses the bundler and
-  charges your smart account in USDT.
-- The WDK MCP toolkit loads this wallet for a chain via a `WDK_CONFIG` JSON
-  file, so Wally's own code barely changes.
+## How it works, in three sentences
 
-## What changes for you
+Instead of signing raw transactions, your wallet signs **user operations**. A **bundler** (an
+external service) wraps them into real transactions and fronts the ETH gas itself. A
+**paymaster** reimburses the bundler and charges your smart account in USDT. Your key still
+signs everything, still on your device; the smart account only changes who fronts the gas,
+never who controls the money.
 
-- **New address.** The smart account is a Safe contract with its own address,
-  different from the EOA you used before. Click the Arbitrum card after
-  restarting to see it. Fund it with USDT directly.
-- Funds on the old EOA address stay there. They are not lost; they still need
-  ETH gas to move, whenever you care to.
-- The very first send also deploys the smart account on-chain, so the first
-  fee is slightly higher than later ones. Still paid in USDT.
-- Wally reports a **user operation hash** instead of a transaction hash.
-  Etherscan-style explorers cannot look those up directly.
+## Setup
 
-## Setup (about 10 minutes)
+### 1. Get a Pimlico API key (free)
 
-1. **Create an account with a bundler/paymaster provider** that supports
-   Safe accounts, EntryPoint v0.7, and an ERC-20 paymaster with USDT on
-   Arbitrum One. Pimlico is the common choice and has a free tier; Gelato
-   and Candide also work. From their dashboard you need three things:
-   - the bundler RPC URL for Arbitrum One (contains your API key)
-   - the paymaster URL (often the same URL)
-   - the ERC-20 paymaster contract address for Arbitrum One (from their docs)
+Sign up at [pimlico.io](https://www.pimlico.io), create an API key. The free tier is plenty
+for personal use. Pimlico provides both the bundler and the USDT paymaster through a single
+URL, which is why one key is all you need.
 
-2. **Create the config file:**
+### 2. Create the config file
 
-       cp wdk.config.example.json wdk.config.json
+```bash
+cp wdk.config.example.json wdk.config.json
+```
 
-   Fill in the three `PASTE_` values. The USDT token address and EntryPoint
-   v0.7 address are already filled in. `wdk.config.json` is gitignored
-   because the bundler URL embeds your API key.
+Open `wdk.config.json` and replace `YOUR_PIMLICO_API_KEY` in **both** URLs with your key.
+That is the only edit. Do not retype the addresses; they are exact, including their letter
+casing (Ethereum addresses carry a checksum in their capitalization, and validation rejects
+any deviation).
 
-3. **Enable it in `.env.local`** by uncommenting:
+For reference, what the values are:
 
-       WDK_CONFIG=./wdk.config.json
-       WALLY_GASLESS_CHAINS=arbitrum
+| Field | Value | What it is |
+|---|---|---|
+| `bundlerUrl` / `paymasterUrl` | `https://api.pimlico.io/v2/42161/rpc?apikey=...` | Pimlico's combined bundler + paymaster endpoint for Arbitrum One (chain 42161) |
+| `paymasterAddress` | `0x7777...834C` | Pimlico's ERC-20 paymaster contract (EntryPoint v0.7, same address on every chain) |
+| `paymasterToken.address` | `0xFd08...Cbb9` | USDT on Arbitrum One: the token your fees are charged in |
+| `entryPointAddress` | `0x0000...a032` | The standard ERC-4337 v0.7 EntryPoint contract |
+| `safeModulesVersion` | `0.3.0` | The Safe modules release that pairs with EntryPoint v0.7 |
 
-4. **Restart the server**, click the Arbitrum card, and send USDT to the new
-   smart-account address.
+`wdk.config.json` is gitignored because the URL embeds your API key.
 
-5. **Test:** `send 1 USDT to 0x... on arbitrum`. The confirmation card
-   appears as usual; gas is charged in USDT by the paymaster.
+### 3. Enable it
 
-## Verify the pairing if the provider errors
+In `.env.local`, uncomment (or add) these two lines:
 
-`safeModulesVersion: "0.3.0"` pairs with EntryPoint v0.7
-(`0x0000000071727De22E5E9d8BAf0edAc6f37da032`). If your provider only offers
-EntryPoint v0.6 (`0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789`), set
-`safeModulesVersion` to `"0.2.0"`. The relay kit validates the pairing and
-fails with a clear error if they mismatch.
+```bash
+WDK_CONFIG=./wdk.config.json
+WALLY_GASLESS_CHAINS=arbitrum
+```
+
+### 4. Restart and get your new address
+
+Restart the server (`npm run dev`). Click the **Arbitrum** card: you will see a **new
+address**. That is your smart account, a Safe contract wallet derived from the same seed.
+Copy it with the copy button.
+
+### 5. Fund it with USDT
+
+Send USDT to that address on the **Arbitrum One** network (when withdrawing from an exchange,
+the network selector must say Arbitrum One). USDT is the only asset you need. Do not send ETH.
+
+### 6. Send
+
+```text
+send 1 USDT to 0x... on arbitrum
+```
+
+The confirmation card shows the details, you confirm, the fee comes out of your USDT. Ask
+`what is my balance` a minute later and watch it settle.
+
+## What to expect
+
+- **A new address.** The smart account is separate from the classic address the same seed
+  produces. Fund the smart account directly; balances on the old classic address stay where
+  they are.
+- **The first send costs slightly more.** The first user operation also deploys your Safe
+  contract on-chain. Still paid in USDT. Later sends are cheaper.
+- **No Arbiscan link.** Gasless sends return a user-operation hash, which Etherscan-style
+  explorers cannot look up. Proof of settlement is your balance updating, which Wally
+  refreshes automatically.
+
+## Troubleshooting
+
+- **"Address ... is invalid ... checksum"** — an address in `wdk.config.json` was retyped
+  with different capitalization. Restore it exactly from `wdk.config.example.json`.
+- **Provider errors mentioning EntryPoint or modules** — your provider account may only
+  support EntryPoint v0.6. Set `entryPointAddress` to
+  `0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789` and `safeModulesVersion` to `"0.2.0"`. The
+  pairing is validated and fails loudly when mismatched.
+- **Transfer blocked with a gas message** — `WALLY_GASLESS_CHAINS=arbitrum` is missing from
+  `.env.local`, or the server was not restarted after adding it.
 
 ## Rollback
 
-Comment the two lines out of `.env.local` and restart. The Arbitrum wallet
-returns to the plain EOA and its original address.
+Comment the two lines out of `.env.local` and restart. Arbitrum returns to the classic
+account and its original address.
