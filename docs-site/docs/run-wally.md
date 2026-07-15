@@ -50,7 +50,7 @@ Open [http://localhost:3000](http://localhost:3000). The first message takes a f
 
 ```text
 what is my balance
-what is my ethereum address
+what is my arbitrum address
 send 1 USDT to 0x... on arbitrum
 ```
 

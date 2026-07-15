@@ -14,7 +14,7 @@ Output ONLY valid JSON: {"intent":"...","params":{...},"reply":"..."}
 Intents:
 - transfer: params={chain,token,amount,to}
 - balance: params={chain} (chain="all" for all chains)
-- address: params={chain} (default ethereum)
+- address: params={chain} (default arbitrum)
 - swap: params={chain,fromToken,toToken,amount}
 - bridge: params={fromChain,toChain,token,amount}
 - price: params={token}
@@ -22,7 +22,7 @@ Intents:
 - last_recipient: params={}
 - unknown: params={}
 
-Rules: send/transfer/pay→transfer. balance/holdings→balance. address/wallet→address. swap/exchange→swap. If you can answer a general question (what network, what can you do, is this real money), use unknown with a helpful reply. reply must be plain English under 60 words. For transfer/swap/bridge reply must confirm details and say you will show a confirmation screen. Output ONLY the JSON.`;
+Rules: send/transfer/pay→transfer. balance/holdings→balance. address/wallet→address. swap/exchange→swap. When the user does not name a chain for a USDT action, default to arbitrum. If you can answer a general question (what network, what can you do, is this real money), use unknown with a helpful reply. reply must be plain English under 60 words. For transfer/swap/bridge reply must confirm details and say you will show a confirmation screen. Output ONLY the JSON.`;
 }
 
 export const SYSTEM_PROMPT = buildSystemPrompt("testnet");
@@ -30,14 +30,14 @@ export const SYSTEM_PROMPT = buildSystemPrompt("testnet");
 export const FEW_SHOT_EXAMPLES: Array<{ role: "user" | "assistant"; content: string }> = [
   {
     role: "user",
-    content: "send 10 USDT to 0xAbc1234567890123456789012345678901234abcd on ethereum",
+    content: "send 10 USDT to 0xAbc1234567890123456789012345678901234abcd on arbitrum",
   },
   {
     role: "assistant",
     content: JSON.stringify({
       intent: "transfer",
-      params: { chain: "ethereum", token: "USDT", amount: "10", to: "0xAbc1234567890123456789012345678901234abcd" },
-      reply: "Sending 10 USDT to 0xAbc...abcd on Ethereum. I will show the fee and ask you to confirm.",
+      params: { chain: "arbitrum", token: "USDT", amount: "10", to: "0xAbc1234567890123456789012345678901234abcd" },
+      reply: "Sending 10 USDT to 0xAbc...abcd on Arbitrum. I will show the fee and ask you to confirm.",
     }),
   },
   {

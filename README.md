@@ -6,11 +6,10 @@ A crypto wallet you talk to. The AI runs on your machine. The keys never leave i
 
 You type plain English. Wally understands it with a local model, quotes the fee, asks you to confirm, and executes on-chain. No cloud AI, no API keys, no custodian.
 
+- **USDT in, USDT out, fees in USDT.** Wally's home chain is Arbitrum with an ERC-4337 smart account: you hold USDT, you send USDT, and the network fee is paid in USDT. The wallet never needs to hold ETH. ([setup](GASLESS.md))
 - **Local intelligence.** [QVAC](https://qvac.tether.io), Tether's on-device AI runtime, runs a quantized Qwen3 4B on your laptop. Your messages never leave the machine to be understood.
 - **Local keys.** [WDK](https://wdk.tether.io), Tether's Wallet Development Kit, derives your wallet from a seed phrase and signs locally. Only signed transactions touch the network.
 - **A human gate on every spend.** The AI proposes a transaction. Nothing moves until you press CONFIRM inside a 60 second window.
-
-Optional party trick: with the [gasless setup](GASLESS.md), Wally sends USDT on Arbitrum and pays the fee in USDT. The wallet never needs to hold ETH.
 
 ## Run it in five minutes
 
@@ -44,6 +43,8 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000). The first message takes a few extra seconds while the model loads.
 
+**To send USDT without ever touching ETH** (the intended Wally experience), do the ten minute [gasless setup](GASLESS.md): one JSON config file with a free bundler/paymaster key, and two lines in `.env.local`. Your Arbitrum wallet becomes a smart account that pays its fees in USDT.
+
 ## Your wallet is yours, not this repo's
 
 The repo contains code, no keys. Every address Wally shows is derived from the seed in **your** local `.env.local`, which is gitignored. Nobody who clones this repo can see or touch your wallet, and you cannot touch theirs. There is no shared example wallet.
@@ -53,13 +54,13 @@ That also means:
 - **Write the twelve words down.** The seed is the wallet. Lose it and the funds are unrecoverable; anyone who has it has your money.
 - **Receiving:** click any balance card to reveal and copy that chain's address. Anyone can send funds to it, even while the app is closed.
 - **Start on testnet.** `NETWORK_MODE=testnet` is the default. Switch to `mainnet` in `.env.local` only when you mean it, and fund the wallet with small amounts first.
-- On mainnet, sending tokens from a classic account needs a little ETH on the same chain for gas. Or skip ETH entirely with the [gasless smart account](GASLESS.md).
+- **Skip ETH.** With the [gasless smart account](GASLESS.md) enabled, USDT is the only asset you ever need on Arbitrum. Without it, classic accounts need a little ETH on the same chain for gas, which is exactly the annoyance Wally exists to remove.
 
 ## Talk to it
 
 ```text
 what is my balance
-what is my ethereum address
+what is my arbitrum address
 send 10 USDT to 0x... on arbitrum
 ```
 

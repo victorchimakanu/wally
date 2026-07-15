@@ -29,9 +29,10 @@
   var welcomeTimer     = null;
   var currentSessionId = null;
 
+  // USDT-first: Arbitrum leads (gasless USDT is Wally's default story).
   var CHAINS = [
-    { key: "ethereum", cls: "eth", name: "ETHEREUM" },
     { key: "arbitrum", cls: "arb", name: "ARBITRUM" },
+    { key: "ethereum", cls: "eth", name: "ETHEREUM" },
     { key: "bitcoin",  cls: "btc", name: "BITCOIN"  }
   ];
 
@@ -211,8 +212,8 @@
       netLine + "\n\n" +
       "Try:\n" +
       "what is my balance\n" +
-      "send 10 USDT to 0x... on ethereum\n" +
-      "what is my ethereum address\n\n" +
+      "send 10 USDT to 0x... on arbitrum\n" +
+      "what is my arbitrum address\n\n" +
       "Click any balance tile to reveal its wallet address.",
       false
     );
@@ -231,9 +232,10 @@
     var arb = byChain["arbitrum"] || {};
     var btc = byChain["bitcoin"]  || {};
 
+    // USDT is the headline number on both EVM chains; ETH is a footnote.
     balanceTrack.innerHTML =
-      buildTile(CHAINS[0], amt(eth["native"]), "ETH",  subLine(amt(eth["USDT"]),   "USDT")) +
-      buildTile(CHAINS[1], amt(arb["USDT"]),   "USDT", subLine(amt(arb["native"]), "ETH")) +
+      buildTile(CHAINS[0], amt(arb["USDT"]),   "USDT", subLine(amt(arb["native"]), "ETH")) +
+      buildTile(CHAINS[1], amt(eth["USDT"]),   "USDT", subLine(amt(eth["native"]), "ETH")) +
       buildTile(CHAINS[2], amt(btc["native"]), "BTC",  "");
 
     CHAINS.forEach(function (c) {

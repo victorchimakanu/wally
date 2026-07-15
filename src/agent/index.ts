@@ -203,9 +203,11 @@ export class WallyAgent {
         const native = await tools.fetchNativeBalanceNumber(params.chain);
         if (native === 0) {
           const msg =
-            `This transfer cannot go through yet. Your address has 0 ETH on ${params.chain}, ` +
-            `and sending ${params.token} costs a small ETH fee (gas). ` +
-            `Send some ETH on ${params.chain} to your address first, then try again. ` +
+            `This transfer cannot go through yet. On a classic account, sending ${params.token} ` +
+            `costs a small ETH fee (gas), and this address has 0 ETH on ${params.chain}. ` +
+            `The recommended fix: enable the gasless smart account (see GASLESS.md in the repo) ` +
+            `and pay fees in ${params.token} instead. No ETH needed, ever. ` +
+            `Alternatively, send a little ETH on ${params.chain} to this address. ` +
             `Your ${params.token} is untouched.`;
           this.emit({ type: "error", message: msg });
           saveHistory(this.sessionId, [...history, { role: "assistant", content: msg }]);

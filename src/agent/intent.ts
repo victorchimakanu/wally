@@ -135,7 +135,7 @@ export function classify(raw: ParsedIntent): TypedIntent {
       const chain = ChainSchema.safeParse((raw.params as Record<string, unknown>)?.chain);
       return {
         intent: "address",
-        params: { chain: chain.success ? chain.data : "ethereum" },
+        params: { chain: chain.success ? chain.data : "arbitrum" },
         reply,
       };
     }
