@@ -1,0 +1,126 @@
+/* Wally docs — "The Reach" theme.
+   Same palette and voice as the app: deep botanical green ground, spring
+   green for life, orange for commitment, cream text, cursive wordmark. */
+
+@import url("https://fonts.googleapis.com/css2?family=Pinyon+Script&family=Inter:wght@400;500;600;700&display=swap");
+
+:root {
+  --r-ground: #0e1f17;
+  --r-surface: #16301f;
+  --r-surface-2: #1e3d28;
+  --r-green: #3dd68c;
+  --r-green-deep: #1e9e62;
+  --r-orange: #f2762e;
+  --r-coral: #f2a03d;
+  --r-cream: #f5efdf;
+  --r-mist: #9db8a6;
+
+  --ifm-color-primary: #3dd68c;
+  --ifm-color-primary-dark: #2bc97e;
+  --ifm-color-primary-darker: #1e9e62;
+  --ifm-color-primary-darkest: #187e4e;
+  --ifm-color-primary-light: #58dc9b;
+  --ifm-color-primary-lighter: #73e2ab;
+  --ifm-color-primary-lightest: #a0edc7;
+  --ifm-code-font-size: 90%;
+  --ifm-font-family-base: "Inter", system-ui, -apple-system, sans-serif;
+}
+
+[data-theme="dark"] {
+  --ifm-color-primary: #3dd68c;
+  --ifm-color-primary-dark: #2bc97e;
+  --ifm-color-primary-darker: #1e9e62;
+  --ifm-color-primary-darkest: #187e4e;
+  --ifm-color-primary-light: #58dc9b;
+  --ifm-color-primary-lighter: #73e2ab;
+  --ifm-color-primary-lightest: #a0edc7;
+
+  --ifm-background-color: var(--r-ground);
+  --ifm-background-surface-color: var(--r-surface);
+  --ifm-font-color-base: var(--r-cream);
+  --ifm-heading-color: var(--r-cream);
+  --ifm-navbar-background-color: rgba(14, 31, 23, 0.92);
+  --ifm-footer-background-color: var(--r-surface);
+  --ifm-toc-border-color: rgba(30, 158, 98, 0.25);
+  --ifm-color-emphasis-300: rgba(30, 158, 98, 0.35);
+  --ifm-code-background: var(--r-surface-2);
+  --docusaurus-highlighted-code-line-bg: rgba(61, 214, 140, 0.12);
+}
+
+/* Wordmark in the cursive voice */
+.navbar__title {
+  font-family: "Pinyon Script", cursive;
+  font-size: 26px;
+  font-weight: 400;
+  color: var(--r-cream);
+}
+
+.navbar {
+  border-bottom: 1px solid rgba(30, 158, 98, 0.4);
+}
+
+/* Sidebar */
+.menu {
+  font-size: 13.5px;
+  font-weight: 500;
+}
+
+.menu__link--active {
+  border-left: 2px solid var(--r-green);
+  border-radius: 0 8px 8px 0;
+}
+
+/* Content */
+.markdown h1 {
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.markdown a {
+  color: var(--r-green);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* Code blocks sit like Wally message panels */
+.theme-code-block {
+  border: 1px solid rgba(30, 158, 98, 0.3);
+  border-left: 3px solid var(--r-green);
+  border-radius: 12px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.16);
+}
+
+/* Admonitions in the Wally chord: tip = green, caution = orange */
+.alert--warning {
+  --ifm-alert-background-color: rgba(242, 118, 46, 0.09);
+  --ifm-alert-border-color: var(--r-orange);
+}
+
+.alert--success,
+.alert--info {
+  --ifm-alert-background-color: rgba(61, 214, 140, 0.08);
+  --ifm-alert-border-color: var(--r-green);
+}
+
+/* Footer */
+.footer {
+  border-top: 1px solid rgba(30, 158, 98, 0.25);
+  font-size: 12.5px;
+  color: var(--r-mist);
+}
+
+/* The "open Wally" navbar button */
+.navbar__items--right .navbar__link {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--r-green);
+  border: 1px solid rgba(30, 158, 98, 0.45);
+  border-radius: 999px;
+  padding: 4px 14px;
+}
+
+.navbar__items--right .navbar__link:hover {
+  border-color: var(--r-green);
+  background: var(--r-surface-2);
+  color: var(--r-cream);
+}

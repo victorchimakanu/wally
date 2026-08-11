@@ -1,0 +1,31 @@
+services:
+  wally:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: "3000"
+      LOG_LEVEL: info
+      NETWORK_MODE: testnet
+      QVAC_MODEL_ID: qwen3-4b-instruct
+      WDK_CHAINS: "ethereum,arbitrum,bitcoin"
+      WDK_RPC_ETHEREUM: https://rpc.mevblocker.io/fast
+      WDK_RPC_ARBITRUM: https://arb1.arbitrum.io/rpc
+      SESSION_SECRET: ${SESSION_SECRET}
+      # Seed: use WDK_SEED_COMMAND to read from a secret manager at runtime.
+      # Example with 1Password: WDK_SEED_COMMAND=op read op://Personal/WallyWallet/seed
+      WDK_SEED_COMMAND: ${WDK_SEED_COMMAND:-}
+      WDK_SEED_FILE: ${WDK_SEED_FILE:-}
+      # Dev only — never set WDK_SEED in production compose files
+      WDK_SEED: ${WDK_SEED:-}
+    volumes:
+      - wally-data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/health').then(r=>process.exit(r.ok?0:1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  wally-data:

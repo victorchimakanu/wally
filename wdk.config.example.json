@@ -1,0 +1,28 @@
+{
+  "$note": "Gasless USDT on Arbitrum. Copy this file to wdk.config.json (gitignored), replace YOUR_PIMLICO_API_KEY in the two URLs, enable the two lines in .env.local, restart. Every other value is correct as-is. Full guide: GASLESS.md",
+  "chains": {
+    "arbitrum": {
+      "module": "@tetherto/wdk-wallet-evm-erc-4337",
+      "config": {
+        "chainId": 42161,
+        "provider": "https://arbitrum-one-rpc.publicnode.com",
+        "bundlerUrl": "https://api.pimlico.io/v2/42161/rpc?apikey=YOUR_PIMLICO_API_KEY",
+        "paymasterUrl": "https://api.pimlico.io/v2/42161/rpc?apikey=YOUR_PIMLICO_API_KEY",
+        "paymasterAddress": "0x777777777777AeC03fd955926DbF81597e66834C",
+        "paymasterToken": {
+          "address": "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9"
+        },
+        "entryPointAddress": "0x0000000071727De22E5E9d8BAf0edAc6f37da032",
+        "safeModulesVersion": "0.3.0"
+      }
+    }
+  },
+  "protocols": [
+    {
+      "module": "@tetherto/wdk-protocol-lending-aave-evm",
+      "label": "aave",
+      "type": "lending",
+      "chains": ["arbitrum"]
+    }
+  ]
+}

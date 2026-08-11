@@ -1,0 +1,14 @@
+{
+  "serve": {
+    "models": {
+      "wally-llm": {
+        "src": "/absolute/path/to/your/.qvac/models/Qwen3-4B-Q4_K_M.gguf",
+        "type": "llamacpp-completion",
+        "preload": true,
+        "config": {
+          "ctx_size": 8192
+        }
+      }
+    }
+  }
+}
