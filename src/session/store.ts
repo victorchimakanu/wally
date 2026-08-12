@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { getDb } from "../db/index.js";
 import type { CompletionMessage } from "../types.js";
 
@@ -20,6 +21,17 @@ export function upsertSession(id: string, owner?: string): void {
 export function getSessionOwner(id: string): string | null {
   const row = getDb().prepare("SELECT owner FROM sessions WHERE id = ?").get(id) as { owner: string | null } | undefined;
   return row?.owner ?? null;
+}
+
+// ensureSessionOwner returns the session's owner, backfilling a random one for
+// legacy rows created before the owner column existed. Keeps a null-owner
+// session from being locked out of listing/switching its own chats.
+export function ensureSessionOwner(id: string): string {
+  const existing = getSessionOwner(id);
+  if (existing) return existing;
+  const owner = randomUUID();
+  getDb().prepare("UPDATE sessions SET owner = ? WHERE id = ?").run(owner, id);
+  return owner;
 }
 
 export function touchSession(id: string): void {

@@ -113,22 +113,52 @@ export async function buildLendPlan(params: LendParams): Promise<LendPlan> {
 
 // ─── Execution ────────────────────────────────────────────────────────────────
 
-// waitForBorrowingPower polls the account's live Aave position until the
-// available borrow headroom covers the planned borrow (both sides USD).
-async function waitForBorrowingPower(
+// waitForCollateralIncrease polls until the account's Aave collateral has
+// risen by at least `minDeltaUsd` above the pre-supply baseline. Delta-based,
+// not absolute: pre-existing collateral must not be mistaken for the new
+// deposit having landed.
+async function waitForCollateralIncrease(
   chain: string,
   address: string,
-  requiredUsd: number,
+  baselineCollateralUsd: number,
+  minDeltaUsd: number,
   timeoutMs = 120_000,
   intervalMs = 4_000
 ): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
+  // Allow a small tolerance for price rounding on the USD figures.
+  const target = baselineCollateralUsd + minDeltaUsd * 0.9;
   while (Date.now() < deadline) {
     try {
       const risk = await fetchAccountRisk(chain, address);
-      if (parseFloat(risk.availableBorrowsUsd) >= requiredUsd) return true;
+      if (parseFloat(risk.totalCollateralUsd) >= target) return true;
     } catch (err) {
-      log.warn({ err }, "Borrowing-power poll failed — retrying");
+      log.warn({ err }, "Collateral poll failed — retrying");
+    }
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+  return false;
+}
+
+// waitForDebtIncrease polls until debt has risen by at least `minDeltaUsd`
+// above the pre-borrow baseline — so a wallet that already carried debt cannot
+// make a reverted borrow look successful.
+async function waitForDebtIncrease(
+  chain: string,
+  address: string,
+  baselineDebtUsd: number,
+  minDeltaUsd: number,
+  timeoutMs = 60_000,
+  intervalMs = 3_000
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  const target = baselineDebtUsd + minDeltaUsd * 0.9;
+  while (Date.now() < deadline) {
+    try {
+      const risk = await fetchAccountRisk(chain, address);
+      if (parseFloat(risk.totalDebtUsd) >= target) return true;
+    } catch (err) {
+      log.warn({ err }, "Debt poll failed — retrying");
     }
     await new Promise((r) => setTimeout(r, intervalMs));
   }
@@ -150,6 +180,15 @@ export async function executeLendPlan(
   const { chain, collateralToken, collateralAmount, borrowToken } = plan.params;
   const steps: LendStepResult[] = [];
 
+  // Baseline the position BEFORE any step, so every verification below is a
+  // delta against the wallet's prior state — a wallet that already holds
+  // collateral/debt cannot make a reverted step look successful.
+  const baseline = await fetchAccountRisk(chain, walletAddress).catch(() => null);
+  const baseCollateral = baseline ? parseFloat(baseline.totalCollateralUsd) : 0;
+  const baseDebt = baseline ? parseFloat(baseline.totalDebtUsd) : 0;
+  const collateralValueUsd = parseFloat(collateralAmount); // USDT ~ $1
+  const borrowValueUsd = parseFloat(plan.borrowAmount);
+
   onStep(`Step 1 of 3: approving ${collateralAmount} ${collateralToken} for the Aave pool...`);
   const approveRaw = await approveForSupply(chain, collateralToken, collateralAmount);
   if (/^\s*error/i.test(approveRaw)) throw new Error(`Approve failed: ${approveRaw.trim()}`);
@@ -162,16 +201,15 @@ export async function executeLendPlan(
   steps.push({ step: "supply", detail: supplyRaw.trim() });
   log.info({ chain }, "Lend step 2/3 (supply) done");
 
-  // The deposit is submitted as a user operation and may take a few blocks to
-  // mine. Borrowing before Aave sees the collateral reverts with zero
-  // borrowing power, so poll the live position until it covers the borrow.
+  // Verify the deposit actually raised collateral (delta), rather than trusting
+  // the WDK string or pre-existing headroom. This also gives the user op time
+  // to mine before we borrow against it.
   onStep("Waiting for the deposit to settle on-chain...");
-  const borrowValueUsd = parseFloat(plan.borrowAmount);
-  const settled = await waitForBorrowingPower(chain, walletAddress, borrowValueUsd);
-  if (!settled) {
+  const supplied = await waitForCollateralIncrease(chain, walletAddress, baseCollateral, collateralValueUsd);
+  if (!supplied) {
     throw new Error(
-      "The deposit was sent but has not settled after 2 minutes. Your collateral is safe in Aave. " +
-        "Say 'how safe is my loan' to check, then ask me to borrow again once it settles."
+      "The deposit was sent but I could not confirm it landed in Aave within 2 minutes. " +
+        "Do not assume it failed — say 'how safe is my loan' to check your position before retrying."
     );
   }
 
@@ -181,22 +219,16 @@ export async function executeLendPlan(
   steps.push({ step: "borrow", detail: borrowRaw.trim() });
   log.info({ chain }, "Lend step 3/3 (borrow) done");
 
-  // Verify the borrow on-chain against authoritative Aave state, rather than
-  // trusting the WDK response string. A borrow that reverts leaves debt at ~0;
-  // poll the live position until the debt reflects the borrow (or time out).
-  let risk = await fetchAccountRisk(chain, walletAddress).catch(() => null);
-  for (let attempt = 0; attempt < 10 && (!risk || risk.totalDebtUsd === "0.00"); attempt++) {
-    await new Promise((r) => setTimeout(r, 3000));
-    risk = await fetchAccountRisk(chain, walletAddress).catch(() => null);
-  }
-
-  if (risk && risk.totalDebtUsd === "0.00") {
-    // Supply landed (we checked borrowing power) but the borrow did not.
+  // Verify the borrow raised debt by roughly the borrowed amount (delta), so a
+  // reverted borrow against pre-existing debt cannot read as success.
+  const borrowed = await waitForDebtIncrease(chain, walletAddress, baseDebt, borrowValueUsd);
+  if (!borrowed) {
     throw new Error(
-      "The deposit went through but the borrow did not register on-chain. Your collateral is safe in Aave " +
-        "and is not borrowed against. Say 'how safe is my loan' to check, then try borrowing again."
+      "The deposit went through but I could not confirm the borrow on-chain. Your collateral is safe " +
+        "in Aave. Say 'how safe is my loan' to check, then try borrowing again."
     );
   }
+  const risk = await fetchAccountRisk(chain, walletAddress).catch(() => null);
 
   const riskSummary = risk
     ? describeRisk(risk, chain, walletAddress)

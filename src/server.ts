@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { readFileSync, existsSync } from "node:fs";
 import { config } from "./config.js";
-import { getLogger } from "./logger.js";
+import { getLogger, scrubSecrets } from "./logger.js";
 import { wdkSubprocess } from "./wdk/server.js";
 import { startSessionReaper } from "./session/manager.js";
 import { listSessions } from "./session/store.js";
@@ -14,10 +14,22 @@ import { getDb } from "./db/index.js";
 import { makeSessionCookie, verifySessionCookie, isAllowedOrigin, checkAccessToken } from "./middleware/auth.js";
 import { captureSeed } from "./wdk/seed.js";
 import { getOrCreateSession } from "./session/manager.js";
-import { getSession, getSessionOwner } from "./session/store.js";
+import { getSession, getSessionOwner, ensureSessionOwner } from "./session/store.js";
 
 const log = getLogger("server");
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Last-resort scrubbing for anything that reaches stderr outside pino (a
+// throw during startup, an unhandled rejection), so a secret in an error
+// string never lands in raw logs.
+process.on("unhandledRejection", (reason) => {
+  const s = reason instanceof Error ? reason.message : String(reason);
+  log.error({ scope: "unhandledRejection" }, scrubSecrets(s));
+});
+process.on("uncaughtException", (err) => {
+  log.error({ scope: "uncaughtException" }, scrubSecrets(err.message));
+  process.exit(1);
+});
 
 async function main() {
   // 0. Capture the seed out of the parent environment before anything else so
@@ -84,6 +96,10 @@ async function main() {
     const ext = path.extname(file);
     const mime = mimeTypes[ext];
     if (!mime) return reply.code(404).send("Not found");
+    // The app shell (HTML) is served only through GET /, which applies the CSP
+    // and the access-token gate. Do not let it be fetched raw here, bypassing
+    // both. Static assets (.js/.css) are fine.
+    if (ext === ".html") return reply.code(404).send("Not found");
     // Path-traversal containment: resolve the candidate and confirm it stays
     // inside publicDir. Without this, "..%2f..%2fsrc%2fconfig.js" escapes and
     // reads arbitrary files. Also reject any separator/parent segment outright.
@@ -125,8 +141,8 @@ async function main() {
     }
     const { id } = (req.body ?? {}) as { id?: string };
     if (!id || getSession(id) === undefined) return reply.code(404).send({ error: "unknown session" });
-    const callerOwner = getSessionOwner(activeId);
-    if (!callerOwner || getSessionOwner(id) !== callerOwner) {
+    const callerOwner = ensureSessionOwner(activeId);
+    if (getSessionOwner(id) !== callerOwner) {
       return reply.code(403).send({ error: "forbidden" });
     }
     getOrCreateSession(id);
@@ -139,7 +155,9 @@ async function main() {
       return reply.code(401).send({ error: "unauthorized" });
     }
     // A new chat inherits the caller's owner so it appears in their sidebar.
-    const id = getOrCreateSession(undefined, getSessionOwner(activeId) ?? undefined);
+    // ensureSessionOwner backfills legacy null-owner sessions so the new chat
+    // is not orphaned under a fresh random owner.
+    const id = getOrCreateSession(undefined, ensureSessionOwner(activeId));
     return reply.header("set-cookie", makeSessionCookie(id)).send({ ok: true });
   });
 
@@ -165,6 +183,7 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error("Fatal startup error:", err);
+  const s = err instanceof Error ? err.message : String(err);
+  console.error("Fatal startup error:", scrubSecrets(s));
   process.exit(1);
 });

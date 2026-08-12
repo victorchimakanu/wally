@@ -252,7 +252,7 @@
           '<span class="tile__amt">' + (primary === null ? "—" : primary) + '</span>' +
           '<span class="tile__tok">' + primaryTok + '</span>' +
         '</div>' +
-        '<div class="tile__sub">' + sub + '</div>' +
+        '<div class="tile__sub">' + esc(sub) + '</div>' +
       '</div>' +
       '<div class="tile__addr" id="addr-' + c.cls + '" hidden></div>' +
     '</div>';

@@ -87,16 +87,22 @@ export class WallyAgent {
       // the model selected. So here: a literal address is used verbatim; its
       // absence is a hard stop, whatever the model proposed in `to`.
       if (parsed.intent === "transfer" && parsed.params && typeof parsed.params === "object") {
-        const evmAddr = userText.match(/0x[0-9a-fA-F]{40}\b/);
-        const btcAddr = userText.match(/\b(?:bc1[a-zA-HJ-NP-Z0-9]{25,62}|[13][a-km-zA-HJ-NP-Z1-9]{25,34})\b/);
-        const literal = evmAddr?.[0] ?? btcAddr?.[0];
-        if (literal) {
-          (parsed.params as Record<string, unknown>)["to"] = literal;
+        const evmAddrs = userText.match(/0x[0-9a-fA-F]{40}\b/g) ?? [];
+        const btcAddrs = userText.match(/\b(?:bc1[a-zA-HJ-NP-Z0-9]{25,62}|[13][a-km-zA-HJ-NP-Z1-9]{25,34})\b/g) ?? [];
+        const all = [...evmAddrs, ...btcAddrs];
+        if (all.length === 1) {
+          (parsed.params as Record<string, unknown>)["to"] = all[0];
         } else {
+          // Zero addresses → ask for one. More than one → refuse rather than
+          // guess which is the intended recipient (a pasted message could
+          // contain an attacker address alongside the intended one).
           const msg =
-            "I need the recipient address in your message — paste the full address you want to send to. " +
-            "To reuse an earlier one, say \"send it to the same address as last time\". " +
-            "For safety I never pick an address myself.";
+            all.length > 1
+              ? "I found more than one address in your message, so I will not guess which to send to. " +
+                "Send again with only the recipient address."
+              : "I need the recipient address in your message — paste the full address you want to send to. " +
+                "To reuse an earlier one, say \"send it to the same address as last time\". " +
+                "For safety I never pick an address myself.";
           this.emit({ type: "message", content: msg });
           saveHistory(this.sessionId, [
             ...history,
@@ -336,7 +342,7 @@ export class WallyAgent {
     // 3. Execute. Consume a rate-limit slot only now, on a confirmed spend,
     // so cancelled or quote-failed attempts never burn the budget. Both the
     // global ceiling and the per-session cap are checked here.
-    if (!consumeGlobalOpRate() || !checkTransferRate(this.sessionId)) {
+    if (!checkTransferRate(this.sessionId) || !consumeGlobalOpRate()) {
       const msg = "Rate limit reached for wallet operations. Please wait before trying again.";
       this.emit({ type: "error", message: msg });
       saveHistory(this.sessionId, [...history, { role: "assistant", content: msg }]);
@@ -369,7 +375,7 @@ export class WallyAgent {
       // Non-gasless checks the tx RECEIPT status (mined + success), not mere
       // mempool presence. While we poll, the row stays "pending".
       const outcome = isGasless
-        ? (await tools.verifyUserOpOnChain(params.chain, txHash)) ? "confirmed" : "indeterminate"
+        ? await tools.verifyUserOpOnChain(params.chain, txHash)
         : await tools.verifyTxOnChain(params.chain, txHash);
 
       if (outcome === "failed") {
@@ -421,8 +427,15 @@ export class WallyAgent {
       this.emit({ type: "tx_complete", txHash, chain: params.chain, explorerUrl: link });
       saveHistory(this.sessionId, [...history, { role: "assistant", content: msg }]);
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Transaction failed";
-      this.emit({ type: "error", message: "Transfer failed: " + message });
+      // An error here does not prove the transaction was not broadcast — the
+      // wallet may have sent it and then the call threw. Never imply "not
+      // sent", which would invite a double-spend resend.
+      const message = err instanceof Error ? err.message : "Transaction error";
+      const msg =
+        "I hit an error during this transfer and cannot confirm whether it was sent. " +
+        "Do NOT resend it — say \"what is my balance\" first to check. Details: " + message;
+      this.emit({ type: "error", message: msg });
+      saveHistory(this.sessionId, [...history, { role: "assistant", content: msg }]);
       log.error({ err, session_id: this.sessionId }, "Transfer execution failed");
     }
   }
@@ -485,7 +498,7 @@ export class WallyAgent {
     }
 
     // Consume a rate-limit slot only on the confirmed swap.
-    if (!consumeGlobalOpRate() || !checkTransferRate(this.sessionId)) {
+    if (!checkTransferRate(this.sessionId) || !consumeGlobalOpRate()) {
       const msg = "Rate limit reached for wallet operations. Please wait before trying again.";
       this.emit({ type: "error", message: msg });
       saveHistory(this.sessionId, [...history, { role: "assistant", content: msg }]);
@@ -503,8 +516,10 @@ export class WallyAgent {
 
       // Same verification discipline as transfers — a swap is not "complete"
       // until it is mined and succeeded. WDK reports "sent" optimistically.
+      // Same verification discipline as transfers — a swap is not "complete"
+      // until it is mined and succeeded. WDK reports "sent" optimistically.
       const outcome = isGasless
-        ? (await tools.verifyUserOpOnChain(params.chain, txHash)) ? "confirmed" : "indeterminate"
+        ? await tools.verifyUserOpOnChain(params.chain, txHash)
         : await tools.verifyTxOnChain(params.chain, txHash);
 
       if (outcome === "failed") {
@@ -520,6 +535,17 @@ export class WallyAgent {
         return;
       }
 
+      // Record the confirmed swap so history includes it.
+      insertTx({
+        session_id: this.sessionId,
+        chain: params.chain,
+        token: `${params.fromToken}->${params.toToken}`,
+        amount: params.amount,
+        recipient: "(swap)",
+        tx_hash: txHash,
+        fee: "",
+        status: "confirmed",
+      });
       const msg =
         `Swap complete. Transaction: ${txHash.slice(0, 10)}...${txHash.slice(-8)}` +
         (explorerUrl ? `\n${explorerUrl}` : "");
@@ -527,8 +553,12 @@ export class WallyAgent {
       this.emit({ type: "tx_complete", txHash, chain: params.chain, explorerUrl });
       saveHistory(this.sessionId, [...history, { role: "assistant", content: msg }]);
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Swap failed";
-      this.emit({ type: "error", message: "Swap failed: " + message });
+      const message = err instanceof Error ? err.message : "Swap error";
+      const msg =
+        "I hit an error during this swap and cannot confirm whether it went through. " +
+        "Do NOT resend — check your balance first. Details: " + message;
+      this.emit({ type: "error", message: msg });
+      saveHistory(this.sessionId, [...history, { role: "assistant", content: msg }]);
     }
   }
 
@@ -570,7 +600,7 @@ export class WallyAgent {
       }
 
       // Consume a rate-limit slot only on the confirmed lend chain.
-      if (!consumeGlobalOpRate() || !checkTransferRate(this.sessionId)) {
+      if (!checkTransferRate(this.sessionId) || !consumeGlobalOpRate()) {
         const msg = "Rate limit reached for wallet operations. Please wait before trying again.";
         this.emit({ type: "error", message: msg });
         saveHistory(this.sessionId, [...history, { role: "assistant", content: msg }]);

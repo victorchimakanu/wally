@@ -10,7 +10,7 @@ import {
 } from "../session/manager.js";
 import { loadHistory } from "../session/store.js";
 import { checkMessageRate, checkGlobalMessageRate } from "../middleware/rateLimit.js";
-import { getLogger } from "../logger.js";
+import { getLogger, scrubSecrets } from "../logger.js";
 import { verifySessionCookie, isAllowedOrigin } from "../middleware/auth.js";
 import { config } from "../config.js";
 
@@ -53,8 +53,11 @@ export function attachWsServer(app: FastifyInstance): WebSocketServer {
     // The session identity lives only in the signed HttpOnly cookie.
     ws.send(JSON.stringify({ type: "connected", networkMode: config.networkMode }));
 
-    // Replay stored conversation so a resumed session shows its history
-    const past = loadHistory(sessionId);
+    // Replay stored conversation so a resumed session shows its history.
+    // Scrub on the way out: persisted content is raw (an earlier error turn
+    // could have stored a secret), so it must pass the same scrubber the live
+    // send path applies.
+    const past = loadHistory(sessionId).map((m) => ({ ...m, content: scrubSecrets(m.content) }));
     if (past.length > 0) {
       ws.send(JSON.stringify({ type: "history", messages: past }));
     }

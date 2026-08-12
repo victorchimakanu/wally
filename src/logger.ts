@@ -12,7 +12,11 @@ export function scrubSecrets(input: string): string {
     // whole query strings on api.pimlico.io / bundler URLs
     .replace(/(https?:\/\/[^\s"']*\?)[^\s"']*/gi, "$1[REDACTED]")
     // bearer tokens
-    .replace(/(bearer\s+)[A-Za-z0-9._-]+/gi, "$1[REDACTED]");
+    .replace(/(bearer\s+)[A-Za-z0-9._-]+/gi, "$1[REDACTED]")
+    // seed/mnemonic/private-key labelled in a message. NOT bare 64-hex (that
+    // would clobber transaction hashes) and NOT bare word-runs (that would
+    // clobber legitimate long messages) — only clearly-labelled secrets.
+    .replace(/(seed|mnemonic|private[_-]?key)["'\s:=]+[^\n,"']{8,}/gi, "$1: [REDACTED]");
 }
 
 const root = pino({

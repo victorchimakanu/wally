@@ -152,7 +152,10 @@ export async function verifyTxOnChain(chain: string, txHash: string): Promise<Tx
     chain === "arbitrum" ? config.wdkRpcArbitrum :
     null;
   if (!rpc) return "unverifiable"; // no verification path for this chain
-  if (!/^0x[0-9a-fA-F]{64}$/.test(txHash)) return "failed"; // not even a hash
+  // A non-hash means we cannot look it up — but the tx may still have been
+  // broadcast, so treat it as indeterminate (do NOT tell the user it failed,
+  // which would invite a double-spend resend).
+  if (!/^0x[0-9a-fA-F]{64}$/.test(txHash)) return "indeterminate";
 
   // Poll the RECEIPT (not getTransactionByHash): a receipt exists only once
   // mined, and its status tells us success vs revert. Mempool presence is not
@@ -171,7 +174,15 @@ export async function verifyTxOnChain(chain: string, txHash: string): Promise<Tx
       });
       const json = (await res.json()) as { result?: { status?: string } | null };
       if (json.result && json.result.status !== undefined) {
-        return json.result.status === "0x1" ? "confirmed" : "failed";
+        // Hex-normalize: some nodes return "0x01" instead of the canonical
+        // "0x1". BigInt parses both; 1 = success, anything else = revert.
+        let status: bigint;
+        try {
+          status = BigInt(json.result.status);
+        } catch {
+          return "indeterminate";
+        }
+        return status === 1n ? "confirmed" : "failed";
       }
     } catch (err) {
       log.warn({ chain, err }, "verifyTxOnChain RPC call failed");
@@ -187,10 +198,10 @@ export async function verifyTxOnChain(chain: string, txHash: string): Promise<Tx
 // eth_getUserOperationReceipt. We poll the bundler until the user operation is
 // actually included (and its inner call succeeded), so a gasless spend is
 // never reported "confirmed" on trust alone.
-export async function verifyUserOpOnChain(chain: string, userOpHash: string): Promise<boolean> {
+export async function verifyUserOpOnChain(chain: string, userOpHash: string): Promise<TxOutcome> {
   const bundlerUrl = bundlerUrlForChain(chain);
-  if (!bundlerUrl) return false; // cannot verify → do not claim success
-  if (!/^0x[0-9a-fA-F]{64}$/.test(userOpHash)) return false;
+  if (!bundlerUrl) return "indeterminate"; // cannot verify → never claim success
+  if (!/^0x[0-9a-fA-F]{64}$/.test(userOpHash)) return "indeterminate";
 
   // ~40s of polling: bundlers batch, so inclusion can take several blocks.
   for (let attempt = 0; attempt < 20; attempt++) {
@@ -207,16 +218,16 @@ export async function verifyUserOpOnChain(chain: string, userOpHash: string): Pr
       });
       const json = (await res.json()) as { result?: { success?: boolean } | null };
       if (json.result) {
-        // The op is on-chain. success=false means it was included but the
-        // inner call reverted — that is a failed transfer, not a confirmed one.
-        return json.result.success === true;
+        // Included. success=false means the inner call reverted — a failed
+        // transfer, distinct from "still settling".
+        return json.result.success === true ? "confirmed" : "failed";
       }
     } catch (err) {
       log.warn({ chain, err }, "verifyUserOpOnChain bundler call failed");
     }
     await new Promise((r) => setTimeout(r, 2000));
   }
-  return false;
+  return "indeterminate"; // not yet included within the window
 }
 
 // bundlerUrlForChain reads the ERC-4337 bundler endpoint from wdk.config.json
