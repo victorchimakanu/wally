@@ -4,6 +4,7 @@ PRAGMA foreign_keys = ON;
 -- Sessions table. One row per browser tab.
 CREATE TABLE IF NOT EXISTS sessions (
   id          TEXT PRIMARY KEY,
+  owner       TEXT,                        -- opaque owner id; sessions are only listable/switchable within one owner
   created_at  INTEGER NOT NULL DEFAULT (unixepoch()),
   last_seen   INTEGER NOT NULL DEFAULT (unixepoch()),
   history     TEXT NOT NULL DEFAULT '[]'  -- JSON array of {role, content} messages

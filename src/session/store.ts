@@ -3,17 +3,23 @@ import type { CompletionMessage } from "../types.js";
 
 export interface SessionRow {
   id: string;
+  owner: string | null;
   created_at: number;
   last_seen: number;
   history: string;
 }
 
-export function upsertSession(id: string): void {
+export function upsertSession(id: string, owner?: string): void {
   const db = getDb();
   db.prepare(`
-    INSERT INTO sessions (id) VALUES (?)
+    INSERT INTO sessions (id, owner) VALUES (?, ?)
     ON CONFLICT(id) DO UPDATE SET last_seen = unixepoch()
-  `).run(id);
+  `).run(id, owner ?? null);
+}
+
+export function getSessionOwner(id: string): string | null {
+  const row = getDb().prepare("SELECT owner FROM sessions WHERE id = ?").get(id) as { owner: string | null } | undefined;
+  return row?.owner ?? null;
 }
 
 export function touchSession(id: string): void {
@@ -50,12 +56,13 @@ export interface SessionSummary {
   lastSeen: number;
 }
 
-// listSessions returns recent sessions that contain at least one message,
-// newest first, titled by their first user message.
-export function listSessions(limit = 30): SessionSummary[] {
+// listSessions returns recent sessions BELONGING TO one owner that contain at
+// least one message, newest first, titled by their first user message. Scoping
+// by owner prevents one client from enumerating another's session IDs.
+export function listSessions(owner: string, limit = 30): SessionSummary[] {
   const rows = getDb()
-    .prepare("SELECT id, last_seen, history FROM sessions WHERE history != '[]' ORDER BY last_seen DESC LIMIT ?")
-    .all(limit) as SessionRow[];
+    .prepare("SELECT id, last_seen, history FROM sessions WHERE owner = ? AND history != '[]' ORDER BY last_seen DESC LIMIT ?")
+    .all(owner, limit) as SessionRow[];
 
   const summaries: SessionSummary[] = [];
   for (const row of rows) {

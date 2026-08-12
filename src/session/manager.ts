@@ -4,7 +4,7 @@ import { WallyAgent } from "../agent/index.js";
 import { upsertSession, touchSession, getSession } from "./store.js";
 import { resolveConfirmation } from "../agent/confirm.js";
 import { fetchAddress } from "../wdk/tools.js";
-import { getLogger } from "../logger.js";
+import { getLogger, scrubSecrets } from "../logger.js";
 import type { WallyInboundEvent, WallyOutboundEvent } from "../types.js";
 
 const log = getLogger("session:manager");
@@ -18,7 +18,11 @@ interface Session {
 
 const sessions = new Map<string, Session>();
 
-export function getOrCreateSession(existingId?: string): string {
+// getOrCreateSession resumes a known session or creates a new one. `owner` is
+// applied only when creating a fresh session, so every session a client makes
+// (first visit, and later "new chat") shares one owner id. Sessions are only
+// listable and switchable within their owner (see server.ts).
+export function getOrCreateSession(existingId?: string, owner?: string): string {
   // Resume a session if it is live in memory OR persisted in SQLite — the
   // in-memory reaper prunes idle agents, but chat history lives on disk and
   // must remain resumable from the session sidebar.
@@ -30,7 +34,8 @@ export function getOrCreateSession(existingId?: string): string {
   if (!sessions.has(id)) {
     const agent = new WallyAgent(id, (event) => emitToSession(id, event));
     sessions.set(id, { id, agent, ws: null, lastSeen: Date.now() });
-    upsertSession(id);
+    // Only stamp an owner on a genuinely new row; resuming keeps the existing one.
+    upsertSession(id, known ? undefined : owner ?? randomUUID());
     log.info({ session_id: id }, "Session created");
   }
 
@@ -108,8 +113,17 @@ export async function handleInbound(
 function emitToSession(sessionId: string, event: WallyOutboundEvent): void {
   const session = sessions.get(sessionId);
   if (!session?.ws) return;
+  // Single chokepoint: scrub any secret material (API keys, bearer tokens,
+  // keyed URLs) out of text that reaches the browser. Error messages can carry
+  // a failed bundler/paymaster URL with its apikey; this strips it.
+  const safe =
+    event.type === "error"
+      ? { ...event, message: scrubSecrets(event.message) }
+      : event.type === "message"
+        ? { ...event, content: scrubSecrets(event.content) }
+        : event;
   try {
-    session.ws.send(JSON.stringify(event));
+    session.ws.send(JSON.stringify(safe));
   } catch (err) {
     log.warn({ session_id: sessionId, err }, "Failed to emit to session WebSocket");
   }

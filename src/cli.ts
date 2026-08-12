@@ -9,6 +9,7 @@
 
 import { createInterface } from "node:readline";
 import { wdkSubprocess } from "./wdk/server.js";
+import { captureSeed } from "./wdk/seed.js";
 import { getDb } from "./db/index.js";
 import { getOrCreateSession, handleInbound, bindWebSocket } from "./session/manager.js";
 import { resolveConfirmation } from "./agent/confirm.js";
@@ -19,6 +20,7 @@ const log = getLogger("cli");
 
 async function main() {
   console.log("Starting WDK MCP subprocess...");
+  captureSeed();
   getDb();
   await wdkSubprocess.start();
   console.log("WDK ready.\n");

@@ -12,13 +12,18 @@ import { metricsRoutes } from "./routes/metrics.js";
 import { attachWsServer } from "./routes/ws.js";
 import { getDb } from "./db/index.js";
 import { makeSessionCookie, verifySessionCookie, isAllowedOrigin, checkAccessToken } from "./middleware/auth.js";
+import { captureSeed } from "./wdk/seed.js";
 import { getOrCreateSession } from "./session/manager.js";
-import { getSession } from "./session/store.js";
+import { getSession, getSessionOwner } from "./session/store.js";
 
 const log = getLogger("server");
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 async function main() {
+  // 0. Capture the seed out of the parent environment before anything else so
+  //    it is not resident in process.env for the process lifetime.
+  captureSeed();
+
   // 1. Initialize the database (creates tables if needed)
   getDb();
 
@@ -58,14 +63,20 @@ async function main() {
     let sessionId = verifySessionCookie(req.headers["cookie"]);
     if (!sessionId) {
       const headerVal = req.headers["x-wally-access"];
-      if (!checkAccessToken(req.query, Array.isArray(headerVal) ? headerVal[0] : headerVal)) {
+      // Header only — never a query parameter, which would leak the secret via
+      // browser history, Referer, and access logs.
+      if (!checkAccessToken(Array.isArray(headerVal) ? headerVal[0] : headerVal)) {
         return reply.code(401).type("text/plain").send("Access token required.");
       }
       sessionId = getOrCreateSession();
       reply.header("set-cookie", makeSessionCookie(sessionId));
     }
     const html = readFileSync(path.join(publicDir, "reach.html"), "utf-8");
-    return reply.header("content-security-policy", CSP).type("text/html; charset=utf-8").send(html);
+    return reply
+      .header("content-security-policy", CSP)
+      .header("referrer-policy", "no-referrer")
+      .type("text/html; charset=utf-8")
+      .send(html);
   });
 
   app.get("/:file", async (req, reply) => {
@@ -73,7 +84,16 @@ async function main() {
     const ext = path.extname(file);
     const mime = mimeTypes[ext];
     if (!mime) return reply.code(404).send("Not found");
-    const filePath = path.join(publicDir, file);
+    // Path-traversal containment: resolve the candidate and confirm it stays
+    // inside publicDir. Without this, "..%2f..%2fsrc%2fconfig.js" escapes and
+    // reads arbitrary files. Also reject any separator/parent segment outright.
+    if (file.includes("/") || file.includes("\\") || file.includes("..")) {
+      return reply.code(404).send("Not found");
+    }
+    const filePath = path.resolve(publicDir, file);
+    if (filePath !== path.join(publicDir, file) || !filePath.startsWith(publicDir + path.sep)) {
+      return reply.code(404).send("Not found");
+    }
     if (!existsSync(filePath)) return reply.code(404).send("Not found");
     return reply.type(mime).send(readFileSync(filePath, "utf-8"));
   });
@@ -89,26 +109,37 @@ async function main() {
     if (!isAllowedOrigin(req.headers["origin"]) || !activeId) {
       return reply.code(401).send({ error: "unauthorized" });
     }
-    return reply.send({ sessions: listSessions(), activeId });
+    // Only the caller's own sessions — never every session in the database.
+    const owner = getSessionOwner(activeId);
+    return reply.send({ sessions: owner ? listSessions(owner) : [], activeId });
   });
 
   // Server-side session switching: the HttpOnly cookie is not scriptable, so
-  // the sidebar switches sessions here and gets a re-signed cookie back.
+  // the sidebar switches sessions here and gets a re-signed cookie back. The
+  // target must belong to the same owner as the caller's current session, so
+  // a client can never adopt another owner's session by guessing its id.
   app.post("/api/session/switch", async (req, reply) => {
-    if (!isAllowedOrigin(req.headers["origin"]) || !verifySessionCookie(req.headers["cookie"])) {
+    const activeId = verifySessionCookie(req.headers["cookie"]);
+    if (!isAllowedOrigin(req.headers["origin"]) || !activeId) {
       return reply.code(401).send({ error: "unauthorized" });
     }
     const { id } = (req.body ?? {}) as { id?: string };
     if (!id || getSession(id) === undefined) return reply.code(404).send({ error: "unknown session" });
+    const callerOwner = getSessionOwner(activeId);
+    if (!callerOwner || getSessionOwner(id) !== callerOwner) {
+      return reply.code(403).send({ error: "forbidden" });
+    }
     getOrCreateSession(id);
     return reply.header("set-cookie", makeSessionCookie(id)).send({ ok: true });
   });
 
   app.post("/api/session/new", async (req, reply) => {
-    if (!isAllowedOrigin(req.headers["origin"]) || !verifySessionCookie(req.headers["cookie"])) {
+    const activeId = verifySessionCookie(req.headers["cookie"]);
+    if (!isAllowedOrigin(req.headers["origin"]) || !activeId) {
       return reply.code(401).send({ error: "unauthorized" });
     }
-    const id = getOrCreateSession();
+    // A new chat inherits the caller's owner so it appears in their sidebar.
+    const id = getOrCreateSession(undefined, getSessionOwner(activeId) ?? undefined);
     return reply.header("set-cookie", makeSessionCookie(id)).send({ ok: true });
   });
 

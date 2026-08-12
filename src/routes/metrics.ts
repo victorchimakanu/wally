@@ -1,9 +1,15 @@
 import type { FastifyInstance } from "fastify";
+import { config } from "../config.js";
+import { verifySessionCookie } from "../middleware/auth.js";
 
 // Minimal Prometheus-compatible /metrics endpoint.
 // Extend with actual counters once @opentelemetry or prom-client is wired in.
 export async function metricsRoutes(app: FastifyInstance): Promise<void> {
-  app.get("/metrics", async (_req, reply) => {
+  app.get("/metrics", async (req, reply) => {
+    // Off-loopback, metrics (heap/uptime recon) require a valid session.
+    if (config.allowRemote && !verifySessionCookie(req.headers["cookie"])) {
+      return reply.code(401).send("unauthorized");
+    }
     const uptime = process.uptime();
     const memMb = process.memoryUsage().heapUsed / 1024 / 1024;
 

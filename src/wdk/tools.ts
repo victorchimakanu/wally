@@ -137,16 +137,27 @@ export async function fetchNativeBalanceNumber(chain: string): Promise<number> {
 // verifyTxOnChain polls the chain's RPC for the transaction. Returns true the
 // moment the node knows the hash (pending or mined), false if it never appears.
 // EVM chains only; other chains return true (no verification path).
-export async function verifyTxOnChain(chain: string, txHash: string): Promise<boolean> {
+// TxOutcome distinguishes the three real states so callers never conflate a
+// slow-but-fine tx with a failed one:
+//   "confirmed"     — mined and the receipt status is success (0x1)
+//   "failed"        — mined but reverted (status 0x0)
+//   "indeterminate" — not seen as mined within the poll window; do NOT tell
+//                     the user it failed (that invites a double-spend resend)
+//   "unverifiable"  — no verification path for this chain
+export type TxOutcome = "confirmed" | "failed" | "indeterminate" | "unverifiable";
+
+export async function verifyTxOnChain(chain: string, txHash: string): Promise<TxOutcome> {
   const rpc =
     chain === "ethereum" ? config.wdkRpcEthereum :
     chain === "arbitrum" ? config.wdkRpcArbitrum :
     null;
-  if (!rpc) return true; // no verification path for this chain
-  // On a chain we CAN verify, something that is not a hash can never be found.
-  if (!/^0x[0-9a-fA-F]{64}$/.test(txHash)) return false;
+  if (!rpc) return "unverifiable"; // no verification path for this chain
+  if (!/^0x[0-9a-fA-F]{64}$/.test(txHash)) return "failed"; // not even a hash
 
-  for (let attempt = 0; attempt < 5; attempt++) {
+  // Poll the RECEIPT (not getTransactionByHash): a receipt exists only once
+  // mined, and its status tells us success vs revert. Mempool presence is not
+  // success, and a reverted tx is not success.
+  for (let attempt = 0; attempt < 8; attempt++) {
     try {
       const res = await fetch(rpc, {
         method: "POST",
@@ -154,18 +165,20 @@ export async function verifyTxOnChain(chain: string, txHash: string): Promise<bo
         body: JSON.stringify({
           jsonrpc: "2.0",
           id: 1,
-          method: "eth_getTransactionByHash",
+          method: "eth_getTransactionReceipt",
           params: [txHash],
         }),
       });
-      const json = (await res.json()) as { result?: unknown };
-      if (json.result) return true;
+      const json = (await res.json()) as { result?: { status?: string } | null };
+      if (json.result && json.result.status !== undefined) {
+        return json.result.status === "0x1" ? "confirmed" : "failed";
+      }
     } catch (err) {
       log.warn({ chain, err }, "verifyTxOnChain RPC call failed");
     }
     await new Promise((r) => setTimeout(r, 3000));
   }
-  return false;
+  return "indeterminate"; // seen or not, we could not confirm mining in time
 }
 
 // verifyUserOpOnChain confirms an ERC-4337 gasless operation. The hash WDK

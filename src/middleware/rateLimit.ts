@@ -42,15 +42,48 @@ export function clearBucket(sessionId: string): void {
 }
 
 // Global wallet-operation limiter. Per-session buckets alone are defeatable
-// by minting fresh sessions, so spends are also capped process-wide:
+// by minting fresh sessions, so executed spends are also capped process-wide:
 // 10 wallet operations (transfer/swap/lend) per hour, whoever asks.
+//
+// Split into peek and consume so that only spends that actually EXECUTE count.
+// Peeking at handler entry rejects early when already at the ceiling; consume
+// runs after the human confirmation, so cancelled or quote-failed ops (which
+// never sign) do not burn the budget.
+const GLOBAL_LIMIT = 10;
+const GLOBAL_WINDOW_MS = 3_600_000;
 const globalOps: number[] = [];
 
-export function checkGlobalOpRate(): boolean {
+function pruneGlobal(now: number): void {
+  while (globalOps.length > 0 && now - globalOps[0]! >= GLOBAL_WINDOW_MS) globalOps.shift();
+}
+
+// peekGlobalOpRate returns true if a spend is currently allowed, WITHOUT
+// consuming a slot.
+export function peekGlobalOpRate(): boolean {
+  pruneGlobal(Date.now());
+  return globalOps.length < GLOBAL_LIMIT;
+}
+
+// consumeGlobalOpRate records one executed spend. Returns false if the ceiling
+// was already reached (caller should abort before signing).
+export function consumeGlobalOpRate(): boolean {
   const now = Date.now();
-  const windowMs = 3_600_000;
-  while (globalOps.length > 0 && now - globalOps[0]! >= windowMs) globalOps.shift();
-  if (globalOps.length >= 10) return false;
+  pruneGlobal(now);
+  if (globalOps.length >= GLOBAL_LIMIT) return false;
   globalOps.push(now);
+  return true;
+}
+
+// Global chat-message ceiling: bounds on-device model compute across all
+// sessions so per-session limits cannot be bypassed by minting sessions.
+const GLOBAL_MSG_LIMIT = 60;
+const globalMsgs: number[] = [];
+
+export function checkGlobalMessageRate(): boolean {
+  const now = Date.now();
+  const windowMs = 60_000;
+  while (globalMsgs.length > 0 && now - globalMsgs[0]! >= windowMs) globalMsgs.shift();
+  if (globalMsgs.length >= GLOBAL_MSG_LIMIT) return false;
+  globalMsgs.push(now);
   return true;
 }

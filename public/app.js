@@ -245,7 +245,7 @@
       'title="Click to reveal wallet address">' +
       '<div class="tile__top">' +
         '<span class="tile__id"><span class="tile__chip tile__chip--' + c.cls + '"></span>' + c.name + '</span>' +
-        '<span class="tile__net tile__net--' + networkMode + '">' + networkMode.toUpperCase() + '</span>' +
+        '<span class="tile__net tile__net--' + esc(networkMode) + '">' + esc(networkMode.toUpperCase()) + '</span>' +
       '</div>' +
       '<div class="tile__bal" id="bal-' + c.cls + '">' +
         '<div class="tile__row">' +

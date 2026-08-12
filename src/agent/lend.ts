@@ -181,14 +181,26 @@ export async function executeLendPlan(
   steps.push({ step: "borrow", detail: borrowRaw.trim() });
   log.info({ chain }, "Lend step 3/3 (borrow) done");
 
-  let riskSummary = "";
-  try {
-    const risk = await fetchAccountRisk(chain, walletAddress);
-    riskSummary = describeRisk(risk, chain, walletAddress);
-  } catch (err) {
-    log.warn({ err }, "Could not fetch post-trade account risk");
-    riskSummary = "Done. I could not fetch the live health factor right now — say 'how safe is my loan' to retry.";
+  // Verify the borrow on-chain against authoritative Aave state, rather than
+  // trusting the WDK response string. A borrow that reverts leaves debt at ~0;
+  // poll the live position until the debt reflects the borrow (or time out).
+  let risk = await fetchAccountRisk(chain, walletAddress).catch(() => null);
+  for (let attempt = 0; attempt < 10 && (!risk || risk.totalDebtUsd === "0.00"); attempt++) {
+    await new Promise((r) => setTimeout(r, 3000));
+    risk = await fetchAccountRisk(chain, walletAddress).catch(() => null);
   }
+
+  if (risk && risk.totalDebtUsd === "0.00") {
+    // Supply landed (we checked borrowing power) but the borrow did not.
+    throw new Error(
+      "The deposit went through but the borrow did not register on-chain. Your collateral is safe in Aave " +
+        "and is not borrowed against. Say 'how safe is my loan' to check, then try borrowing again."
+    );
+  }
+
+  const riskSummary = risk
+    ? describeRisk(risk, chain, walletAddress)
+    : "Done. I could not fetch the live health factor right now — say 'how safe is my loan' to retry.";
 
   return { steps, riskSummary };
 }

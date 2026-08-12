@@ -13,7 +13,7 @@ import {
   insertTx,
   updateTxStatus,
 } from "../history/store.js";
-import { checkGlobalOpRate } from "../middleware/rateLimit.js";
+import { peekGlobalOpRate, consumeGlobalOpRate, checkTransferRate } from "../middleware/rateLimit.js";
 import { config } from "../config.js";
 import { getLogger } from "../logger.js";
 import type {
@@ -256,7 +256,7 @@ export class WallyAgent {
     initialReply: string,
     history: CompletionMessage[]
   ): Promise<void> {
-    if (!checkGlobalOpRate()) {
+    if (!peekGlobalOpRate()) {
       const msg = "Rate limit: too many wallet operations this hour. Try again later.";
       this.emit({ type: "error", message: msg });
       saveHistory(this.sessionId, [...history, { role: "assistant", content: msg }]);
@@ -333,7 +333,15 @@ export class WallyAgent {
       return;
     }
 
-    // 3. Execute
+    // 3. Execute. Consume a rate-limit slot only now, on a confirmed spend,
+    // so cancelled or quote-failed attempts never burn the budget. Both the
+    // global ceiling and the per-session cap are checked here.
+    if (!consumeGlobalOpRate() || !checkTransferRate(this.sessionId)) {
+      const msg = "Rate limit reached for wallet operations. Please wait before trying again.";
+      this.emit({ type: "error", message: msg });
+      saveHistory(this.sessionId, [...history, { role: "assistant", content: msg }]);
+      return;
+    }
     this.emit({ type: "typing" });
     try {
       const { txHash, explorerUrl } = await tools.executeTransfer(
@@ -355,22 +363,45 @@ export class WallyAgent {
       });
 
       // Trust but verify: only claim success once the operation is actually
-      // on-chain. WDK has reported "sent" for transactions that never reached
-      // the network. Gasless (ERC-4337) sends return a user-operation hash
-      // that eth_getTransactionByHash cannot see, so those are verified
-      // against the bundler's eth_getUserOperationReceipt instead of skipped.
-      // While we poll, the row stays "pending" — never confirmed on trust.
-      const seenOnChain = isGasless
-        ? await tools.verifyUserOpOnChain(params.chain, txHash)
+      // mined AND succeeded. WDK has reported "sent" for transactions that
+      // never reached the network, and a mined-but-reverted tx moved nothing.
+      // Gasless sends verify against the bundler's user-operation receipt.
+      // Non-gasless checks the tx RECEIPT status (mined + success), not mere
+      // mempool presence. While we poll, the row stays "pending".
+      const outcome = isGasless
+        ? (await tools.verifyUserOpOnChain(params.chain, txHash)) ? "confirmed" : "indeterminate"
         : await tools.verifyTxOnChain(params.chain, txHash);
 
-      if (!seenOnChain) {
+      if (outcome === "failed") {
         updateTxStatus(txId, "failed");
         const msg =
-          `The wallet signed this transfer, but the transaction has not appeared on ${params.chain}. ` +
-          `Treat it as not sent. Your funds have most likely not moved — say "what is my balance" to verify. ` +
+          `This transfer failed on ${params.chain} — it was mined but reverted, so no funds moved. ` +
+          `Say "what is my balance" to confirm. Reference: ${txHash}`;
+        this.emit({ type: "error", message: msg });
+        saveHistory(this.sessionId, [...history, { role: "assistant", content: msg }]);
+        return;
+      }
+
+      if (outcome === "indeterminate") {
+        // Do NOT say "not sent" — a slow tx that later mines would then be
+        // double-spent if the user resends. Leave the row pending.
+        const msg =
+          `I could not confirm this transfer landed on ${params.chain} within the wait window. ` +
+          `It may still be settling. Do NOT resend — say "what is my balance" in a minute to check. ` +
           `Reference: ${txHash}`;
         this.emit({ type: "error", message: msg });
+        saveHistory(this.sessionId, [...history, { role: "assistant", content: msg }]);
+        return;
+      }
+
+      if (outcome === "unverifiable") {
+        // Chains with no verification path (e.g. Bitcoin): report as submitted,
+        // never as confirmed.
+        updateTxStatus(txId, "pending");
+        const msg =
+          `Submitted on ${params.chain}. I cannot verify settlement on this chain from here, ` +
+          `so treat it as unconfirmed until you check. Reference: ${txHash}`;
+        this.emit({ type: "message", content: msg });
         saveHistory(this.sessionId, [...history, { role: "assistant", content: msg }]);
         return;
       }
@@ -401,7 +432,7 @@ export class WallyAgent {
     initialReply: string,
     history: CompletionMessage[]
   ): Promise<void> {
-    if (!checkGlobalOpRate()) {
+    if (!peekGlobalOpRate()) {
       const msg = "Rate limit: too many wallet operations this hour. Try again later.";
       this.emit({ type: "error", message: msg });
       saveHistory(this.sessionId, [...history, { role: "assistant", content: msg }]);
@@ -453,14 +484,41 @@ export class WallyAgent {
       return;
     }
 
+    // Consume a rate-limit slot only on the confirmed swap.
+    if (!consumeGlobalOpRate() || !checkTransferRate(this.sessionId)) {
+      const msg = "Rate limit reached for wallet operations. Please wait before trying again.";
+      this.emit({ type: "error", message: msg });
+      saveHistory(this.sessionId, [...history, { role: "assistant", content: msg }]);
+      return;
+    }
     this.emit({ type: "typing" });
     try {
+      const isGasless = config.gaslessChains.includes(params.chain);
       const { txHash, explorerUrl } = await tools.executeSwap(
         params.chain,
         params.fromToken,
         params.toToken,
         params.amount
       );
+
+      // Same verification discipline as transfers — a swap is not "complete"
+      // until it is mined and succeeded. WDK reports "sent" optimistically.
+      const outcome = isGasless
+        ? (await tools.verifyUserOpOnChain(params.chain, txHash)) ? "confirmed" : "indeterminate"
+        : await tools.verifyTxOnChain(params.chain, txHash);
+
+      if (outcome === "failed") {
+        const msg = `The swap failed on ${params.chain} — mined but reverted, so your tokens were not swapped. Reference: ${txHash}`;
+        this.emit({ type: "error", message: msg });
+        saveHistory(this.sessionId, [...history, { role: "assistant", content: msg }]);
+        return;
+      }
+      if (outcome === "indeterminate" || outcome === "unverifiable") {
+        const msg = `Swap submitted on ${params.chain}, but I could not confirm it landed. Do NOT resend — check your balance in a minute. Reference: ${txHash}`;
+        this.emit({ type: "message", content: msg });
+        saveHistory(this.sessionId, [...history, { role: "assistant", content: msg }]);
+        return;
+      }
 
       const msg =
         `Swap complete. Transaction: ${txHash.slice(0, 10)}...${txHash.slice(-8)}` +
@@ -481,7 +539,7 @@ export class WallyAgent {
     history: CompletionMessage[]
   ): Promise<void> {
     clearPendingLend(this.sessionId);
-    if (!checkGlobalOpRate()) {
+    if (!peekGlobalOpRate()) {
       const msg = "Rate limit: too many wallet operations this hour. Try again later.";
       this.emit({ type: "error", message: msg });
       saveHistory(this.sessionId, [...history, { role: "assistant", content: msg }]);
@@ -507,6 +565,14 @@ export class WallyAgent {
       if (!confirmed) {
         const msg = "Lending plan cancelled. Nothing was sent.";
         this.emit({ type: "message", content: msg });
+        saveHistory(this.sessionId, [...history, { role: "assistant", content: msg }]);
+        return;
+      }
+
+      // Consume a rate-limit slot only on the confirmed lend chain.
+      if (!consumeGlobalOpRate() || !checkTransferRate(this.sessionId)) {
+        const msg = "Rate limit reached for wallet operations. Please wait before trying again.";
+        this.emit({ type: "error", message: msg });
         saveHistory(this.sessionId, [...history, { role: "assistant", content: msg }]);
         return;
       }

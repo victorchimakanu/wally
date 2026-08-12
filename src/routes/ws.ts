@@ -9,7 +9,7 @@ import {
   handleInbound,
 } from "../session/manager.js";
 import { loadHistory } from "../session/store.js";
-import { checkMessageRate } from "../middleware/rateLimit.js";
+import { checkMessageRate, checkGlobalMessageRate } from "../middleware/rateLimit.js";
 import { getLogger } from "../logger.js";
 import { verifySessionCookie, isAllowedOrigin } from "../middleware/auth.js";
 import { config } from "../config.js";
@@ -68,7 +68,9 @@ export function attachWsServer(app: FastifyInstance): WebSocketServer {
       try { eventType = (JSON.parse(raw) as { type?: string }).type; } catch { /* ignore */ }
       const needsRateLimit = eventType === "message";
 
-      if (needsRateLimit && !checkMessageRate(sessionId)) {
+      // Per-session limit, plus a global ceiling so minting fresh sessions
+      // cannot bypass it and exhaust on-device model compute.
+      if (needsRateLimit && (!checkMessageRate(sessionId) || !checkGlobalMessageRate())) {
         ws.send(JSON.stringify({ type: "error", message: "Rate limit exceeded. Please wait a moment." }));
         return;
       }

@@ -18,5 +18,11 @@ export function getDb(): Database.Database {
   const schema = readFileSync(path.join(__dirname, "schema.sql"), "utf-8");
   _db.exec(schema);
 
+  // Defensive migration for databases created before the owner column existed.
+  const cols = _db.prepare("PRAGMA table_info(sessions)").all() as Array<{ name: string }>;
+  if (!cols.some((c) => c.name === "owner")) {
+    _db.exec("ALTER TABLE sessions ADD COLUMN owner TEXT");
+  }
+
   return _db;
 }

@@ -22,6 +22,7 @@ import AaveProtocolEvm from "@tetherto/wdk-protocol-lending-aave-evm";
 import { WalletAccountReadOnlyEvm } from "@tetherto/wdk-wallet-evm";
 import { AaveV3Arbitrum, AaveV3Ethereum } from "@bgd-labs/aave-address-book";
 import { config } from "../config.js";
+import { getCapturedSeed } from "./seed.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -54,6 +55,16 @@ export function tokenInfo(chain: string, symbol: string): { address: string; dec
   return TOKENS[chain]?.[symbol.toUpperCase()] ?? null;
 }
 
+// toBaseUnits converts a decimal string to integer base units using string
+// arithmetic, avoiding the precision loss of parseFloat * 10**decimals for
+// large amounts. "12.5", 6 -> "12500000".
+export function toBaseUnits(amount: string, decimals: number): string {
+  const [whole, frac = ""] = amount.split(".");
+  const fracPadded = (frac + "0".repeat(decimals)).slice(0, decimals);
+  const combined = (whole + fracPadded).replace(/^0+(?=\d)/, "");
+  return combined === "" ? "0" : combined;
+}
+
 // approveForSupply signs the ERC-20 approve that lets Aave's pool pull the
 // collateral. The MCP toolkit ships no approve tool and its sendTransaction
 // carries no calldata, so this spawns a one-shot runner that calls the WDK
@@ -67,16 +78,18 @@ export async function approveForSupply(
   const pool = POOLS[chain];
   if (!token || !pool) throw new Error(`Lending is not configured for ${tokenSymbol} on ${chain}.`);
 
-  const baseAmount = BigInt(Math.round(parseFloat(amount) * 10 ** token.decimals)).toString();
+  const baseAmount = toBaseUnits(amount, token.decimals);
 
   // Minimal environment: only the seed source and what Node needs to run.
   // Forwarding process.env wholesale would leak unrelated secrets into the
-  // child.
+  // child. WDK_SEED comes from the captured holder, not process.env.
   const childEnv: Record<string, string> = {};
-  for (const k of ["PATH", "HOME", "WDK_SEED", "WDK_SEED_COMMAND", "WDK_SEED_FILE"]) {
+  for (const k of ["PATH", "HOME", "WDK_SEED_COMMAND", "WDK_SEED_FILE"]) {
     const v = process.env[k];
     if (v) childEnv[k] = v;
   }
+  const seed = getCapturedSeed();
+  if (seed) childEnv["WDK_SEED"] = seed;
 
   const { stdout } = await execFileAsync(
     process.execPath,

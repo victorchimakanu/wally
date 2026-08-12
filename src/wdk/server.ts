@@ -5,6 +5,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { config } from "../config.js";
 import { getLogger } from "../logger.js";
+import { getCapturedSeed } from "./seed.js";
 
 const log = getLogger("wdk:server");
 
@@ -47,15 +48,19 @@ export class WdkSubprocess extends EventEmitter {
   private buildEnv(): Record<string, string> {
     const env: Record<string, string> = {};
 
-    // Copy through only non-sensitive env vars we need
+    // Copy through only the vars the subprocess needs. WDK_SEED is captured
+    // out of the parent environment at startup, so it is handed over from the
+    // captured holder rather than read from process.env.
     for (const k of [
       "PATH", "HOME", "NODE_PATH",
-      "WDK_SEED", "WDK_SEED_COMMAND", "WDK_SEED_FILE",
+      "WDK_SEED_COMMAND", "WDK_SEED_FILE",
       "WDK_INDEXER_API_KEY",
       "WDK_CONFIG",
     ]) {
       if (process.env[k]) env[k] = process.env[k]!;
     }
+    const seed = getCapturedSeed();
+    if (seed) env["WDK_SEED"] = seed;
 
     // Set chain list and RPC overrides
     env["WDK_CHAINS"] = config.wdkChains.join(",");

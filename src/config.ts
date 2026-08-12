@@ -85,7 +85,16 @@ const ConfigSchema = z.object({
     .enum(["trace", "debug", "info", "warn", "error", "fatal"])
     .default("info"),
 
-  sessionSecret: z.string().min(16),
+  // Signs session cookies. Must be real entropy — the known placeholders are
+  // rejected because they ship in the public repo and would let anyone forge a
+  // valid cookie.
+  sessionSecret: z
+    .string()
+    .min(32, "SESSION_SECRET must be at least 32 characters (openssl rand -base64 32)")
+    .refine(
+      (v) => !["change-me", "change-me-in-production", "changeme"].includes(v.trim().toLowerCase()),
+      "SESSION_SECRET is still a placeholder — generate a real one with: openssl rand -base64 32"
+    ),
 });
 
 type Config = z.infer<typeof ConfigSchema>;
@@ -150,6 +159,25 @@ function buildConfig(): Config {
     console.error(
       "Configuration error: WALLY_ALLOW_REMOTE=true requires WALLY_ACCESS_TOKEN (>=16 chars). " +
         "Clients must present it before a session cookie is issued."
+    );
+    process.exit(1);
+  }
+
+  // A plaintext seed in the environment is a real-funds risk. On mainnet,
+  // prefer a non-plaintext source (command or file). A plaintext WDK_SEED on
+  // mainnet is refused unless the operator explicitly opts in, and even then
+  // it is captured out of the environment at startup (see captureSeed()).
+  if (
+    cfg.networkMode === "mainnet" &&
+    process.env["WDK_SEED"] &&
+    !process.env["WDK_SEED_COMMAND"] &&
+    !process.env["WDK_SEED_FILE"] &&
+    process.env["WALLY_ALLOW_PLAINTEXT_SEED"] !== "true"
+  ) {
+    console.error(
+      "Configuration error: plaintext WDK_SEED with NETWORK_MODE=mainnet. Prefer WDK_SEED_COMMAND " +
+        "or WDK_SEED_FILE. To run a small demo wallet with a plaintext seed anyway, set " +
+        "WALLY_ALLOW_PLAINTEXT_SEED=true (use only a throwaway wallet with minimal funds)."
     );
     process.exit(1);
   }

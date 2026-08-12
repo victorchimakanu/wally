@@ -12,17 +12,25 @@ type SupportedChain = (typeof SUPPORTED_CHAINS)[number];
 
 const ChainSchema = z.enum(SUPPORTED_CHAINS);
 
+// Token symbols are model-produced, so constrain them: a known set plus a
+// short uppercase-alnum shape. This blocks a model-injected token string from
+// flowing into a WDK call or being persisted and replayed into a later prompt.
+const TokenSchema = z
+  .string()
+  .transform((s) => s.toUpperCase())
+  .refine((s) => /^[A-Z0-9]{2,10}$/.test(s), "unrecognized token symbol");
+
 const TransferParams = z.object({
   chain: ChainSchema,
-  token: z.string().min(1),
+  token: TokenSchema,
   amount: z.string().regex(/^\d+(\.\d+)?$/, "amount must be a positive number"),
   to: z.string().min(10),
 });
 
 const SwapParams = z.object({
   chain: z.enum(["ethereum", "arbitrum"]),
-  fromToken: z.string().min(1),
-  toToken: z.string().min(1),
+  fromToken: TokenSchema,
+  toToken: TokenSchema,
   amount: z.string().regex(/^\d+(\.\d+)?$/),
 });
 
