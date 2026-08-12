@@ -40,14 +40,17 @@ For production use `WDK_SEED_COMMAND` instead (for example, a 1Password CLI read
 
 Leave everything else at its default for local development.
 
-## Step 3 — Start QVAC
+## Step 3 — Start the QVAC model server
 
-Open the QVAC desktop app and confirm the local server is running. You should see a green status indicator. If you prefer the CLI:
+Install the QVAC CLI and start its OpenAI-compatible server. The server owns the model; Wally talks to it over HTTP.
 
 ```bash
-qvac start
-qvac models download qwen3-4b-instruct
+npm install -g @qvac/cli
+cp qvac.config.example.json qvac.config.json   # edit the model `src` path to your local .gguf
+qvac serve openai -c qvac.config.json
 ```
+
+The config file preloads the model (a Qwen3 4B `.gguf` under `~/.qvac/models/`) and sets `ctx_size`. Leave it running in its own terminal. Wally connects to it at `QVAC_SERVER_URL` (default `http://127.0.0.1:11434`); a loopback URL keeps inference on-device.
 
 ## Step 4 — Run Wally
 

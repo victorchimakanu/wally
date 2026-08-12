@@ -79,12 +79,13 @@ export class WallyAgent {
       const historyCtx = await buildHistoryContext(this.sessionId);
       const parsed = await parseIntent(userText, history, historyCtx);
 
-      // The recipient is never the model's to choose. It must come from the
-      // user's literal text in this message, or exactly match an address this
-      // session has already paid (the verified history acts as the address
-      // book for "send it to the same address again"). Anything else — in
-      // particular a syntactically valid address the model invented — is
-      // rejected before it can reach the confirmation screen.
+      // The recipient is never the model's to choose — not even among past
+      // recipients. The only address a transfer accepts is one the user typed
+      // literally in this message. "Send it to the same address as last time"
+      // is a separate, deterministic path (the last_recipient intent), which
+      // resolves to the single most recent recipient in code, never a value
+      // the model selected. So here: a literal address is used verbatim; its
+      // absence is a hard stop, whatever the model proposed in `to`.
       if (parsed.intent === "transfer" && parsed.params && typeof parsed.params === "object") {
         const evmAddr = userText.match(/0x[0-9a-fA-F]{40}\b/);
         const btcAddr = userText.match(/\b(?:bc1[a-zA-HJ-NP-Z0-9]{25,62}|[13][a-km-zA-HJ-NP-Z1-9]{25,34})\b/);
@@ -92,23 +93,17 @@ export class WallyAgent {
         if (literal) {
           (parsed.params as Record<string, unknown>)["to"] = literal;
         } else {
-          const proposed = String((parsed.params as Record<string, unknown>)["to"] ?? "");
-          const knownRecipients = getRecentTxs(this.sessionId, 50).map((t) => t.recipient);
-          const verified = knownRecipients.find((r) => r.toLowerCase() === proposed.toLowerCase());
-          if (verified) {
-            (parsed.params as Record<string, unknown>)["to"] = verified;
-          } else {
-            const msg =
-              "I need the recipient address in your message — paste the full address you want to send to. " +
-              "For safety I never fill one in myself.";
-            this.emit({ type: "message", content: msg });
-            saveHistory(this.sessionId, [
-              ...history,
-              { role: "user", content: userText },
-              { role: "assistant", content: msg },
-            ]);
-            return;
-          }
+          const msg =
+            "I need the recipient address in your message — paste the full address you want to send to. " +
+            "To reuse an earlier one, say \"send it to the same address as last time\". " +
+            "For safety I never pick an address myself.";
+          this.emit({ type: "message", content: msg });
+          saveHistory(this.sessionId, [
+            ...history,
+            { role: "user", content: userText },
+            { role: "assistant", content: msg },
+          ]);
+          return;
         }
       }
 
@@ -359,12 +354,15 @@ export class WallyAgent {
         status: "pending",
       });
 
-      // Trust but verify: only claim success once the chain's own RPC knows
-      // the transaction. WDK has reported "sent" for transactions that never
-      // reached the network. On gasless chains the hash is an ERC-4337 user
-      // operation hash, which eth_getTransactionByHash cannot see — the
-      // bundler mines it into a batch, so skip RPC verification there.
-      const seenOnChain = isGasless || (await tools.verifyTxOnChain(params.chain, txHash));
+      // Trust but verify: only claim success once the operation is actually
+      // on-chain. WDK has reported "sent" for transactions that never reached
+      // the network. Gasless (ERC-4337) sends return a user-operation hash
+      // that eth_getTransactionByHash cannot see, so those are verified
+      // against the bundler's eth_getUserOperationReceipt instead of skipped.
+      // While we poll, the row stays "pending" — never confirmed on trust.
+      const seenOnChain = isGasless
+        ? await tools.verifyUserOpOnChain(params.chain, txHash)
+        : await tools.verifyTxOnChain(params.chain, txHash);
 
       if (!seenOnChain) {
         updateTxStatus(txId, "failed");

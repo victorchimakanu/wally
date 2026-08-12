@@ -77,6 +77,10 @@ const ConfigSchema = z.object({
     .default("false")
     .transform((s) => s === "true"),
 
+  // Shared secret required before a session cookie is issued when the server
+  // is reachable off-loopback. Mandatory whenever allowRemote is true.
+  accessToken: z.string().optional(),
+
   logLevel: z
     .enum(["trace", "debug", "info", "warn", "error", "fatal"])
     .default("info"),
@@ -101,6 +105,7 @@ function buildConfig(): Config {
     port: process.env["PORT"],
     host: process.env["HOST"],
     allowRemote: process.env["WALLY_ALLOW_REMOTE"],
+    accessToken: process.env["WALLY_ACCESS_TOKEN"] || undefined,
     logLevel: process.env["LOG_LEVEL"],
     sessionSecret: process.env["SESSION_SECRET"],
   };
@@ -135,6 +140,16 @@ function buildConfig(): Config {
     console.error(
       "Configuration error: HOST is not loopback. Exposing Wally's wallet interface to the " +
         "network requires WALLY_ALLOW_REMOTE=true. Do not do this on untrusted networks."
+    );
+    process.exit(1);
+  }
+
+  // Off-loopback exposure without a shared access secret would hand a session
+  // (and the wallet) to anyone who can reach the port. Refuse to start.
+  if (cfg.allowRemote && (!cfg.accessToken || cfg.accessToken.length < 16)) {
+    console.error(
+      "Configuration error: WALLY_ALLOW_REMOTE=true requires WALLY_ACCESS_TOKEN (>=16 chars). " +
+        "Clients must present it before a session cookie is issued."
     );
     process.exit(1);
   }

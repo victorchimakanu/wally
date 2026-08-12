@@ -37,6 +37,21 @@ export function verifySessionCookie(cookieHeader: string | undefined): string | 
   return null;
 }
 
+// checkAccessToken gates cookie issuance when the server is exposed
+// off-loopback. On loopback (accessToken unset) it always passes. Otherwise
+// the caller must present the shared secret, checked in constant time, via
+// the `access_token` query parameter or the `x-wally-access` header.
+export function checkAccessToken(query: unknown, headerValue: string | undefined): boolean {
+  const expected = config.accessToken;
+  if (!expected) return true; // loopback default: no token required
+  const provided =
+    (query && typeof query === "object" && typeof (query as Record<string, unknown>)["access_token"] === "string"
+      ? ((query as Record<string, string>)["access_token"])
+      : undefined) ?? headerValue;
+  if (!provided || provided.length !== expected.length) return false;
+  return timingSafeEqual(Buffer.from(provided), Buffer.from(expected));
+}
+
 // isAllowedOrigin: browsers send an Origin header; only this app's own
 // loopback origin may open a WebSocket or call the API. Requests without an
 // Origin header (curl, scripts) still need the signed cookie to do anything.

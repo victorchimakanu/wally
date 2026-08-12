@@ -4,10 +4,15 @@
 // ethers is provided transitively by @tetherto/wdk-wallet-evm; used here only
 // to recover the real tx hash when WDK returns raw signed transaction bytes.
 import { Transaction } from "ethers";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import * as wdk from "./client.js";
 import { config } from "../config.js";
 import { getLogger } from "../logger.js";
 import type { ChainBalance } from "../types.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const log = getLogger("wdk:tools");
 
@@ -161,6 +166,57 @@ export async function verifyTxOnChain(chain: string, txHash: string): Promise<bo
     await new Promise((r) => setTimeout(r, 3000));
   }
   return false;
+}
+
+// verifyUserOpOnChain confirms an ERC-4337 gasless operation. The hash WDK
+// returns for a gasless send is a user-operation hash, invisible to
+// eth_getTransactionByHash — only the bundler can resolve it, via
+// eth_getUserOperationReceipt. We poll the bundler until the user operation is
+// actually included (and its inner call succeeded), so a gasless spend is
+// never reported "confirmed" on trust alone.
+export async function verifyUserOpOnChain(chain: string, userOpHash: string): Promise<boolean> {
+  const bundlerUrl = bundlerUrlForChain(chain);
+  if (!bundlerUrl) return false; // cannot verify → do not claim success
+  if (!/^0x[0-9a-fA-F]{64}$/.test(userOpHash)) return false;
+
+  // ~40s of polling: bundlers batch, so inclusion can take several blocks.
+  for (let attempt = 0; attempt < 20; attempt++) {
+    try {
+      const res = await fetch(bundlerUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "eth_getUserOperationReceipt",
+          params: [userOpHash],
+        }),
+      });
+      const json = (await res.json()) as { result?: { success?: boolean } | null };
+      if (json.result) {
+        // The op is on-chain. success=false means it was included but the
+        // inner call reverted — that is a failed transfer, not a confirmed one.
+        return json.result.success === true;
+      }
+    } catch (err) {
+      log.warn({ chain, err }, "verifyUserOpOnChain bundler call failed");
+    }
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+  return false;
+}
+
+// bundlerUrlForChain reads the ERC-4337 bundler endpoint from wdk.config.json
+// (the same file the WDK subprocess uses). Kept out of committed config; it
+// carries the bundler API key.
+function bundlerUrlForChain(chain: string): string | null {
+  try {
+    const cfgPath = path.resolve(__dirname, "..", "..", "wdk.config.json");
+    const cfg = JSON.parse(readFileSync(cfgPath, "utf8"));
+    return cfg?.chains?.[chain]?.config?.bundlerUrl ?? null;
+  } catch {
+    return null;
+  }
 }
 
 export async function fetchPrice(token: string): Promise<string> {

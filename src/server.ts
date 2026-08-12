@@ -11,7 +11,7 @@ import { healthRoutes } from "./routes/health.js";
 import { metricsRoutes } from "./routes/metrics.js";
 import { attachWsServer } from "./routes/ws.js";
 import { getDb } from "./db/index.js";
-import { makeSessionCookie, verifySessionCookie, isAllowedOrigin } from "./middleware/auth.js";
+import { makeSessionCookie, verifySessionCookie, isAllowedOrigin, checkAccessToken } from "./middleware/auth.js";
 import { getOrCreateSession } from "./session/manager.js";
 import { getSession } from "./session/store.js";
 
@@ -51,9 +51,16 @@ async function main() {
 
   app.get("/", async (req, reply) => {
     // Issue (or keep) the signed HttpOnly session cookie. The browser cannot
-    // read or forge it; the WebSocket upgrade requires it.
+    // read or forge it; the WebSocket upgrade requires it. When the server is
+    // exposed off-loopback, a new cookie is issued only to a caller that
+    // presents the shared access token — otherwise anyone reaching the port
+    // could obtain a session and operate the wallet.
     let sessionId = verifySessionCookie(req.headers["cookie"]);
     if (!sessionId) {
+      const headerVal = req.headers["x-wally-access"];
+      if (!checkAccessToken(req.query, Array.isArray(headerVal) ? headerVal[0] : headerVal)) {
+        return reply.code(401).type("text/plain").send("Access token required.");
+      }
       sessionId = getOrCreateSession();
       reply.header("set-cookie", makeSessionCookie(sessionId));
     }

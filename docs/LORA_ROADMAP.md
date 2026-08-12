@@ -21,19 +21,22 @@ machine.** Every confirmed transaction is a human-verified training pair:
     "wire 50 to dave for the studio" → {transfer, arbitrum, USDT, 50, 0x4f2a...}   ✓ confirmed
 
 Every correction ("no, I meant on ethereum") is a negative label. Most products pay annotators
-for this data. Wally's core safety flow produces it as a byproduct, on-device, with perfect
-ground truth. The chat sessions feature stores all of it in local SQLite. The training corpus
-builds itself while the user simply uses their wallet.
+for this data. Wally's safety flow makes it cheap to produce, on-device, with perfect ground
+truth — **in principle**. Honest status: today's database stores chat history and completed
+transfer fields, not the parsed intent, the correction, or an accept/reject label. Building the
+corpus means adding an explicit, reviewed training log at the confirmation gate. The safety flow
+makes that log cheap, but it must be built; it does not exist as a byproduct yet.
 
 ## What the adapters would be
 
 **1. The personal dialect adapter (the big one).**
-Learns how *this specific user* talks about money. Names ("dave", "my landlord", "the studio
-account") resolving to addresses they have confirmed before. Habitual phrasings, recurring
-amounts, the chains they actually use. Today Wally needs "send 10 USDT to 0x4f2a... on
-arbitrum". With a dialect adapter, "pay dave his 50" parses correctly on the first try, and the
-confirmation card is where the user checks it understood. The model develops a picture of you,
-and that picture is a file on your disk.
+Learns how *this specific user* talks about money: habitual phrasings, recurring amounts, the
+chains they actually use. Today Wally needs a full literal address; a dialect adapter helps
+"pay the usual 50, same as last time" parse cleanly, and the confirmation card is where the user
+checks it understood. Important boundary: an adapter improves *understanding only*. It never
+becomes the source of a recipient address — "dave" resolving to an address is a deterministic,
+user-verified address-book feature, never a value the model recalls, because Wally's safety rule
+is that the model does not choose addresses, learned or not.
 
 **2. The intent-accuracy adapter (the practical one).**
 The stock Qwen3 4B occasionally mangles parsing: typos like "arbritum", unusual word orders,
@@ -42,9 +45,11 @@ confirmed history) makes a small model behave like a much larger one *on this on
 Small model + narrow adapter is the whole on-device thesis: you do not need a frontier model to
 be excellent at a domain, you need a focused one.
 
-**3. The product adapter (the maintainable one).**
-New WDK chains, new tokens, new operations (lending, bridging) taught via adapter update instead
-of a new base model download. Shipping a 10 MB adapter beats shipping a 4 GB model.
+**3. Better recognition of new features (not new capability).**
+When WDK adds chains, tokens, or operations, an adapter can help the model *recognize* how users
+phrase them. It cannot *add* them: chains, tokens, and operations are WDK modules, handlers, and
+validation enums that ship as software. An adapter is weights, not code — it grants no new
+authority or capability, only better parsing of features that already exist.
 
 ## What it makes transactions feel like
 
@@ -91,8 +96,13 @@ currently tell that story end to end; QVAC (local inference + local fine-tuning)
 
 ## Phasing
 
-- **Phase 0 (now possible):** log the labeled corpus cleanly (confirmed intent + user text
-  already in SQLite; add a small export view).
+- **Phase 0 (to build):** add the labeled training log at the confirmation gate (user text +
+  parsed intent + confirmed/corrected). This does not exist yet; today's DB stores history and
+  transfer fields, not labels.
+- **Model choice caveat:** not every quantization is fine-tunable. QVAC's requirements list
+  F32, F16, Q4_0, Q8_0, TQ1_0 and TQ2_0; the Q4_K_M file Wally serves for inference is not among
+  them, so the training loop must pick a verified fine-tunable model (check with `getModelInfo()`)
+  and pair the adapter with a compatible base.
 - **Phase 1:** offline experiment: export corpus, train adapter with QVAC fine-tuning on the
   same laptop, measure parse accuracy base vs adapted. This is one afternoon and produces the
   demo number ("misparse rate cut by X%").

@@ -6,7 +6,7 @@ Wally is a production chat interface that lets users send crypto by typing natur
 
 Every operation in Wally passes through exactly two libraries:
 
-**QVAC** (`@qvac/sdk`) understands what the user wants. It runs a language model locally on the user's machine, reads the message, and returns a structured JSON object describing the action: what to do, on which chain, with which amount, and to which address.
+**QVAC** understands what the user wants. Wally sends OpenAI-compatible HTTP requests to the QVAC CLI server (`qvac serve openai`); that server owns the model and calls `@qvac/sdk` internally. The model reads the message and returns a structured JSON object describing the action: what to do, on which chain, with which amount, and to which address.
 
 **WDK** (`@tetherto/wdk-mcp-toolkit`) does what the user wants. It holds the wallet keys, connects to the chains, quotes fees, and executes the transaction. It never interprets language — it only executes typed commands.
 
@@ -14,9 +14,9 @@ Neither library does the other's job. The boundary between them is the JSON inte
 
 ## Why local inference
 
-The QVAC model runs inside the QVAC local server on the user's device. No message text, no address, no amount ever leaves the machine to reach an external AI API. This matters because Wally handles financial operations — sending transaction context to a cloud model is a privacy risk and a potential attack surface.
+The QVAC model runs inside the QVAC CLI server. Inference is on-device **only when `QVAC_SERVER_URL` is loopback**, which is the default — Wally refuses to start against a non-loopback server unless it is `https` with `QVAC_API_KEY` set. On the default loopback setup, no message text, no address, no amount ever leaves the machine to reach an external AI API. This matters because Wally handles financial operations — sending transaction context to a cloud model is a privacy risk and a potential attack surface.
 
-QVAC communicates with the application over a local socket. The `@qvac/sdk` `completion()` function calls that socket. If the local server is not running, the call fails immediately with a clear error.
+Wally talks to the server over HTTP (`POST /v1/chat/completions`), the same OpenAI-compatible interface `ollama` exposes. If the server is not running, the call fails immediately with a clear error.
 
 ## How the request flows
 
@@ -32,7 +32,7 @@ Fastify server  (src/server.ts)
 Input sanitizer  (src/agent/sanitize.ts)
         | Rejects injection patterns before any LLM call
         v
-QVAC completion()  (src/qvac/client.ts)
+QVAC CLI server  (HTTP, src/qvac/client.ts)
         | Structured JSON output constrained by JSON schema
         | { intent: "transfer", params: { chain, token, amount, to }, reply }
         v
@@ -60,7 +60,7 @@ Browser tab  (WebSocket)
 
 ## WDK as an MCP subprocess
 
-WDK runs as a separate child process. Wally spawns it using the `wdk-mcp-toolkit` binary (`bin/index.js serve`) and communicates over stdio using the Model Context Protocol. The reason for a subprocess rather than a direct library import is isolation: if WDK crashes, the main process restarts it without restarting the whole server. It also means the seed phrase is deleted from the subprocess environment immediately after WDK reads it, so it never appears in the main process's memory.
+WDK runs as a separate child process. Wally spawns it using the `wdk-mcp-toolkit` binary (`bin/index.js serve`) and communicates over stdio using the Model Context Protocol. The reason for a subprocess rather than a direct library import is isolation: if WDK crashes, the main process restarts it without restarting the whole server. The toolkit deletes the seed from its own subprocess environment immediately after reading it. Note that with a plaintext `WDK_SEED` the value still exists in the parent process's environment in development; production setups should use `WDK_SEED_COMMAND` or `WDK_SEED_FILE` so the parent never holds the seed in plaintext. The Aave approve path spawns its own short-lived signer with a minimal environment (only the seed source), never the full parent environment.
 
 The MCP client in `src/wdk/client.ts` wraps `callTool()` calls into typed functions like `transfer()`, `getBalance()`, and `quoteSwap()`. The rest of the codebase calls those functions and never touches MCP directly.
 
@@ -72,7 +72,7 @@ Text messages that say "yes" or "confirm" are not confirmations. This design pre
 
 ## Session and history
 
-Each browser tab gets a session ID (UUID) stored in an httpOnly cookie. The session stores the conversation history in SQLite so the QVAC model has context for follow-up questions ("the same address as last time"). Sessions expire after 30 minutes of inactivity.
+Each session ID is carried in a server-issued, HMAC-signed HttpOnly cookie the browser cannot read or forge. Every WebSocket and API entry point verifies that signature and a same-origin `Origin` header before touching a session; off-loopback exposure additionally requires a shared access token before any cookie is issued. The session stores conversation history in SQLite so the model has context for follow-up questions. Sessions expire after 30 minutes of inactivity.
 
 Completed transactions are written to a separate SQLite table. The agent injects the last five transactions into the QVAC system prompt as plain text so the model can resolve history references without needing RAG.
 
@@ -82,8 +82,9 @@ The rate limiter (`src/middleware/rateLimit.ts`) is enforced before the QVAC cal
 
 - 10 messages per minute per session
 - 3 transfer attempts per hour per session
+- 10 wallet operations per hour globally, across all sessions
 
-Both limits are in-memory and per-session. They reset when a session is reaped.
+The global cap matters because per-session limits alone can be defeated by minting fresh sessions; the global limiter bounds total wallet activity regardless of how many sessions an attacker creates.
 
 ## Adding a chain
 
