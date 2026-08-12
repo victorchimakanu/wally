@@ -23,7 +23,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
-    "@tetherto/wdk-mcp-toolkit": "git+https://github.com/tetherto/wdk-mcp-toolkit.git#893dfbe97432c0f40eff8836827337f1e30c593a",
+    "@tetherto/wdk-mcp-toolkit": "git+https://github.com/tetherto/wdk-mcp-toolkit.git#d821898d6e629f17df9eb46e4d1e1180e13b6148",
     "@tetherto/wdk-protocol-bridge-usdt0-evm": "^1.0.0-beta.4",
     "@tetherto/wdk-protocol-lending-aave-evm": "^1.0.0-beta.4",
     "@tetherto/wdk-protocol-swap-velora-evm": "1.0.0-beta.4",
