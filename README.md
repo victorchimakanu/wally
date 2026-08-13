@@ -23,17 +23,19 @@ npm install
 cp .env.example .env.local
 ```
 
-**Create your wallet.** Wally has no wallet until you give it a seed phrase. Generate a fresh one:
+**Your wallet.** You do not need to create one by hand. The first time you start Wally
+with no seed configured, it generates a fresh wallet for you and shows you the recovery
+phrase once, on screen, to write down. It is stored locally in a gitignored `.wally-seed`
+file (owner-only) and reused on every later start. Each person who runs their own copy of
+Wally gets their own wallet; nobody shares funds.
+
+If you would rather bring your own seed, set one in `.env.local` and Wally uses it instead:
 
 ```bash
-node -e "console.log(require('ethers').Wallet.createRandom().mnemonic.phrase)"
+WDK_SEED=your twelve or twenty-four word phrase   # optional; omit to auto-create
 ```
 
-Open `.env.local` and set your seed:
-
-```bash
-WDK_SEED=the twelve words you just generated
-```
+For production, prefer `WDK_SEED_COMMAND` or `WDK_SEED_FILE` over a plaintext seed.
 
 **Start the QVAC model server.** Wally talks to QVAC over the OpenAI-compatible API
 (`qvac serve openai`, port 11434, the same interface ollama exposes). Edit

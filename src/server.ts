@@ -12,7 +12,7 @@ import { metricsRoutes } from "./routes/metrics.js";
 import { attachWsServer } from "./routes/ws.js";
 import { getDb } from "./db/index.js";
 import { makeSessionCookie, verifySessionCookie, isAllowedOrigin, checkAccessToken } from "./middleware/auth.js";
-import { captureSeed } from "./wdk/seed.js";
+import { captureSeed, getRecoveryPhraseForBackup, acknowledgeBackup } from "./wdk/seed.js";
 import { getOrCreateSession } from "./session/manager.js";
 import { getSession, getSessionOwner, ensureSessionOwner } from "./session/store.js";
 
@@ -147,6 +147,25 @@ async function main() {
     }
     getOrCreateSession(id);
     return reply.header("set-cookie", makeSessionCookie(id)).send({ ok: true });
+  });
+
+  // One-time recovery-phrase backup for an auto-generated wallet. Returns the
+  // phrase only while a backup is still pending; the client shows it once, the
+  // user writes it down, then acks. Cookie + same-origin gated like the rest.
+  app.get("/api/wallet/recovery", async (req, reply) => {
+    if (!isAllowedOrigin(req.headers["origin"]) || !verifySessionCookie(req.headers["cookie"])) {
+      return reply.code(401).send({ error: "unauthorized" });
+    }
+    const phrase = getRecoveryPhraseForBackup();
+    return reply.header("referrer-policy", "no-referrer").send({ pendingBackup: phrase !== null, phrase: phrase ?? undefined });
+  });
+
+  app.post("/api/wallet/recovery/ack", async (req, reply) => {
+    if (!isAllowedOrigin(req.headers["origin"]) || !verifySessionCookie(req.headers["cookie"])) {
+      return reply.code(401).send({ error: "unauthorized" });
+    }
+    acknowledgeBackup();
+    return reply.send({ ok: true });
   });
 
   app.post("/api/session/new", async (req, reply) => {

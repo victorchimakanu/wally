@@ -998,3 +998,63 @@ body:has(.chat:not(.chat--empty)) .chat-echo { display: block; }
     animation-duration: 1ms !important;
   }
 }
+
+/* ── First-run recovery phrase ─────────────────────────────────── */
+.recovery-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(14, 31, 23, 0.92);
+}
+.recovery-card {
+  width: 520px;
+  max-width: 100%;
+  background: var(--r-surface, #10231a);
+  border: 1px solid rgba(61, 214, 140, 0.28);
+  border-radius: 16px;
+  padding: 28px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+}
+.recovery-card h2 { margin: 0 0 8px; font-size: 20px; color: var(--r-text, #eaf5ee); }
+.recovery-card p { margin: 0 0 18px; font-size: 14px; line-height: 1.5; color: var(--r-text-dim, #a9c3b5); }
+.recovery-phrase {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-bottom: 18px;
+}
+.recovery-word {
+  padding: 8px 10px;
+  background: rgba(61, 214, 140, 0.08);
+  border: 1px solid rgba(61, 214, 140, 0.18);
+  border-radius: 8px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 13px;
+  color: var(--r-text, #eaf5ee);
+}
+.recovery-ack {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 18px;
+  font-size: 13px;
+  color: var(--r-text-dim, #a9c3b5);
+  cursor: pointer;
+}
+.recovery-ack input { margin-top: 3px; }
+.recovery-btn {
+  width: 100%;
+  padding: 12px;
+  border: none;
+  border-radius: 10px;
+  background: var(--r-accent, #3dd68c);
+  color: #06130c;
+  font-weight: 600;
+  font-size: 15px;
+  cursor: pointer;
+}
+.recovery-btn:disabled { opacity: 0.4; cursor: not-allowed; }

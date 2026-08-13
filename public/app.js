@@ -579,9 +579,74 @@
     return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
   }
 
+  /* ── First-run recovery phrase backup ──────────────────────── */
+
+  function checkRecoveryBackup() {
+    fetch("/api/wallet/recovery")
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data && data.pendingBackup && data.phrase) showRecoveryModal(data.phrase);
+      })
+      .catch(function () { /* no auto-wallet; nothing to back up */ });
+  }
+
+  function showRecoveryModal(phrase) {
+    var back = document.createElement("div");
+    back.className = "recovery-backdrop";
+
+    var card = document.createElement("div");
+    card.className = "recovery-card";
+
+    var h = document.createElement("h2");
+    h.textContent = "Your new wallet";
+    var p = document.createElement("p");
+    p.textContent =
+      "Wally created a wallet just for you. Write down this recovery phrase and keep it somewhere safe. " +
+      "It is the only way to recover your wallet. Anyone who has it controls your funds. Wally never sends it anywhere.";
+
+    var box = document.createElement("div");
+    box.className = "recovery-phrase";
+    phrase.split(" ").forEach(function (word, i) {
+      var w = document.createElement("span");
+      w.className = "recovery-word";
+      w.textContent = (i + 1) + ". " + word;
+      box.appendChild(w);
+    });
+
+    var label = document.createElement("label");
+    label.className = "recovery-ack";
+    var chk = document.createElement("input");
+    chk.type = "checkbox";
+    var span = document.createElement("span");
+    span.textContent = "I have written down my recovery phrase and stored it safely.";
+    label.appendChild(chk);
+    label.appendChild(span);
+
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "recovery-btn";
+    btn.textContent = "Continue to my wallet";
+    btn.disabled = true;
+    chk.addEventListener("change", function () { btn.disabled = !chk.checked; });
+    btn.addEventListener("click", function () {
+      fetch("/api/wallet/recovery/ack", { method: "POST" })
+        .then(function () { back.remove(); })
+        .catch(function () { back.remove(); });
+    });
+
+    card.appendChild(h);
+    card.appendChild(p);
+    card.appendChild(box);
+    card.appendChild(label);
+    card.appendChild(btn);
+    back.appendChild(card);
+    document.body.appendChild(back);
+  }
+
   /* ── Init ───────────────────────────────────────────────────── */
 
   connect();
+  checkRecoveryBackup();
   inputEl.focus();
 
 })();
