@@ -13,6 +13,19 @@ function sign(payload: string): string {
   return createHmac("sha256", config.sessionSecret).update(payload).digest("hex");
 }
 
+// safeEqual is a constant-time string compare that NEVER throws. timingSafeEqual
+// throws on unequal BYTE length, and a character-length precheck is not enough
+// (a multibyte char makes a 64-char string exceed 64 bytes). An attacker could
+// craft such a value to trigger the throw; in the raw WebSocket upgrade handler
+// that would become an uncaughtException and take the process down. Comparing
+// Buffer byte lengths first closes that.
+function safeEqual(a: string, b: string): boolean {
+  const ab = Buffer.from(a);
+  const bb = Buffer.from(b);
+  if (ab.length !== bb.length) return false;
+  return timingSafeEqual(ab, bb);
+}
+
 export function makeSessionCookie(id: string): string {
   // The signed payload includes an issued-at timestamp, so a captured raw
   // cookie stops verifying after MAX_AGE — it is not a permanent credential.
@@ -37,8 +50,7 @@ export function verifySessionCookie(cookieHeader: string | undefined): string | 
     const payload = value.slice(0, lastDot);
     const mac = value.slice(lastDot + 1);
     const expected = sign(payload);
-    if (mac.length !== expected.length) return null;
-    if (!timingSafeEqual(Buffer.from(mac), Buffer.from(expected))) return null;
+    if (!safeEqual(mac, expected)) return null;
     const midDot = payload.lastIndexOf(".");
     if (midDot <= 0) return null;
     const id = payload.slice(0, midDot);
@@ -57,8 +69,8 @@ export function verifySessionCookie(cookieHeader: string | undefined): string | 
 export function checkAccessToken(headerValue: string | undefined): boolean {
   const expected = config.accessToken;
   if (!expected) return true; // loopback default: no token required
-  if (!headerValue || headerValue.length !== expected.length) return false;
-  return timingSafeEqual(Buffer.from(headerValue), Buffer.from(expected));
+  if (!headerValue) return false;
+  return safeEqual(headerValue, expected);
 }
 
 // isAllowedOrigin: browsers send an Origin header; only this app's own

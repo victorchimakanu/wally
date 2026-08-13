@@ -101,8 +101,7 @@ export class WallyAgent {
               ? "I found more than one address in your message, so I will not guess which to send to. " +
                 "Send again with only the recipient address."
               : "I need the recipient address in your message — paste the full address you want to send to. " +
-                "To reuse an earlier one, say \"send it to the same address as last time\". " +
-                "For safety I never pick an address myself.";
+                "For safety I never pick or remember an address myself; every send needs the address in your message.";
           this.emit({ type: "message", content: msg });
           saveHistory(this.sessionId, [
             ...history,
@@ -514,29 +513,9 @@ export class WallyAgent {
         params.amount
       );
 
-      // Same verification discipline as transfers — a swap is not "complete"
-      // until it is mined and succeeded. WDK reports "sent" optimistically.
-      // Same verification discipline as transfers — a swap is not "complete"
-      // until it is mined and succeeded. WDK reports "sent" optimistically.
-      const outcome = isGasless
-        ? await tools.verifyUserOpOnChain(params.chain, txHash)
-        : await tools.verifyTxOnChain(params.chain, txHash);
-
-      if (outcome === "failed") {
-        const msg = `The swap failed on ${params.chain} — mined but reverted, so your tokens were not swapped. Reference: ${txHash}`;
-        this.emit({ type: "error", message: msg });
-        saveHistory(this.sessionId, [...history, { role: "assistant", content: msg }]);
-        return;
-      }
-      if (outcome === "indeterminate" || outcome === "unverifiable") {
-        const msg = `Swap submitted on ${params.chain}, but I could not confirm it landed. Do NOT resend — check your balance in a minute. Reference: ${txHash}`;
-        this.emit({ type: "message", content: msg });
-        saveHistory(this.sessionId, [...history, { role: "assistant", content: msg }]);
-        return;
-      }
-
-      // Record the confirmed swap so history includes it.
-      insertTx({
+      // Record the swap as pending BEFORE verification, so a swap that lands
+      // after the poll window still appears in history (mirrors transfers).
+      const swapTxId = insertTx({
         session_id: this.sessionId,
         chain: params.chain,
         token: `${params.fromToken}->${params.toToken}`,
@@ -544,8 +523,31 @@ export class WallyAgent {
         recipient: "(swap)",
         tx_hash: txHash,
         fee: "",
-        status: "confirmed",
+        status: "pending",
       });
+
+      // Same verification discipline as transfers — a swap is not "complete"
+      // until it is mined and succeeded. WDK reports "sent" optimistically.
+      const outcome = isGasless
+        ? await tools.verifyUserOpOnChain(params.chain, txHash)
+        : await tools.verifyTxOnChain(params.chain, txHash);
+
+      if (outcome === "failed") {
+        updateTxStatus(swapTxId, "failed");
+        const msg = `The swap failed on ${params.chain} — mined but reverted, so your tokens were not swapped. Reference: ${txHash}`;
+        this.emit({ type: "error", message: msg });
+        saveHistory(this.sessionId, [...history, { role: "assistant", content: msg }]);
+        return;
+      }
+      if (outcome === "indeterminate" || outcome === "unverifiable") {
+        // Leave the row pending — it may still land.
+        const msg = `Swap submitted on ${params.chain}, but I could not confirm it landed. Do NOT resend — check your balance in a minute. Reference: ${txHash}`;
+        this.emit({ type: "message", content: msg });
+        saveHistory(this.sessionId, [...history, { role: "assistant", content: msg }]);
+        return;
+      }
+
+      updateTxStatus(swapTxId, "confirmed");
       const msg =
         `Swap complete. Transaction: ${txHash.slice(0, 10)}...${txHash.slice(-8)}` +
         (explorerUrl ? `\n${explorerUrl}` : "");

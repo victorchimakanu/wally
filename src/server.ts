@@ -1,4 +1,5 @@
 import Fastify from "fastify";
+import type { FastifyRequest, FastifyReply } from "fastify";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { readFileSync, existsSync } from "node:fs";
@@ -149,23 +150,41 @@ async function main() {
     return reply.header("set-cookie", makeSessionCookie(id)).send({ ok: true });
   });
 
-  // One-time recovery-phrase backup for an auto-generated wallet. Returns the
-  // phrase only while a backup is still pending; the client shows it once, the
-  // user writes it down, then acks. Cookie + same-origin gated like the rest.
-  app.get("/api/wallet/recovery", async (req, reply) => {
-    if (!isAllowedOrigin(req.headers["origin"]) || !verifySessionCookie(req.headers["cookie"])) {
-      return reply.code(401).send({ error: "unauthorized" });
+  // The recovery phrase is the crown-jewel secret. Its endpoint is held to a
+  // stricter bar than the rest of the API:
+  //  - LOOPBACK ONLY. The plaintext seed is never served off-loopback, even in
+  //    remote mode, so it cannot cross the network (in cleartext or at all) and
+  //    a remote access-token holder cannot read it.
+  //  - Host header validated against a loopback host (defeats DNS rebinding).
+  //  - Origin must be present and same-origin (undefined is NOT allowed here,
+  //    unlike the chat API).
+  //  - Cache-Control: no-store so it never lands in a cache/history.
+  function recoveryGate(req: FastifyRequest, reply: FastifyReply): boolean {
+    const host = String(req.headers["host"] ?? "");
+    const hostname = host.split(":")[0] ?? "";
+    const hostLoopback = ["127.0.0.1", "localhost", "::1", "[::1]"].includes(hostname);
+    const originRaw = req.headers["origin"];
+    const origin = Array.isArray(originRaw) ? originRaw[0] : originRaw;
+    if (!hostLoopback || !origin || !isAllowedOrigin(origin) || !verifySessionCookie(req.headers["cookie"])) {
+      reply.code(403).send({ error: "forbidden" });
+      return false;
     }
+    reply.header("cache-control", "no-store, private").header("pragma", "no-cache").header("referrer-policy", "no-referrer");
+    return true;
+  }
+
+  app.get("/api/wallet/recovery", async (req, reply) => {
+    if (!recoveryGate(req, reply)) return reply;
     const phrase = getRecoveryPhraseForBackup();
-    return reply.header("referrer-policy", "no-referrer").send({ pendingBackup: phrase !== null, phrase: phrase ?? undefined });
+    return reply.send({ pendingBackup: phrase !== null, phrase: phrase ?? undefined });
   });
 
   app.post("/api/wallet/recovery/ack", async (req, reply) => {
-    if (!isAllowedOrigin(req.headers["origin"]) || !verifySessionCookie(req.headers["cookie"])) {
-      return reply.code(401).send({ error: "unauthorized" });
-    }
-    acknowledgeBackup();
-    return reply.send({ ok: true });
+    if (!recoveryGate(req, reply)) return reply;
+    const ok = acknowledgeBackup();
+    // If the marker could not be persisted, tell the client so it does not
+    // claim success — the phrase would otherwise re-prompt on next start.
+    return reply.code(ok ? 200 : 500).send(ok ? { ok: true } : { ok: false, error: "could not persist backup acknowledgement" });
   });
 
   app.post("/api/session/new", async (req, reply) => {

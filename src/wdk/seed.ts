@@ -22,7 +22,7 @@
 import { readFileSync, writeFileSync, existsSync, chmodSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { Wallet } from "ethers";
+import { Wallet, Mnemonic } from "ethers";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..", "..");
@@ -53,7 +53,23 @@ export function captureSeed(): void {
 
   // 3. Auto-managed local wallet.
   if (existsSync(SEED_FILE)) {
-    captured = readFileSync(SEED_FILE, "utf8").trim();
+    const contents = readFileSync(SEED_FILE, "utf8").trim();
+    // Fail loudly on a corrupt/partial seed file rather than silently deriving
+    // a different (or no) wallet than the one the user backed up.
+    if (!Mnemonic.isValidMnemonic(contents)) {
+      throw new Error(
+        `The wallet seed file at ${SEED_FILE} is empty or not a valid recovery phrase. ` +
+          "Restore it from your backup, or delete it to create a new wallet."
+      );
+    }
+    // Re-tighten perms on an existing file too (it may have been created with a
+    // loose umask by other means).
+    try {
+      chmodSync(SEED_FILE, 0o600);
+    } catch {
+      /* best effort */
+    }
+    captured = contents;
     // Existing wallet the user never confirmed backing up → still prompt.
     if (!existsSync(BACKED_MARKER)) unbackedPhrase = captured;
     return;
@@ -70,15 +86,15 @@ export function captureSeed(): void {
   captured = phrase;
   unbackedPhrase = phrase;
 
-  // Loud console notice on the run that creates the wallet.
+  // Notice only — NEVER print the phrase itself. stderr is commonly captured by
+  // journald / docker logs / pm2, where the phrase would become a durable,
+  // admin-readable key leak. The phrase is shown once in the app UI instead.
   console.error(
     "\n" +
       "────────────────────────────────────────────────────────────\n" +
-      " A new wallet was created for you. Your recovery phrase is:\n\n" +
-      "   " + phrase + "\n\n" +
-      " Write it down and keep it safe. It is the ONLY way to recover\n" +
-      " this wallet. Anyone who has it controls your funds.\n" +
-      " Saved to: " + SEED_FILE + " (keep this file private).\n" +
+      " A new wallet was created for you.\n" +
+      " Open Wally in your browser to view and back up your recovery\n" +
+      " phrase (shown once). Saved to: " + SEED_FILE + " (keep private).\n" +
       "────────────────────────────────────────────────────────────\n"
   );
 }
@@ -98,13 +114,17 @@ export function isBackupPending(): boolean {
 }
 
 // acknowledgeBackup records that the user saved their phrase and stops the UI
-// from ever showing it again (a marker file, so it survives restarts).
-export function acknowledgeBackup(): void {
-  if (unbackedPhrase === null) return;
+// from ever showing it again (a marker file, so it survives restarts). Returns
+// false if the marker could not be persisted — in that case the in-memory state
+// is NOT cleared, so the caller can report failure and the phrase is not lost
+// (it would re-prompt on the next start rather than falsely reading as backed).
+export function acknowledgeBackup(): boolean {
+  if (unbackedPhrase === null) return true;
   try {
     writeFileSync(BACKED_MARKER, new Date().toISOString() + "\n");
   } catch {
-    // non-fatal
+    return false; // keep unbackedPhrase set; do not report success
   }
   unbackedPhrase = null;
+  return true;
 }

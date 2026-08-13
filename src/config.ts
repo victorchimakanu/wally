@@ -163,6 +163,17 @@ function buildConfig(): Config {
     process.exit(1);
   }
 
+  // The app serves plain HTTP; it does not terminate TLS itself. Off-loopback
+  // that means the operator MUST front it with an HTTPS proxy, or the access
+  // token and wallet traffic cross the network in cleartext. Warn loudly.
+  if (cfg.allowRemote) {
+    console.error(
+      "WARNING: WALLY_ALLOW_REMOTE=true serves plain HTTP. Put an HTTPS/TLS proxy in front of it. " +
+        "Never expose it directly over cleartext HTTP. The recovery-phrase endpoint is loopback-only and " +
+        "is never served off-loopback regardless."
+    );
+  }
+
   // A plaintext seed in the environment is a real-funds risk. On mainnet,
   // prefer a non-plaintext source (command or file). A plaintext WDK_SEED on
   // mainnet is refused unless the operator explicitly opts in, and even then

@@ -3,11 +3,18 @@ import { checkQvacHealth } from "../qvac/client.js";
 import { wdkSubprocess } from "../wdk/server.js";
 import { getDb } from "../db/index.js";
 import { getLogger } from "../logger.js";
+import { config } from "../config.js";
+import { verifySessionCookie } from "../middleware/auth.js";
 
 const log = getLogger("routes:health");
 
 export async function healthRoutes(app: FastifyInstance): Promise<void> {
-  app.get("/health", async (_req, reply) => {
+  app.get("/health", async (req, reply) => {
+    // Off-loopback, subsystem status is a recon signal — require a session,
+    // matching /metrics. On loopback it stays open for local health checks.
+    if (config.allowRemote && !verifySessionCookie(req.headers["cookie"])) {
+      return reply.code(401).send({ error: "unauthorized" });
+    }
     const [qvacResult] = await Promise.allSettled([checkQvacHealth()]);
 
     const qvac =

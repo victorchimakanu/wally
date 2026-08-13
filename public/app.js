@@ -240,7 +240,9 @@
   }
 
   function buildTile(c, primary, primaryTok, sub) {
-    primary = esc(primary); primaryTok = esc(primaryTok);
+    // Null-check BEFORE escaping, or esc(null) becomes the literal "null".
+    primary = primary === null ? null : esc(primary);
+    primaryTok = esc(primaryTok);
     return '<div class="tile" data-chain="' + esc(c.key) + '" data-clickable ' +
       'title="Click to reveal wallet address">' +
       '<div class="tile__top">' +
@@ -629,9 +631,17 @@
     btn.disabled = true;
     chk.addEventListener("change", function () { btn.disabled = !chk.checked; });
     btn.addEventListener("click", function () {
+      btn.disabled = true;
       fetch("/api/wallet/recovery/ack", { method: "POST" })
-        .then(function () { back.remove(); })
-        .catch(function () { back.remove(); });
+        .then(function (r) { return r.ok ? r.json() : { ok: false }; })
+        .then(function (d) {
+          if (d && d.ok) { back.remove(); return; }
+          // Server could not persist the acknowledgement — keep the phrase on
+          // screen rather than dismissing it into nothing.
+          btn.disabled = false;
+          btn.textContent = "Could not save — try again";
+        })
+        .catch(function () { btn.disabled = false; btn.textContent = "Could not save — try again"; });
     });
 
     card.appendChild(h);

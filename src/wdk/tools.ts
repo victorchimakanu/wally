@@ -218,9 +218,13 @@ export async function verifyUserOpOnChain(chain: string, userOpHash: string): Pr
       });
       const json = (await res.json()) as { result?: { success?: boolean } | null };
       if (json.result) {
-        // Included. success=false means the inner call reverted — a failed
-        // transfer, distinct from "still settling".
-        return json.result.success === true ? "confirmed" : "failed";
+        // Included. A strict boolean is expected: true = success, false =
+        // reverted. A non-boolean (some bundlers return "0x1"/"true") is
+        // ambiguous, so treat it as indeterminate rather than guess "failed".
+        const s = json.result.success;
+        if (s === true) return "confirmed";
+        if (s === false) return "failed";
+        return "indeterminate";
       }
     } catch (err) {
       log.warn({ chain, err }, "verifyUserOpOnChain bundler call failed");
@@ -297,7 +301,10 @@ function extractTxHash(raw: string): string {
       } catch {
         // not a decodable transaction; fall through
       }
-      return candidate.slice(0, 66);
+      // Do NOT fabricate a plausible-looking hash by truncating — that would
+      // be shown to the user as a real reference. Return the raw string so
+      // verification takes the malformed-hash → indeterminate branch.
+      return candidate;
     }
   }
 

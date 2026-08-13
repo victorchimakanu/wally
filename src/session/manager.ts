@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type WebSocket from "ws";
 import { WallyAgent } from "../agent/index.js";
-import { upsertSession, touchSession, getSession } from "./store.js";
+import { upsertSession, touchSession, getSession, deleteExpiredSessions } from "./store.js";
 import { resolveConfirmation } from "../agent/confirm.js";
 import { fetchAddress } from "../wdk/tools.js";
 import { getLogger, scrubSecrets } from "../logger.js";
@@ -129,8 +129,9 @@ function emitToSession(sessionId: string, event: WallyOutboundEvent): void {
   }
 }
 
-// Prune sessions that have had no WebSocket activity for 30 minutes.
-// The SQLite store keeps its own expiry separate from this in-memory map.
+// Prune sessions with no WebSocket activity for 30 minutes — both from the
+// in-memory map AND from SQLite, so the sessions table (and its stored chat
+// history) does not grow without bound over a long-running instance.
 export function startSessionReaper(intervalMs = 60_000): NodeJS.Timeout {
   return setInterval(() => {
     const cutoff = Date.now() - 30 * 60 * 1000;
@@ -139,6 +140,13 @@ export function startSessionReaper(intervalMs = 60_000): NodeJS.Timeout {
         sessions.delete(id);
         log.info({ session_id: id }, "Session reaped");
       }
+    }
+    // Persisted rows older than a day of inactivity are removed from disk.
+    try {
+      const removed = deleteExpiredSessions(24 * 60 * 60);
+      if (removed > 0) log.info({ removed }, "Expired session rows pruned from disk");
+    } catch (err) {
+      log.warn({ err }, "Failed to prune expired session rows");
     }
   }, intervalMs);
 }

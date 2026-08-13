@@ -182,10 +182,23 @@ export async function executeLendPlan(
 
   // Baseline the position BEFORE any step, so every verification below is a
   // delta against the wallet's prior state — a wallet that already holds
-  // collateral/debt cannot make a reverted step look successful.
-  const baseline = await fetchAccountRisk(chain, walletAddress).catch(() => null);
-  const baseCollateral = baseline ? parseFloat(baseline.totalCollateralUsd) : 0;
-  const baseDebt = baseline ? parseFloat(baseline.totalDebtUsd) : 0;
+  // collateral/debt cannot make a reverted step look successful. Fail CLOSED if
+  // the baseline read fails: defaulting it to zero would collapse the delta
+  // checks back into absolute checks, which is exactly the false-success bug
+  // the delta approach exists to prevent.
+  let baseline = await fetchAccountRisk(chain, walletAddress).catch(() => null);
+  for (let attempt = 0; attempt < 3 && !baseline; attempt++) {
+    await new Promise((r) => setTimeout(r, 2000));
+    baseline = await fetchAccountRisk(chain, walletAddress).catch(() => null);
+  }
+  if (!baseline) {
+    throw new Error(
+      "I could not read your current Aave position before starting, so I stopped without doing anything. " +
+        "Nothing was sent. Please try again in a moment."
+    );
+  }
+  const baseCollateral = parseFloat(baseline.totalCollateralUsd);
+  const baseDebt = parseFloat(baseline.totalDebtUsd);
   const collateralValueUsd = parseFloat(collateralAmount); // USDT ~ $1
   const borrowValueUsd = parseFloat(plan.borrowAmount);
 

@@ -28,8 +28,16 @@ export function attachWsServer(app: FastifyInstance): WebSocketServer {
     }
     // A browser page must be same-origin; any client must present the signed
     // HttpOnly cookie issued by GET /. Unauthenticated sockets never reach
-    // the wallet.
-    if (!isAllowedOrigin(req.headers["origin"]) || !verifySessionCookie(req.headers["cookie"])) {
+    // the wallet. This runs in a raw upgrade listener with no framework
+    // error boundary, so any throw is contained here — a crafted request must
+    // never be able to crash the process.
+    let authed = false;
+    try {
+      authed = isAllowedOrigin(req.headers["origin"]) && verifySessionCookie(req.headers["cookie"]) !== null;
+    } catch {
+      authed = false;
+    }
+    if (!authed) {
       socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
       socket.destroy();
       return;
