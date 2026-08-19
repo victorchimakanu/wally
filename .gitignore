@@ -17,5 +17,4 @@ docs-site/.docusaurus/
 qvac.config.json
 
 # Auto-generated local wallet (single-user self-hosted mode)
-.wally-seed
-.wally-seed.backed
+.wally-seed*

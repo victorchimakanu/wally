@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { classify } from "../../src/agent/intent.js";
 
-const validEthAddress = "0xAbcdef1234567890abcdef1234567890abcdef12";
+const validEthAddress = "0xabCDEF1234567890ABcDEF1234567890aBCDeF12";
 const validBtcAddress = "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq";
 
 describe("classify — transfer", () => {

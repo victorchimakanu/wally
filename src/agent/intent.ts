@@ -3,6 +3,7 @@
 // anyway to catch any edge cases and to give TypeScript meaningful types.
 
 import { z } from "zod";
+import { getAddress } from "ethers";
 import type { ParsedIntent } from "../qvac/client.js";
 
 // ─── Per-intent param schemas ─────────────────────────────────────────────────
@@ -20,10 +21,17 @@ const TokenSchema = z
   .transform((s) => s.toUpperCase())
   .refine((s) => /^[A-Z0-9]{2,10}$/.test(s), "unrecognized token symbol");
 
+// Amounts must be positive: "0" passing validation only to be rejected by the
+// toolkit after a confirmed click produces an alarming indeterminate message.
+const AmountSchema = z
+  .string()
+  .regex(/^\d+(\.\d+)?$/, "amount must be a positive number")
+  .refine((v) => parseFloat(v) > 0, "amount must be greater than zero");
+
 const TransferParams = z.object({
   chain: ChainSchema,
   token: TokenSchema,
-  amount: z.string().regex(/^\d+(\.\d+)?$/, "amount must be a positive number"),
+  amount: AmountSchema,
   to: z.string().min(10),
 });
 
@@ -31,28 +39,32 @@ const SwapParams = z.object({
   chain: z.enum(["ethereum", "arbitrum"]),
   fromToken: TokenSchema,
   toToken: TokenSchema,
-  amount: z.string().regex(/^\d+(\.\d+)?$/),
+  amount: AmountSchema,
 });
 
 const BridgeParams = z.object({
   fromChain: ChainSchema,
   toChain: ChainSchema,
-  token: z.string().min(1),
-  amount: z.string().regex(/^\d+(\.\d+)?$/),
+  token: TokenSchema,
+  amount: AmountSchema,
 });
 
 const BalanceParams = z.object({
   chain: z.union([ChainSchema, z.literal("all")]),
 });
 
+// Constrained like every other token field: this string is persisted into
+// history and replayed to the model, so it must never be free text.
 const PriceParams = z.object({
-  token: z.string().min(1),
+  token: TokenSchema,
 });
 
 // LTV arrives from the model as a number ("50") or occasionally a string
-// ("50%"). Normalize to a number in (0, 75]. 75 sits safely under Aave's
-// liquidation thresholds for stablecoin collateral.
-export const MAX_LTV_PERCENT = 75;
+// ("50%"). Normalize to a number in (0, 60]. Aave's liquidation threshold for
+// stablecoin collateral sits only a few points above 75, which left positions
+// opening near health factor 1.0 with no repay path in Wally; 60 leaves a
+// real buffer against interest accrual and oracle drift.
+export const MAX_LTV_PERCENT = 60;
 
 const LtvSchema = z
   .union([z.number(), z.string()])
@@ -63,9 +75,15 @@ const LtvSchema = z
 
 const LendBorrowParams = z.object({
   chain: z.enum(["ethereum", "arbitrum"]).default("arbitrum"),
-  collateralToken: z.string().min(1).default("USDT"),
-  collateralAmount: z.string().regex(/^\d+(\.\d+)?$/, "amount must be a positive number"),
-  borrowToken: z.string().min(1).default("USDT"),
+  collateralToken: TokenSchema.default("USDT"),
+  // Cap precision at 6 decimals (USDT): Wally's base-unit conversion truncates
+  // silently while the toolkit throws, which could strand a lend chain between
+  // the approve and the supply.
+  collateralAmount: AmountSchema.refine(
+    (v) => !v.includes(".") || v.split(".")[1]!.length <= 6,
+    "too many decimal places",
+  ),
+  borrowToken: TokenSchema.default("USDT"),
   ltv: LtvSchema.optional(),
 });
 
@@ -100,7 +118,20 @@ export type TypedIntent =
 
 function isValidAddress(address: string, chain: SupportedChain): boolean {
   if (chain === "ethereum" || chain === "arbitrum") {
-    return /^0x[0-9a-fA-F]{40}$/.test(address);
+    if (!/^0x[0-9a-fA-F]{40}$/.test(address)) return false;
+    // Mixed-case addresses carry an EIP-55 checksum: enforce it, so a single
+    // mistyped character is caught instead of sending to a wrong address.
+    // All-lowercase (or all-uppercase) addresses have no checksum to check.
+    const body = address.slice(2);
+    const hasChecksum = /[a-f]/.test(body) && /[A-F]/.test(body);
+    if (hasChecksum) {
+      try {
+        getAddress(address);
+      } catch {
+        return false;
+      }
+    }
+    return true;
   }
   if (chain === "bitcoin") {
     return /^(1|3|bc1)[A-Za-z0-9]{25,62}$/.test(address);

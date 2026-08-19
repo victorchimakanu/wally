@@ -4,7 +4,7 @@ import { EventEmitter } from "node:events";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { config } from "../config.js";
-import { getLogger } from "../logger.js";
+import { getLogger, scrubSecrets } from "../logger.js";
 import { getCapturedSeed } from "./seed.js";
 
 const log = getLogger("wdk:server");
@@ -87,6 +87,13 @@ export class WdkSubprocess extends EventEmitter {
       command: process.execPath,
       args: [TOOLKIT_BIN, "serve"],
       env: this.buildEnv(),
+      // Never inherit the subprocess's stderr raw: pipe it through the scrubber
+      // so a future upstream debug line can never land a secret in our logs.
+      stderr: "pipe",
+    });
+    this.transport.stderr?.on("data", (chunk: Buffer) => {
+      const line = chunk.toString("utf8").trim();
+      if (line) log.warn({ toolkit_stderr: scrubSecrets(line).slice(0, 500) }, "WDK toolkit stderr");
     });
 
     const client = new Client({ name: "wally", version: "1.0.0" });

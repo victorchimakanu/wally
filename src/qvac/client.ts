@@ -146,7 +146,10 @@ async function runCompletion(
     }
     return parsed;
   } catch (err) {
-    log.warn({ text, err }, "QVAC output was not valid JSON — falling back to unknown");
+    // Do not log the raw model output: if a user ever pastes their recovery
+    // phrase into chat and the model echoes it, the unlabelled phrase would
+    // land in the log where the label-keyed scrubber cannot catch it.
+    log.warn({ textLength: text.length, err }, "QVAC output was not valid JSON — falling back to unknown");
     return {
       intent: "unknown",
       params: {},

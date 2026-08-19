@@ -94,25 +94,11 @@ export async function transfer(
   return extractText(result);
 }
 
-export async function quoteSendTransaction(
-  chain: string,
-  to: string,
-  value: string,
-  data?: string
-): Promise<string> {
-  const result = await callTool("quoteSendTransaction", { chain, to, value, ...(data ? { data } : {}) });
-  return extractText(result);
-}
-
-export async function sendTransaction(
-  chain: string,
-  to: string,
-  value: string,
-  data?: string
-): Promise<string> {
-  const result = await callTool("sendTransaction", { chain, to, value, ...(data ? { data } : {}) });
-  return extractText(result);
-}
+// NOTE: raw sendTransaction/quoteSendTransaction wrappers were deliberately
+// removed. The toolkit runs with elicitation off, so any wrapper that reaches
+// a state-changing tool without Wally's confirmation gate would execute
+// unconditionally. If a future feature needs arbitrary transactions, it must
+// go through createConfirmation like every other spend.
 
 // ─── Pricing ──────────────────────────────────────────────────────────────────
 

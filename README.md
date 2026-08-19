@@ -122,6 +122,19 @@ docs-site/      the documentation site
 
 Tests: `npm test`. Type check: `npm run typecheck`.
 
+## Known dependency risk (accepted, tracked)
+
+`npm audit` reports vulnerabilities inside the WDK dependency tree, mostly old
+`axios` copies pulled in by the gasless relay path (via the safe-relay kit and
+tronweb) with no fixed version upstream yet. A local override is not possible:
+pinning axios/elliptic across the tree breaks WDK's internal class checks (we
+tried; it had to be reverted). Until WDK lifts those dependencies upstream,
+treat any network position between this app and the bundler as untrusted, keep
+the bundler API key rotatable, and re-run `npm audit` after every WDK bump.
+The toolkit itself is pinned to an exact upstream commit; `npm install` needs
+GitHub SSH access for the two git-pinned packages, and if the pins ever stop
+resolving the install fails loudly rather than silently drifting.
+
 ## Built on
 
 [QVAC](https://qvac.tether.io) local AI runtime · [WDK](https://wdk.tether.io) Wallet Development Kit · Fastify + WebSocket · SQLite

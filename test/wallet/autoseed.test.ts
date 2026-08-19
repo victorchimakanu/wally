@@ -42,10 +42,10 @@ describe("auto-generated wallet on first run", () => {
   });
 
   it("captures a configured plaintext seed instead of generating", async () => {
-    process.env["WDK_SEED"] = "rigid meadow dutch material average rebel where kick ladder market illness normal";
+    process.env["WDK_SEED"] = "cat attack unaware scan crash pioneer example wrap trumpet dirt sword sun";
     const mod = await import("../../src/wdk/seed.js?case=plaintext");
     mod.captureSeed();
-    expect(mod.getCapturedSeed()).toContain("rigid meadow");
+    expect(mod.getCapturedSeed()).toContain("cat attack");
     expect(existsSync(SEED_PATH)).toBe(false); // did NOT auto-generate
     expect(mod.isBackupPending()).toBe(false); // configured seed = user's own, no prompt
     // And it is removed from the environment after capture.

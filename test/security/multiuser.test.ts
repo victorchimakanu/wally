@@ -15,7 +15,7 @@ describe("secret scrubbing does not clobber legitimate values", () => {
     // A bundler URL with an api key must be redacted.
     expect(scrubSecrets("https://api.pimlico.io/v2/42161/rpc?apikey=pim_LEAK")).not.toContain("pim_LEAK");
     // A labelled seed must be redacted.
-    expect(scrubSecrets("error: seed=rigid meadow dutch material average rebel")).not.toContain("rigid meadow");
+    expect(scrubSecrets("error: seed=cat attack unaware scan crash pioneer")).not.toContain("cat attack");
   });
 });
 

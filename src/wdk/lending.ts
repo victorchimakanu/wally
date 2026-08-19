@@ -17,11 +17,11 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { formatUnits } from "ethers";
+import { formatUnits, JsonRpcProvider, Contract } from "ethers";
 import AaveProtocolEvm from "@tetherto/wdk-protocol-lending-aave-evm";
 import { WalletAccountReadOnlyEvm } from "@tetherto/wdk-wallet-evm";
 import { AaveV3Arbitrum, AaveV3Ethereum } from "@bgd-labs/aave-address-book";
-import { config } from "../config.js";
+import { config, rpcForChain } from "../config.js";
 import { getCapturedSeed } from "./seed.js";
 
 const execFileAsync = promisify(execFile);
@@ -48,11 +48,29 @@ const POOLS: Record<string, string> = {
 };
 
 function rpcUrl(chain: string): string {
-  return chain === "ethereum" ? config.wdkRpcEthereum : config.wdkRpcArbitrum;
+  // Honors networkMode: risk reads and the signing subprocess must be on the
+  // same network or lend baselines come from the wrong chain.
+  return rpcForChain(chain === "ethereum" ? "ethereum" : "arbitrum");
 }
 
 export function tokenInfo(chain: string, symbol: string): { address: string; decimals: number } | null {
   return TOKENS[chain]?.[symbol.toUpperCase()] ?? null;
+}
+
+// isKnownContractAddress: true when an address is a token contract or an Aave
+// pool we know about, on ANY chain. Tokens sent to a token contract are burned
+// irrecoverably, so transfers to these addresses are refused outright.
+export function isKnownContractAddress(address: string): boolean {
+  const a = address.toLowerCase();
+  for (const chain of Object.keys(TOKENS)) {
+    for (const t of Object.values(TOKENS[chain]!)) {
+      if (t.address.toLowerCase() === a) return true;
+    }
+  }
+  for (const pool of Object.values(POOLS)) {
+    if (String(pool).toLowerCase() === a) return true;
+  }
+  return false;
 }
 
 // toBaseUnits converts a decimal string to integer base units using string
@@ -107,6 +125,36 @@ export async function approveForSupply(
   if (parsed.error) throw new Error(`Approve failed: ${parsed.error}`);
   if (!parsed.hash) throw new Error("Approve runner returned no transaction hash.");
   return `Approve sent. Hash: ${parsed.hash}`;
+}
+
+// waitForAllowance polls the token's on-chain allowance(owner -> pool) until
+// it covers the amount, so the supply never races an unmined approve (which
+// intermittently failed bundler simulation and aborted the chain after the
+// approve was already spent). Read-only eth_calls; no keys involved.
+export async function waitForAllowance(
+  chain: string,
+  tokenSymbol: string,
+  owner: string,
+  amount: string,
+  timeoutMs = 90_000
+): Promise<boolean> {
+  const token = tokenInfo(chain, tokenSymbol);
+  const pool = POOLS[chain];
+  if (!token || !pool) return false;
+  const needed = BigInt(toBaseUnits(amount, token.decimals));
+  const provider = new JsonRpcProvider(rpcUrl(chain));
+  const erc20 = new Contract(token.address, ["function allowance(address,address) view returns (uint256)"], provider);
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const current = (await erc20.getFunction("allowance")(owner, pool)) as bigint;
+      if (current >= needed) return true;
+    } catch {
+      // transient RPC error: keep polling until the deadline
+    }
+    await new Promise((r) => setTimeout(r, 4000));
+  }
+  return false;
 }
 
 export interface AccountRisk {

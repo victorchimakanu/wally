@@ -160,12 +160,18 @@ async function main() {
   //    unlike the chat API).
   //  - Cache-Control: no-store so it never lands in a cache/history.
   function recoveryGate(req: FastifyRequest, reply: FastifyReply): boolean {
+    // Loopback is judged by the actual TCP peer, not the Host header: headers
+    // are client-controlled, so in remote mode a curl with a spoofed Host
+    // could otherwise pull the phrase over the network. The header checks
+    // below remain as defense in depth (they also stop DNS rebinding).
+    const peer = req.socket?.remoteAddress ?? "";
+    const socketLoopback = ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(peer);
     const host = String(req.headers["host"] ?? "");
     const hostname = host.split(":")[0] ?? "";
     const hostLoopback = ["127.0.0.1", "localhost", "::1", "[::1]"].includes(hostname);
     const originRaw = req.headers["origin"];
     const origin = Array.isArray(originRaw) ? originRaw[0] : originRaw;
-    if (!hostLoopback || !origin || !isAllowedOrigin(origin) || !verifySessionCookie(req.headers["cookie"])) {
+    if (!socketLoopback || !hostLoopback || !origin || !isAllowedOrigin(origin) || !verifySessionCookie(req.headers["cookie"])) {
       reply.code(403).send({ error: "forbidden" });
       return false;
     }

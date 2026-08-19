@@ -9,7 +9,7 @@
 
 import * as wdk from "../wdk/client.js";
 import * as tools from "../wdk/tools.js";
-import { approveForSupply, fetchAccountRisk, describeRisk, computeBorrowAmount, tokenInfo } from "../wdk/lending.js";
+import { approveForSupply, fetchAccountRisk, describeRisk, computeBorrowAmount, tokenInfo, waitForAllowance } from "../wdk/lending.js";
 import { MAX_LTV_PERCENT, type LendBorrowIntent } from "./intent.js";
 import { getLogger } from "../logger.js";
 
@@ -207,6 +207,18 @@ export async function executeLendPlan(
   if (/^\s*error/i.test(approveRaw)) throw new Error(`Approve failed: ${approveRaw.trim()}`);
   steps.push({ step: "approve", detail: approveRaw.trim() });
   log.info({ chain }, "Lend step 1/3 (approve) done");
+
+  // Wait for the approve to be usable on-chain before supplying: firing the
+  // supply against an unmined approve intermittently failed simulation and
+  // aborted the chain after the approve was already spent.
+  onStep("Waiting for the approval to confirm on-chain...");
+  const allowanceOk = await waitForAllowance(chain, collateralToken, walletAddress, collateralAmount);
+  if (!allowanceOk) {
+    throw new Error(
+      "The approval was sent but I could not see it confirm on-chain within 90 seconds, so I stopped " +
+        "before depositing. Nothing else was sent. Try again in a moment — the approval may finish settling."
+    );
+  }
 
   onStep(`Step 2 of 3: depositing ${collateralAmount} ${collateralToken} into Aave...`);
   const supplyRaw = await wdk.supply(chain, collateralToken, collateralAmount);

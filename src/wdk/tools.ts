@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as wdk from "./client.js";
-import { config } from "../config.js";
+import { config, rpcForChain } from "../config.js";
 import { getLogger } from "../logger.js";
 import type { ChainBalance } from "../types.js";
 
@@ -148,9 +148,7 @@ export type TxOutcome = "confirmed" | "failed" | "indeterminate" | "unverifiable
 
 export async function verifyTxOnChain(chain: string, txHash: string): Promise<TxOutcome> {
   const rpc =
-    chain === "ethereum" ? config.wdkRpcEthereum :
-    chain === "arbitrum" ? config.wdkRpcArbitrum :
-    null;
+    chain === "ethereum" || chain === "arbitrum" ? rpcForChain(chain) : null;
   if (!rpc) return "unverifiable"; // no verification path for this chain
   // A non-hash means we cannot look it up — but the tx may still have been
   // broadcast, so treat it as indeterminate (do NOT tell the user it failed,

@@ -13,7 +13,7 @@ import { captureSeed } from "./wdk/seed.js";
 import { getDb } from "./db/index.js";
 import { getOrCreateSession, handleInbound, bindWebSocket } from "./session/manager.js";
 import { resolveConfirmation } from "./agent/confirm.js";
-import { getLogger } from "./logger.js";
+import { getLogger, scrubSecrets } from "./logger.js";
 import type { WallyOutboundEvent } from "./types.js";
 
 const log = getLogger("cli");
@@ -101,6 +101,8 @@ function printEvent(event: WallyOutboundEvent, sessionId: string) {
 }
 
 main().catch((err) => {
-  console.error("Fatal:", err);
+  // Scrub like every other fatal path: never print a raw error object that a
+  // future upstream change could load with secret-bearing text.
+  console.error("Fatal:", scrubSecrets(err instanceof Error ? err.message : String(err)));
   process.exit(1);
 });

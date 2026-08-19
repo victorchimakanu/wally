@@ -3,7 +3,7 @@ import { classify, type LendBorrowIntent } from "./intent.js";
 import { sanitize } from "./sanitize.js";
 import { createConfirmation, cancelConfirmation } from "./confirm.js";
 import { storePendingLend, takePendingLend, clearPendingLend, buildLendPlan, executeLendPlan } from "./lend.js";
-import { fetchAccountRisk, describeRisk } from "../wdk/lending.js";
+import { fetchAccountRisk, describeRisk, isKnownContractAddress } from "../wdk/lending.js";
 import * as tools from "../wdk/tools.js";
 import { loadHistory, saveHistory } from "../session/store.js";
 import { formatHistoryContext } from "../history/formatter.js";
@@ -23,6 +23,36 @@ import type {
 } from "../types.js";
 
 const log = getLogger("agent");
+
+// amountAppearsInText: true when the model-parsed amount matches a number the
+// user literally typed. Handles plain ("12.5"), European decimal comma
+// ("12,50"), thousands grouping ("1,250" / "1.250,50"). The point: a value the
+// model invented never reaches the confirmation screen.
+export function amountAppearsInText(amount: string, text: string): boolean {
+  const target = parseFloat(amount);
+  if (!Number.isFinite(target)) return false;
+  const tokens = text.match(/\d[\d.,]*\d|\d/g) ?? [];
+  for (const t of tokens) {
+    const candidates = new Set<string>();
+    if (!t.includes(",")) {
+      candidates.add(t); // plain: "12.5", "1250"
+    } else if (t.includes(".") && t.includes(",")) {
+      // "1.250,50" European full form -> 1250.50
+      candidates.add(t.replace(/\./g, "").replace(",", "."));
+      // "1,250.50" US full form -> 1250.50
+      candidates.add(t.replace(/,/g, ""));
+    } else if (/^\d{1,3}(,\d{3})+$/.test(t)) {
+      candidates.add(t.replace(/,/g, "")); // "1,250" thousands -> 1250
+    } else if (/^\d+,\d+$/.test(t)) {
+      candidates.add(t.replace(",", ".")); // "12,50" decimal comma -> 12.5
+    }
+    for (const c of candidates) {
+      const n = parseFloat(c);
+      if (Number.isFinite(n) && Math.abs(n - target) < 1e-9) return true;
+    }
+  }
+  return false;
+}
 
 type Emitter = (event: WallyOutboundEvent) => void;
 
@@ -102,6 +132,32 @@ export class WallyAgent {
                 "Send again with only the recipient address."
               : "I need the recipient address in your message — paste the full address you want to send to. " +
                 "For safety I never pick or remember an address myself; every send needs the address in your message.";
+          this.emit({ type: "message", content: msg });
+          saveHistory(this.sessionId, [
+            ...history,
+            { role: "user", content: userText },
+            { role: "assistant", content: msg },
+          ]);
+          return;
+        }
+      }
+
+      // Amounts get the same standard as addresses: the executed amount must
+      // appear literally in the user's message. The model parses, but a value
+      // it invented (mis-read locale format, context confusion) never reaches
+      // the confirmation screen — we ask instead of trusting a human glance.
+      if (
+        (parsed.intent === "transfer" || parsed.intent === "swap" || parsed.intent === "lend_borrow") &&
+        parsed.params &&
+        typeof parsed.params === "object"
+      ) {
+        const p = parsed.params as Record<string, unknown>;
+        const amountKey = parsed.intent === "lend_borrow" ? "collateralAmount" : "amount";
+        const modelAmount = typeof p[amountKey] === "string" ? (p[amountKey] as string) : "";
+        if (modelAmount && !amountAppearsInText(modelAmount, userText)) {
+          const msg =
+            `I read the amount as ${modelAmount}, but I could not find that number in your message, ` +
+            `so I will not proceed on a guess. Please repeat the request with the exact amount, for example: "send 12.50 USDT to 0x...".`;
           this.emit({ type: "message", content: msg });
           saveHistory(this.sessionId, [
             ...history,
@@ -269,6 +325,19 @@ export class WallyAgent {
     }
     const isGasless = config.gaslessChains.includes(params.chain);
 
+    // Never send to a known token contract or lending pool: tokens sent to a
+    // token contract are burned with no recovery. A user copying the wrong
+    // line from a block explorer hits exactly this.
+    if (["ethereum", "arbitrum"].includes(params.chain) && isKnownContractAddress(params.to)) {
+      const msg =
+        `That recipient is a token or protocol contract address, not a wallet. ` +
+        `Tokens sent there would be lost permanently, so I stopped. ` +
+        `Please double-check where you copied the address from.`;
+      this.emit({ type: "error", message: msg });
+      saveHistory(this.sessionId, [...history, { role: "assistant", content: msg }]);
+      return;
+    }
+
     // 0. Gas preflight: a token transfer pays its fee in the chain's native
     // asset. With zero native balance the transaction can never be mined,
     // so stop here with a clear explanation instead of failing downstream.
@@ -291,7 +360,16 @@ export class WallyAgent {
           return;
         }
       } catch (err) {
-        log.warn({ err }, "Gas preflight check failed — continuing");
+        // Fail closed: an unverifiable gas balance is exactly the precondition
+        // of the known WDK raw-tx-as-hash bug. Better to ask the user to retry
+        // than to sign a transaction that may silently never broadcast.
+        log.warn({ err }, "Gas preflight check failed, blocking the transfer");
+        const msg =
+          `I could not verify this address has ETH for the network fee on ${params.chain}, ` +
+          `so I stopped before signing anything. Please try again in a moment. Your funds are untouched.`;
+        this.emit({ type: "error", message: msg });
+        saveHistory(this.sessionId, [...history, { role: "assistant", content: msg }]);
+        return;
       }
     }
 
@@ -434,7 +512,11 @@ export class WallyAgent {
         "I hit an error during this transfer and cannot confirm whether it was sent. " +
         "Do NOT resend it — say \"what is my balance\" first to check. Details: " + message;
       this.emit({ type: "error", message: msg });
-      saveHistory(this.sessionId, [...history, { role: "assistant", content: msg }]);
+      // History is replayed to the model as its own words: never persist raw
+      // external error text (RPC bodies, on-chain revert strings are attacker-
+      // authorable). The user saw the detail; the model gets a fixed line.
+      saveHistory(this.sessionId, [...history, { role: "assistant", content:
+        "I hit an error during this transfer and could not confirm whether it was sent. I told the user to check their balance before any resend." }]);
       log.error({ err, session_id: this.sessionId }, "Transfer execution failed");
     }
   }
@@ -560,7 +642,9 @@ export class WallyAgent {
         "I hit an error during this swap and cannot confirm whether it went through. " +
         "Do NOT resend — check your balance first. Details: " + message;
       this.emit({ type: "error", message: msg });
-      saveHistory(this.sessionId, [...history, { role: "assistant", content: msg }]);
+      // Same rule as transfers: raw external error text never enters history.
+      saveHistory(this.sessionId, [...history, { role: "assistant", content:
+        "I hit an error during this swap and could not confirm whether it went through. I told the user to check their balance before retrying." }]);
     }
   }
 
@@ -628,7 +712,9 @@ export class WallyAgent {
       const message = err instanceof Error ? err.message : "Lending operation failed";
       log.error({ err, session_id: this.sessionId }, "Lend/borrow failed");
       this.emit({ type: "error", message: "Lending stopped: " + message + " No further steps were run." });
-      saveHistory(this.sessionId, [...history, { role: "assistant", content: "Lending stopped: " + message }]);
+      // Raw external error text never enters model-replayed history.
+      saveHistory(this.sessionId, [...history, { role: "assistant", content:
+        "The lending operation stopped on an error before completing. No further steps were run." }]);
     }
   }
 

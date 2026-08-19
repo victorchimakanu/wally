@@ -197,3 +197,16 @@ function buildConfig(): Config {
 }
 
 export const config = buildConfig();
+
+// rpcForChain: the ONE place that picks a read RPC for a chain, honoring
+// networkMode exactly like the signing subprocess does. Before this existed,
+// verification and Aave risk reads always hit the mainnet defaults, so in
+// testnet mode a successful Sepolia transfer could never be confirmed and the
+// lending chain read its baseline from the wrong network entirely.
+export function rpcForChain(chain: "ethereum" | "arbitrum"): string {
+  if (config.networkMode === "testnet") {
+    if (chain === "ethereum") return process.env["WDK_RPC_ETHEREUM"] ?? "https://rpc.sepolia.org";
+    return process.env["WDK_RPC_ARBITRUM"] ?? "https://sepolia-rollup.arbitrum.io/rpc";
+  }
+  return chain === "ethereum" ? config.wdkRpcEthereum : config.wdkRpcArbitrum;
+}

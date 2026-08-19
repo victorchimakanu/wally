@@ -18,7 +18,9 @@ const log = getLogger("routes:ws");
 
 
 export function attachWsServer(app: FastifyInstance): WebSocketServer {
-  const wss = new WebSocketServer({ noServer: true });
+  // 64 KiB cap: a chat message is small; the ws default (100 MiB) invites a
+  // local memory-spike DoS since every frame is stringified and JSON.parsed.
+  const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
 
   // Upgrade HTTP -> WebSocket
   app.server.on("upgrade", (req: IncomingMessage, socket, head) => {
