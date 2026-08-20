@@ -63,7 +63,7 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000). The first message takes a few extra seconds while the model loads.
 
-**To send USDT without ever touching ETH** (the intended Wally experience), do the ten minute [gasless setup](GASLESS.md): one JSON config file with a free bundler/paymaster key, and two lines in `.env.local`. Your Arbitrum wallet becomes a smart account that pays its fees in USDT.
+**To send USDT without ever touching ETH** (the default Wally experience), do the ten minute [gasless setup](GASLESS.md): one JSON config file with a free bundler/paymaster key, and one `WDK_CONFIG` line in `.env.local`. That's it — every chain configured with a bundler and paymaster switches to a smart account paying its fees in USDT automatically. No ETH, no extra flags. Set `WALLY_GASLESS_CHAINS=none` only if you explicitly want classic accounts.
 
 ## Your wallet is yours, not this repo's
 

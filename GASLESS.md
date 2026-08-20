@@ -49,12 +49,16 @@ For reference, what the values are:
 
 ### 3. Enable it
 
-In `.env.local`, uncomment (or add) these two lines:
+In `.env.local`, uncomment (or add) this one line:
 
 ```bash
 WDK_CONFIG=./wdk.config.json
-WALLY_GASLESS_CHAINS=arbitrum
 ```
+
+That's all. Gasless is the default: every chain in `wdk.config.json` that has a
+bundler and a paymaster configured becomes a smart account automatically. (To
+override the auto-detection, set `WALLY_GASLESS_CHAINS` explicitly, or set it
+to `none` to force classic ETH-gas accounts.)
 
 ### 4. Restart and get your new address
 
@@ -95,8 +99,9 @@ The confirmation card shows the details, you confirm, the fee comes out of your 
   support EntryPoint v0.6. Set `entryPointAddress` to
   `0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789` and `safeModulesVersion` to `"0.2.0"`. The
   pairing is validated and fails loudly when mismatched.
-- **Transfer blocked with a gas message** — `WALLY_GASLESS_CHAINS=arbitrum` is missing from
-  `.env.local`, or the server was not restarted after adding it.
+- **Transfer blocked with a gas message** — `WDK_CONFIG` is missing from `.env.local`, the
+  config file lacks `bundlerUrl`/`paymasterUrl` for the chain, `WALLY_GASLESS_CHAINS` is
+  set to something that excludes it, or the server was not restarted after the change.
 
 ## Rollback
 

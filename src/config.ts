@@ -3,6 +3,29 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { readFileSync } from "node:fs";
 
+// detectGaslessChains: a chain is gasless by default when its WDK_CONFIG entry
+// has both a bundler and a paymaster — i.e. the operator did the GASLESS.md
+// setup. This makes "pay gas in USDT, no ETH ever" the out-of-the-box behavior
+// with one config file and zero extra switches. Missing or unreadable config
+// simply means no gasless chains (classic accounts still work).
+function detectGaslessChains(): string[] {
+  const cfgPath = process.env["WDK_CONFIG"];
+  if (!cfgPath) return [];
+  try {
+    const resolved = path.isAbsolute(cfgPath)
+      ? cfgPath
+      : path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", cfgPath);
+    const parsed = JSON.parse(readFileSync(resolved, "utf-8")) as {
+      chains?: Record<string, { config?: { bundlerUrl?: string; paymasterUrl?: string } }>;
+    };
+    return Object.entries(parsed.chains ?? {})
+      .filter(([, c]) => Boolean(c?.config?.bundlerUrl) && Boolean(c?.config?.paymasterUrl))
+      .map(([name]) => name.toLowerCase());
+  } catch {
+    return [];
+  }
+}
+
 // Load .env.local first (developer overrides), then .env, at startup.
 // We do this before anything else so the process.env values are available.
 function loadDotenv() {
@@ -62,10 +85,19 @@ const ConfigSchema = z.object({
   // Chains running the ERC-4337 smart-account wallet (gas paid via paymaster,
   // e.g. in USDT). Skips the native-gas preflight and tx-hash verification,
   // since 4337 returns a user-operation hash, not a transaction hash.
+  //
+  // DEFAULT: auto-detected. Paying gas in USDT is Wally's intended onboarding
+  // experience (no ETH needed, ever), so any chain whose wdk.config.json entry
+  // carries a bundler AND a paymaster is gasless automatically. Set
+  // WALLY_GASLESS_CHAINS to override, or to "none" to force classic accounts.
   gaslessChains: z
     .string()
-    .default("")
-    .transform((s) => s.split(",").map((c) => c.trim().toLowerCase()).filter(Boolean)),
+    .default("auto")
+    .transform((s) =>
+      s.trim().toLowerCase() === "auto"
+        ? detectGaslessChains()
+        : s.split(",").map((c) => c.trim().toLowerCase()).filter(Boolean).filter((c) => c !== "none")
+    ),
 
   port: z.coerce.number().int().positive().default(3000),
 
