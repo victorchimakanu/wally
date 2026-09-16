@@ -19,3 +19,6 @@ qvac.config.json
 
 # Auto-generated local wallet (single-user self-hosted mode)
 .wally-seed*
+
+# scratch scripts (benchmarks, one-off diagnostics)
+.tmp-*
