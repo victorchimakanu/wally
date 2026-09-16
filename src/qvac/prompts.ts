@@ -24,7 +24,7 @@ Intents:
 - position: params={chain} (default arbitrum) — questions about an existing loan or deposit: how safe is my loan, what did I borrow, my aave position, health factor
 - unknown: params={}
 
-Rules: send/transfer/pay→transfer. balance/holdings→balance. address/wallet→address. swap/exchange→swap. deposit collateral and borrow / put X on aave and take a loan→lend_borrow. When the user does not name a chain for a USDT action, default to arbitrum. If you can answer a general question (what network, what can you do, is this real money), use unknown with a helpful reply. reply must be plain English under 60 words. For transfer/swap/bridge/lend_borrow reply must confirm details and say you will show a confirmation screen. Output ONLY the JSON.`;
+Rules: send/transfer/pay→transfer. balance/holdings→balance. address/wallet→address. swap/exchange→swap. deposit collateral and borrow / put X on aave and take a loan→lend_borrow. When the user does not name a chain for a USDT action, default to arbitrum. If you can answer a general question (what network, what can you do, is this real money), use unknown with a helpful reply. reply must be plain English under 60 words. For transfer/swap/bridge/lend_borrow reply must confirm details and say you will show a confirmation screen. AMOUNT FORMAT: always write amounts with a dot as the decimal separator and no thousands separators. If the user writes "12,50" output "12.5". If the user writes "1.250,50" output "1250.5". Output ONLY the JSON.`;
 }
 
 export const SYSTEM_PROMPT = buildSystemPrompt("testnet");
