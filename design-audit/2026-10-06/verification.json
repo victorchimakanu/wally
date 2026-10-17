@@ -1,0 +1,19 @@
+{
+  "mutatedNodeIds": [],
+  "screens": 72,
+  "flows": 20,
+  "navigationInstances": 69,
+  "instances": 715,
+  "brokenLinks": [],
+  "arrowOrCheckGlyphs": [],
+  "oldDemoNames": [],
+  "buttonIconOverrides": [],
+  "allFlowsOneRow": true,
+  "looseElements": 0,
+  "newScreens": [
+    "504:4368",
+    "508:4461",
+    "508:4485"
+  ],
+  "archivedElements": 8
+}
