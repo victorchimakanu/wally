@@ -1,5 +1,7 @@
 # Wally
 
+Phone-local QVAC integration and performance testing: [Android phone test setup and current hardware limitations](docs/QVAC-PHONE-TESTING.md). The native path is prepared; physical-device inference and APK compilation remain unverified.
+
 A crypto wallet you talk to. The AI runs on your machine. The keys never leave it either.
 
 ![Wally](docs/screenshot.png)
@@ -11,6 +13,10 @@ You type plain English. Wally understands it with a local model, quotes the fee,
 - **Local keys.** [WDK](https://wdk.tether.io), Tether's Wallet Development Kit, derives your wallet from a seed phrase and signs locally. Only signed transactions touch the network.
 - **A human gate on every spend.** The AI proposes a transaction. Nothing moves until you press CONFIRM inside a 60 second window.
 - **Chained DeFi from one sentence.** "Deposit 200 USDT into Aave and borrow at 50% LTV" runs the whole chain (approve, deposit, borrow) as one confirmed plan. If you leave out the loan-to-value, Wally asks for it. The borrow amount is computed in code from live prices and capped below the liquidation threshold; the model parses your words but never picks the numbers. Afterwards, ask "how safe is my loan" any time for a live health-factor readout with an on-chain proof link.
+
+## Local UI simulation
+
+Run `npm run dev:sim` and open http://127.0.0.1:3000. Node.js is the only requirement; this preview uses fictional balances and scripted replies, with no wallet keys, AI model, or blockchain access. See [the local feature review](docs/LOCAL-DEV-REVIEW.md) for tested flows and implementation gaps.
 
 ## Run it in five minutes
 
@@ -140,3 +146,7 @@ resolving the install fails loudly rather than silently drifting.
 [QVAC](https://qvac.tether.io) local AI runtime · [WDK](https://wdk.tether.io) Wallet Development Kit · Fastify + WebSocket · SQLite
 
 Wally is a reference app. Read it, run it, copy the pattern.
+
+## Mobile frontend: live testnet APIs
+
+The Expo mobile app connects public market prices and a local WDK testnet wallet. Setup, supported flows and current limits are documented in [Live API integration](docs/LIVE-API-INTEGRATION.md). Wallet keys remain on this computer in the development setup.

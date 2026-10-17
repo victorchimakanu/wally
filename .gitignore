@@ -15,6 +15,11 @@ docs-site/node_modules/
 docs-site/build/
 docs-site/.docusaurus/
 qvac.config.json
+!mobile/qvac.config.json
+mobile/android/
+mobile/ios/
+mobile/qvac/
+mobile/.expo/
 
 # Auto-generated local wallet (single-user self-hosted mode)
 .wally-seed*
