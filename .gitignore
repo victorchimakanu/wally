@@ -23,3 +23,7 @@ mobile/.expo/
 
 # Auto-generated local wallet (single-user self-hosted mode)
 .wally-seed*
+
+# local model cache and scratch scripts
+.qvac/
+.tmp-*

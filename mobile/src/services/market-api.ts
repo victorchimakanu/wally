@@ -1,3 +1,4 @@
+import { backendHeaders, backendOrigin } from './backend.ts';
 export const COINS = [
   { id: 'bitcoin', symbol: 'BTC', name: 'Bitcoin' },
   { id: 'ethereum', symbol: 'ETH', name: 'Ethereum' },
@@ -8,7 +9,46 @@ export type Currency = 'USD' | 'NGN' | 'EUR';
 export type MarketAsset = { id: string; symbol: string; name: string; currency: Currency; price: number | null; change: number | null; cap: number | null; volume: number | null; supply: number | null; maximum: number | null; updatedAt: string | null };
 export type MarketSnapshot = { version: 1; source: 'CoinGecko'; currency: Currency; fetchedAt: number; assets: MarketAsset[] };
 export type ChartSnapshot = { version: 1; source: 'CoinGecko'; currency: Currency; id: string; days: number; fetchedAt: number; points: [number, number][] };
-const base = 'https://api.coingecko.com/api/v3';
+/**
+ * Market data goes through the Wally backend proxy when one is configured, so the provider
+ * key stays on the server and every phone shares one cached, rate-limited origin.
+ * The URL rules live in ./backend.ts, which chain history uses too.
+ *
+ * Unset EXPO_PUBLIC_WALLY_PROXY_URL and this falls back to calling CoinGecko directly,
+ * exactly as before.
+ */
+export { resolveProxy } from './backend.ts';
+const proxy = backendOrigin();
+const base = proxy ? `${proxy}/v1` : 'https://api.coingecko.com/api/v3';
+
+/** The shared key, when the backend requires one. See ./backend.ts for what it is and is not. */
+function proxyHeaders(): Record<string, string> {
+  return backendHeaders(proxy);
+}
+
+/**
+ * Which upstream market data is actually coming from.
+ *
+ * The fallback to CoinGecko is deliberate — prices keep working when the backend is down —
+ * but that makes a misconfigured proxy invisible. Settings shows this so the configured
+ * path and the real one can be compared without reading server logs.
+ */
+export function marketSource(): { mode: 'proxy' | 'direct'; label: string; url: string } {
+  return proxy
+    ? { mode: 'proxy', label: 'Wally backend', url: proxy }
+    : { mode: 'direct', label: 'CoinGecko (direct)', url: 'https://api.coingecko.com' };
+}
+
+/** The proxy wraps provider payloads as { fetchedAt, fresh, data }; CoinGecko returns them bare. */
+type Envelope = { fetchedAt?: unknown; fresh?: unknown; data?: unknown };
+function unwrap(raw: unknown): { payload: unknown; fetchedAt: number } {
+  if (!proxy) return { payload: raw, fetchedAt: Date.now() };
+  const body = raw as Envelope;
+  if (!body || typeof body !== 'object' || !('data' in body)) throw new Error('The market service returned an unexpected response.');
+  // A stale response carries the time it was actually fetched, so "Saved" stays truthful.
+  const at = typeof body.fetchedAt === 'number' && Number.isSafeInteger(body.fetchedAt) && body.fetchedAt > 0 ? body.fetchedAt : Date.now();
+  return { payload: body.data, fetchedAt: Math.min(at, Date.now()) };
+}
 const nullable = (value: unknown): number | null => typeof value === 'number' && Number.isFinite(value) ? value : null;
 const positive = (value: unknown): number | null => { const n = nullable(value); return n !== null && n >= 0 ? n : null; };
 export function currencyCode(value: string): Currency { return value === 'NGN' || value === 'EUR' ? value : 'USD'; }
@@ -49,7 +89,7 @@ async function get(path: string, signal?: AbortSignal): Promise<unknown> {
   if (signal?.aborted) abort(); else signal?.addEventListener('abort', abort, { once: true });
   const timer = setTimeout(abort, 12000);
   try {
-    const response = await fetch(base + path, { signal: controller.signal, headers: { Accept: 'application/json' } });
+    const response = await fetch(base + path, { signal: controller.signal, headers: { Accept: 'application/json', ...proxyHeaders() } });
     if (!response.ok) throw new Error(response.status === 429 ? 'Market refresh is temporarily rate limited. Try again later.' : response.status === 401 || response.status === 403 ? 'The market provider requires an API plan for this request.' : `The market provider is unavailable (${response.status}).`);
     return await response.json();
   } catch (error) {
@@ -59,12 +99,19 @@ async function get(path: string, signal?: AbortSignal): Promise<unknown> {
   } finally { clearTimeout(timer); signal?.removeEventListener('abort', abort); }
 }
 export async function fetchMarket(currency: Currency, signal?: AbortSignal): Promise<MarketSnapshot> {
-  const raw = await get(`/coins/markets?vs_currency=${currency.toLowerCase()}&ids=${COINS.map(coin => coin.id).join(',')}&sparkline=false`, signal);
-  return parseMarket(raw, currency);
+  const path = proxy
+    ? `/market?currency=${currency.toLowerCase()}`
+    : `/coins/markets?vs_currency=${currency.toLowerCase()}&ids=${COINS.map(coin => coin.id).join(',')}&sparkline=false`;
+  const { payload, fetchedAt } = unwrap(await get(path, signal));
+  return parseMarket(payload, currency, fetchedAt);
 }
 export async function fetchChart(id: string, currency: Currency, days: number, signal?: AbortSignal): Promise<ChartSnapshot> {
   if (!COINS.some(coin => coin.id === id) || ![1, 7, 30, 365].includes(days)) throw new Error('Unsupported chart request.');
-  return parseChart(await get(`/coins/${id}/market_chart?vs_currency=${currency.toLowerCase()}&days=${days}`, signal), id, currency, days);
+  const path = proxy
+    ? `/market/chart?id=${id}&days=${days}&currency=${currency.toLowerCase()}`
+    : `/coins/${id}/market_chart?vs_currency=${currency.toLowerCase()}&days=${days}`;
+  const { payload, fetchedAt } = unwrap(await get(path, signal));
+  return parseChart(payload, id, currency, days, fetchedAt);
 }
 export function formatPrice(amount: number | null, currency: Currency = 'USD', compact = false): string {
   return amount === null ? 'Unavailable' : amount.toLocaleString('en-US', { style: 'currency', currency, maximumFractionDigits: 2, ...(compact ? { notation: 'compact' as const } : {}) });

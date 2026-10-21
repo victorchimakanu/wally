@@ -44,6 +44,8 @@
     "wallet:install": "npm install --prefix ../internal/wallet-api-runtime --save-exact @tetherto/wdk-wallet-evm@1.0.0-beta.14 qrcode@1.5.4 --no-audit --no-fund",
     "wallet:server": "node scripts/wallet-api-server.mjs",
     "test:wallet": "node --test test/wallet-server.test.mjs",
+    "wdk:install": "expo install @tetherto/wdk-react-native-core && npm install --save-dev @tetherto/wdk-worklet-bundler",
+    "wdk:generate": "wdk-worklet-bundler generate --install",
     "start": "expo start --go",
     "android": "expo start --go --android",
     "ios": "expo start --go --ios",
