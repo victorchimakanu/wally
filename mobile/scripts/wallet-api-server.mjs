@@ -1,3 +1,16 @@
+/**
+ * DEVELOPMENT ONLY — NOT A PRODUCTION PATH.
+ *
+ * This server keeps the wallet seed on the developer's computer at
+ * internal/testnet-wallet/wallet.seed and serves one wallet over loopback.
+ * It is single-user by construction and must never become a hosted service.
+ *
+ * Superseded for production by on-device signing in a WDK Bare worklet.
+ * See docs/ADR-001-key-custody.md and mobile/wdk.config.js.
+ *
+ * Keep using it for desktop development and the existing mocked tests. Do not
+ * add features here, and do not point a shipped build at it.
+ */
 import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';

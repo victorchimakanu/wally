@@ -147,7 +147,9 @@ async function complete(endpoint: string, model: string, messages: { role: strin
   try {
     const stream = !!delivery.onReply;
     const response = await (delivery.fetch ?? fetch)(localEndpoint(endpoint) + '/v1/chat/completions', {
-      method: 'POST', signal: controller.signal, headers: { 'Content-Type': 'application/json' },
+      method: 'POST', signal: controller.signal,
+      // The key is only meaningful when this endpoint is the Wally backend; QVAC ignores it.
+      headers: { 'Content-Type': 'application/json', ...(process.env.EXPO_PUBLIC_WALLY_APP_KEY ? { 'x-wally-key': process.env.EXPO_PUBLIC_WALLY_APP_KEY } : {}) },
       body: JSON.stringify({ model, stream, temperature: 0, max_tokens: maxTokens, reasoning_budget: false,
         messages, response_format: { type: 'json_schema', json_schema: { name, strict: true, schema } },
       }),

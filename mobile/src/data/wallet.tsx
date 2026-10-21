@@ -33,7 +33,10 @@ export function WalletProvider({ children }: React.PropsWithChildren) {
   const refreshHistory = useCallback(async () => {
     if (!client || fetchingHistory.current || offlineNow.current) return;
     fetchingHistory.current = true; setHistoryLoading(true); setHistoryError('');
-    try { const data = await client.history(); if (alive.current) setHistory(data); }
+    // Per chain, not one address for both: Arbitrum's smart-account address need not match
+    // the Ethereum EOA. Omitted when no snapshot has loaded yet, which keeps history local.
+    const addresses = Object.fromEntries((current.current?.balances ?? []).map(item => [item.chain, item.address]));
+    try { const data = await client.history(addresses); if (alive.current) setHistory(data); }
     catch (failure) { if (alive.current) setHistoryError(failure instanceof Error ? failure.message : 'Activity unavailable.'); }
     finally { fetchingHistory.current = false; if (alive.current) setHistoryLoading(false); }
   }, []);
