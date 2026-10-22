@@ -10,7 +10,7 @@ import type { FastifyReply, FastifyRequest } from "fastify";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { timingSafeEqual } from "node:crypto";
-import { config } from "./config.js";
+import { config, onLoopback, trustProxySetting } from "./config.js";
 import { getLogger, scrubSecrets } from "./logger.js";
 import { healthRoutes } from "./routes/health.js";
 import { marketRoutes } from "./routes/market.js";
@@ -61,7 +61,9 @@ export function buildServer() {
     logger: false,
     // Chain history and RPC payloads are small; a signed transaction is the largest thing here.
     bodyLimit: 64 * 1024,
-    trustProxy: true,
+    // Not `true`: that would honour X-Forwarded-For from any client and let anyone who can
+    // reach this port directly forge their IP, defeating the rate limiter. See TRUSTED_PROXY.
+    trustProxy: trustProxySetting(),
   });
 
   const allow = createRateLimiter(config.rateLimitPerMinute);
@@ -81,7 +83,14 @@ export function buildServer() {
 
     if (request.method === "OPTIONS") {
       reply.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-      reply.header("Access-Control-Allow-Headers", "Content-Type");
+      // x-wally-key must be listed: it is a custom header, so the browser preflights every
+      // request carrying it and refuses the request outright if the preflight omits it. The
+      // service *requires* that header off loopback, so leaving it out breaks every browser
+      // request the moment WALLY_APP_KEY is set. Measured 22 Oct 2026.
+      reply.header("Access-Control-Allow-Headers", "Content-Type, x-wally-key");
+      // Cache the preflight so a keyed app does not spend two requests on every call; the
+      // rate limiter counts preflights too.
+      reply.header("Access-Control-Max-Age", "600");
       return reply.code(204).send();
     }
 
@@ -119,7 +128,20 @@ export function buildServer() {
   void app.register(marketRoutes);
   void app.register(rpcRoutes);
   void app.register(historyRoutes);
-  void app.register(qvacRoutes);
+
+  /**
+   * The QVAC passthrough exists only to work around a CORS bug in the browser preview, and
+   * the app can only ever reach it from a development build over loopback: the endpoint is
+   * `__DEV__`-gated in mobile/src/demo/store.tsx and `localEndpoint()` in
+   * mobile/src/services/qvac.ts refuses anything that is not 127.0.0.1, localhost or
+   * 10.0.2.2. Serving it from a deployed instance would publish a model relay that no client
+   * can legitimately call, so it is registered only when this process is on loopback.
+   */
+  if (onLoopback()) {
+    void app.register(qvacRoutes);
+  } else {
+    log.info({}, "qvac passthrough not registered: development-only and this host is not loopback");
+  }
 
   return app;
 }
