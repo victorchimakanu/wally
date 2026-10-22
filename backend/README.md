@@ -202,9 +202,25 @@ needs a per-installation budget before any real user load; see the open decision
 cp .env.example .env.local     # edit as needed; defaults are public testnet endpoints
 npm install
 npm run dev                    # http://127.0.0.1:8080
-npm test                       # offline tests: validation, cache, scrubbing
+npm test                       # offline tests: validation, cache, scrubbing, access control
+npm run test:mutation          # proves the tests actually catch the bugs they claim to
 npm run typecheck
 ```
+
+### `npm run test:mutation`
+
+Applies a bug to one line at a time and checks the suite notices. A mutation that survives
+means the suite passes while that bug is present, whatever the coverage number says.
+
+This is here because a green suite proved almost nothing. On 22 October 2026, with 52 tests
+passing, seven mutations survived — five of them in `server.ts`: every key accepted, the origin
+allowlist removed, the rate limiter never refusing, `/health?deep=1` unauthenticated. The cause
+was three tests that were not testing the code they named. One re-implemented `keyMatches`
+inline instead of importing it. One asserted a status code that the mutated path returned
+anyway. One compared `EXPLORERS.arbitrum` against `EXPLORERS.arbitrum`.
+
+**Add a mutation whenever you add a guard.** A guard with no mutation is a guard nobody has
+shown to be tested.
 
 Production:
 
