@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { CHAINS, config, isChain, type Chain } from "../config.js";
-import { TtlCache } from "../cache.js";
+import { TtlCache, singleFlight } from "../cache.js";
 import { fetchHistory, type LiveTransaction } from "../indexer.js";
 import { getLogger } from "../logger.js";
 
@@ -8,6 +8,9 @@ const log = getLogger("history");
 
 type Payload = { items: LiveTransaction[]; source: string };
 const cache = new TtlCache<Payload>(config.historyCacheMs);
+
+/** Two screens opening at once, or a pull-to-refresh race, is still one question per chain. */
+const flight = singleFlight<Payload>();
 
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 
@@ -64,7 +67,7 @@ export async function historyRoutes(app: FastifyInstance): Promise<void> {
         if (hit) return { chain, items: hit.value.items, error: null as string | null, cache: "hit" as const };
 
         try {
-          const result = await fetchHistory(chain, address);
+          const result = await flight.run(key, () => fetchHistory(chain, address));
           cache.set(key, result);
           return { chain, items: result.items, error: null as string | null, cache: "miss" as const };
         } catch (error) {

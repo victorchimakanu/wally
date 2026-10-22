@@ -43,3 +43,33 @@ export class TtlCache<T> {
     return this.entries.size;
   }
 }
+
+/**
+ * Collapse concurrent work on the same key into one call.
+ *
+ * A TTL cache only helps traffic that arrives *after* a result is stored. It does nothing for
+ * requests that arrive while the first one is still in flight, so every phone that asks during
+ * that window goes upstream. Measured 23 Oct 2026: 25 concurrent identical balance reads cost
+ * 25 upstream calls, and the same for market data.
+ *
+ * That is the opposite of why this service exists. Phones poll balances on a timer, so a cache
+ * expiry releases a burst all at once, and the provider sees the burst rather than one request.
+ *
+ * A rejection is shared too, which is deliberate: one failed upstream call should not become N
+ * retries. Each waiter still runs its own catch, so per-route stale fallbacks are unaffected.
+ */
+export function singleFlight<T>() {
+  const inflight = new Map<string, Promise<T>>();
+  return {
+    run(key: string, load: () => Promise<T>): Promise<T> {
+      const existing = inflight.get(key);
+      if (existing) return existing;
+      const started = load().finally(() => inflight.delete(key));
+      inflight.set(key, started);
+      return started;
+    },
+    get size(): number {
+      return inflight.size;
+    },
+  };
+}

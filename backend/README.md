@@ -228,6 +228,29 @@ Production:
 npm run build && npm start
 ```
 
+### Concurrency: a cache is not enough on its own
+
+A TTL cache only helps traffic arriving *after* a result is stored. Everything that arrives
+while the first call is still in flight goes upstream too. Measured 23 October 2026, before
+this was fixed: **25 concurrent identical balance reads cost 25 upstream calls**, and the same
+for market prices.
+
+That is the opposite of the reason this service exists. Phones poll on a timer, so a cache
+expiry releases a burst all at once and the provider sees the burst, not one request.
+
+`singleFlight` in [`src/cache.ts`](src/cache.ts) collapses concurrent work on the same key into
+one call. It is keyed on chain + method + params for RPC, so two addresses never share an
+answer, and it applies to every forwarded method rather than only the cacheable ones — two
+phones estimating gas for the same transfer in the same instant is still one question. A
+coalesced JSON-RPC response carries whichever `id` arrived first, so the caller's own `id` is
+always substituted back.
+
+A failure is shared too. One failed upstream call becoming N retries is how a struggling
+provider gets pushed over; each waiter still runs its own stale-fallback path.
+
+**Coalescing is not caching.** The nonce, gas quotes and receipts are still never stored — a
+simultaneous burst is one question, but the next read goes to the node.
+
 ### On a VPS
 
 Keep `HOST=127.0.0.1` and terminate TLS in nginx or Caddy in front of it. The service sets

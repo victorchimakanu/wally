@@ -2,9 +2,13 @@
  * Mutation testing for the backend.  Run with: npm run test:mutation
  *
  * Each entry below is a bug someone could plausibly introduce. The mutation is applied, the
- * suite is run, and the file is restored with `git checkout` so a crash cannot leave the tree
- * dirty. If the suite still passes, that mutant SURVIVED: the suite is not protecting that
- * line, whatever the coverage number says.
+ * suite is run, and the file is restored from the exact bytes read before mutating. If the
+ * suite still passes, that mutant SURVIVED: the suite is not protecting that line, whatever
+ * the coverage number says.
+ *
+ * Restore is NOT `git checkout`. An earlier version used it and destroyed uncommitted work
+ * mid-run, which is exactly when you are most likely to be running this — you have just added
+ * a guard and want to know whether it is tested.
  *
  * Why this exists. On 22 Oct 2026 the suite was green at 52 passing tests while seven of these
  * mutations survived, five of them in server.ts — every key accepted, the origin allowlist
@@ -16,13 +20,12 @@
  * Add a mutation whenever you add a guard. A guard with no mutation is a guard nobody has
  * shown to be tested.
  */
-import { execFileSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const BACKEND = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const REPO = path.resolve(BACKEND, "..");
 
 /** [id, file relative to backend/, find, replace, what the bug would mean] */
 const MUTATIONS = [
@@ -98,6 +101,24 @@ const MUTATIONS = [
    "    `${host}/api/v2/addresses/${address}/transactions?filter=to%20%7C%20from`,",
    "the 422 regression returns"],
 
+  // concurrency
+  ["no-coalescing-rpc", "src/routes/rpc.ts",
+   "      const result = await flight.run(flightKey, () =>",
+   "      const result = await ((async (_k, f) => f())(flightKey, () =>",
+   "every concurrent caller goes upstream separately"],
+  ["coalesce-ignores-params", "src/routes/rpc.ts",
+   "      const flightKey = `${chain}:${body.method}:${JSON.stringify(params)}`;",
+   "      const flightKey = `${chain}:${body.method}`;",
+   "two different addresses share one in-flight answer"],
+  ["rpc-id-not-substituted", "src/routes/rpc.ts",
+   '      return reply.header("x-wally-cache", cacheable ? "miss" : "bypass").send({ ...result, id });',
+   '      return reply.header("x-wally-cache", cacheable ? "miss" : "bypass").send(result);',
+   "a coalesced response carries another caller's JSON-RPC id"],
+  ["no-coalescing-market", "src/routes/market.ts",
+   "      const data = await flight.run(key, () =>",
+   "      const data = await ((async (_k, f) => f())(key, () =>",
+   "a price cache expiry stampedes CoinGecko"],
+
   // cache
   ["cache-never-expires", "src/cache.ts",
    "    if (Date.now() - entry.storedAt >= this.ttlMs) return null;", "    if (false) return null;",
@@ -107,8 +128,8 @@ const MUTATIONS = [
 const suitePasses = () =>
   spawnSync("npx", ["vitest", "run"], { cwd: BACKEND, encoding: "utf8" }).status === 0;
 
-const restore = (rel) =>
-  execFileSync("git", ["checkout", "--", path.join("backend", rel)], { cwd: REPO });
+/** Restore the bytes we read, so uncommitted work survives a run. */
+const restore = (file, original) => writeFileSync(file, original);
 
 if (!suitePasses()) {
   console.error("The suite is already failing. Fix that before mutation testing means anything.");
@@ -132,7 +153,7 @@ for (const [id, rel, find, replace, meaning] of MUTATIONS) {
   try {
     caught = !suitePasses();
   } finally {
-    restore(rel);
+    restore(file, original);
   }
   if (caught) killed++;
   else survived.push([id, rel, meaning]);

@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { allowedRpcMethods, isChain, rpcUrl, config } from "../config.js";
-import { TtlCache } from "../cache.js";
+import { TtlCache, singleFlight } from "../cache.js";
 import { fetchJson, UpstreamError } from "../upstream.js";
 import { getLogger } from "../logger.js";
 
@@ -30,6 +30,13 @@ function ttlFor(method: string): number {
   if (method === "eth_blockNumber") return 5_000;
   return config.rpcCacheMs;
 }
+
+/**
+ * Keyed on chain+method+params, so concurrent callers asking the same question share one
+ * upstream call. Applies to every forwarded method, not only the cacheable ones: two phones
+ * estimating gas for the same transfer in the same instant is still one question.
+ */
+const flight = singleFlight<Record<string, unknown>>();
 
 const caches = new Map<string, TtlCache<unknown>>();
 function cacheFor(method: string): TtlCache<unknown> {
@@ -95,17 +102,22 @@ export async function rpcRoutes(app: FastifyInstance): Promise<void> {
     }
 
     try {
-      const result = await fetchJson<Record<string, unknown>>(
-        rpcUrl(chain),
-        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) },
-        `rpc ${chain}`,
+      const flightKey = `${chain}:${body.method}:${JSON.stringify(params)}`;
+      const result = await flight.run(flightKey, () =>
+        fetchJson<Record<string, unknown>>(
+          rpcUrl(chain),
+          { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) },
+          `rpc ${chain}`,
+        ),
       );
       // Only cache successful answers; a JSON-RPC error may be transient.
       if (cacheable && result && typeof result === "object" && !("error" in result)) {
         cacheFor(body.method).set(key, result);
       }
-      // A JSON-RPC error is a valid upstream answer, so pass it through untouched.
-      return reply.header("x-wally-cache", cacheable ? "miss" : "bypass").send(result);
+      // A JSON-RPC error is a valid upstream answer, so pass it through untouched — but the
+      // id must be this caller's, since a shared in-flight response carries whichever id was
+      // sent first.
+      return reply.header("x-wally-cache", cacheable ? "miss" : "bypass").send({ ...result, id });
     } catch (error) {
       const status = error instanceof UpstreamError ? error.status : 502;
       log.warn({ chain, method: body.method, status }, "rpc upstream failed");

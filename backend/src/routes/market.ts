@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { config } from "../config.js";
-import { TtlCache } from "../cache.js";
+import { TtlCache, singleFlight } from "../cache.js";
 import { fetchJson, UpstreamError } from "../upstream.js";
 import { getLogger } from "../logger.js";
 
@@ -18,6 +18,12 @@ const isDays = (v: unknown): v is string => typeof v === "string" && (DAYS as re
 
 const markets = new TtlCache<unknown>(config.marketCacheMs);
 const charts = new TtlCache<unknown>(config.chartCacheMs);
+
+/**
+ * CoinGecko's public tier throttles hard, and a cache expiry releases every waiting phone at
+ * once. Without coalescing, that burst is what the provider sees. See singleFlight in cache.ts.
+ */
+const flight = singleFlight<unknown>();
 
 function coingecko(path: string, params: Record<string, string>): string {
   const url = new URL(config.coingeckoBase + path);
@@ -45,14 +51,16 @@ export async function marketRoutes(app: FastifyInstance): Promise<void> {
     if (hit) return reply.header("x-wally-cache", "hit").send({ currency, fetchedAt: hit.storedAt, fresh: true, data: hit.value });
 
     try {
-      const data = await fetchJson<unknown>(
-        coingecko("/coins/markets", {
-          vs_currency: currency,
-          ids: ASSETS.join(","),
-          price_change_percentage: "24h",
-        }),
-        { headers: headers() },
-        "coingecko markets",
+      const data = await flight.run(key, () =>
+        fetchJson<unknown>(
+          coingecko("/coins/markets", {
+            vs_currency: currency,
+            ids: ASSETS.join(","),
+            price_change_percentage: "24h",
+          }),
+          { headers: headers() },
+          "coingecko markets",
+        ),
       );
       markets.set(key, data);
       return reply.header("x-wally-cache", "miss").send({ currency, fetchedAt: Date.now(), fresh: true, data });
@@ -82,10 +90,12 @@ export async function marketRoutes(app: FastifyInstance): Promise<void> {
     if (hit) return reply.header("x-wally-cache", "hit").send({ id, days, currency, fetchedAt: hit.storedAt, fresh: true, data: hit.value });
 
     try {
-      const data = await fetchJson<unknown>(
-        coingecko(`/coins/${id}/market_chart`, { vs_currency: currency, days }),
-        { headers: headers() },
-        "coingecko chart",
+      const data = await flight.run(key, () =>
+        fetchJson<unknown>(
+          coingecko(`/coins/${id}/market_chart`, { vs_currency: currency, days }),
+          { headers: headers() },
+          "coingecko chart",
+        ),
       );
       charts.set(key, data);
       return reply.header("x-wally-cache", "miss").send({ id, days, currency, fetchedAt: Date.now(), fresh: true, data });
