@@ -385,10 +385,29 @@ describe("regressions found by auditing against the app, 22 Oct 2026", () => {
     expect(response.headers["access-control-allow-headers"]).toContain("x-wally-key");
   });
 
-  it("does not trust a forwarded-for header from an arbitrary client", async () => {
-    const { trustProxySetting } = await import("../src/config.js");
-    // `true` would let any caller forge their IP and walk past the rate limiter.
-    expect(trustProxySetting()).not.toBe(true);
+  it("does not take a forwarded-for header from an untrusted client as the client ip", async () => {
+    // Behavioural, not a check on the config function: an earlier version of this test
+    // asserted trustProxySetting() !== true, which still passed when server.ts was changed
+    // back to `trustProxy: true`. Mutation testing caught that. This asserts what the rate
+    // limiter actually keys on.
+    const probe = buildServer();
+    probe.get("/__probe_ip", async (request) => ({ ip: request.ip }));
+
+    const forged = await probe.inject({
+      method: "GET",
+      url: "/__probe_ip",
+      remoteAddress: "203.0.113.5", // not the trusted proxy
+      headers: { "x-forwarded-for": "198.51.100.9" },
+    });
+    expect(forged.json().ip, "a header from an untrusted peer must be ignored").toBe("203.0.113.5");
+
+    const viaProxy = await probe.inject({
+      method: "GET",
+      url: "/__probe_ip",
+      remoteAddress: "127.0.0.1", // the configured reverse proxy
+      headers: { "x-forwarded-for": "198.51.100.9" },
+    });
+    expect(viaProxy.json().ip, "the real proxy must still be able to report the client").toBe("198.51.100.9");
   });
 
   it("serves the development-only QVAC passthrough only on loopback", async () => {
