@@ -1,0 +1,19 @@
+{
+  "build": {
+    "phone-development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "env": { "WALLY_NATIVE_QVAC": "1" },
+      "android": { "buildType": "apk" }
+    },
+    "phone-preview": {
+      "distribution": "internal",
+      "env": { "WALLY_NATIVE_QVAC": "1" },
+      "android": { "buildType": "apk" }
+    },
+    "preview": {
+      "distribution": "internal",
+      "android": { "buildType": "apk" }
+    }
+  }
+}
