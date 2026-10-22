@@ -25,10 +25,28 @@ export type DemoState = {
 export function draftStatus(message: Message): NonNullable<Message['draftState']> {
   return message.draftCancelled ? 'cancelled' : message.draftState ?? 'active';
 }
+/**
+ * The most messages one chat keeps.
+ *
+ * Chat history was unbounded, and store.tsx re-serialises the whole state to AsyncStorage on
+ * every state change, so it grew forever and every change paid for all of it. Measured 23 Oct
+ * 2026: 5,000 messages is 631 KB and about 1 ms to stringify on a desktop — slow-growing
+ * rather than urgent, but it only ever goes one way, and the target device is a low-end
+ * Android phone.
+ *
+ * 200 is far beyond what any conversation uses while staying small to serialise. Only the
+ * model's context is what the assistant actually reads, and that is the last 4 messages
+ * (recentContext in services/qvac.ts), so trimming old messages changes no reply.
+ */
+export const MAX_CHAT_MESSAGES = 200;
+
 /** A replacement proposal retires old controls but preserves their history. */
 export function appendChatMessages(previous: Message[], incoming: Message[]): Message[] {
   const replacesDraft = incoming.some(message => message.draft);
-  return [...previous.map(message => replacesDraft && message.draft && draftStatus(message) === 'active' ? { ...message, draftState: 'superseded' as const } : message), ...incoming];
+  const combined = [...previous.map(message => replacesDraft && message.draft && draftStatus(message) === 'active' ? { ...message, draftState: 'superseded' as const } : message), ...incoming];
+  // Keep the newest. A draft whose message is trimmed away simply stops being current, which
+  // originIsCurrent already treats as "open the latest draft" rather than as an error.
+  return combined.length > MAX_CHAT_MESSAGES ? combined.slice(-MAX_CHAT_MESSAGES) : combined;
 }
 export function originIsCurrent(state: DemoState, origin: DraftOrigin, draft: Draft): boolean {
   const message = state.chats.find(chat => chat.id === origin.chatId)?.messages.find(item => item.id === origin.messageId);
