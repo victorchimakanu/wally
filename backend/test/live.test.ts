@@ -321,3 +321,84 @@ describe("rpc caching never costs a transaction", () => {
     }
   });
 });
+
+describe("regressions found by auditing against the app, 22 Oct 2026", () => {
+  /**
+   * The app validates every amount with this expression and `parseHistory()` throws for the
+   * WHOLE list when one item fails, so a single bad value blanks Activity entirely.
+   */
+  const APP_AMOUNT = /^(?:0|[1-9]\d{0,12})(?:\.\d{1,18})?$/;
+
+  it("omits an amount too large for the app instead of poisoning the whole list", async () => {
+    const { __test } = await import("../src/indexer.js");
+    const hash = "0x" + "e".repeat(64);
+
+    // 1e31 wei is the first value the app's parser rejects; free to send on a testnet.
+    const huge = __test.fromEtherscan("arbitrum", { hash, value: (10n ** 31n).toString() })!;
+    expect(huge.amount, "an unusable amount must be left out, not passed through").toBeUndefined();
+    // The transaction itself must survive: the app renders a missing amount as "—".
+    expect(huge.hash).toBe(hash);
+    expect(huge.explorerUrl).toBe(`${__test.EXPLORERS.arbitrum}/tx/${hash}`);
+
+    const fine = __test.fromEtherscan("arbitrum", { hash, value: (10n ** 30n).toString() })!;
+    expect(fine.amount).toBe("1000000000000");
+    expect(APP_AMOUNT.test(fine.amount!)).toBe(true);
+  });
+
+  it("applies the same cap to Blockscout amounts and to fees", async () => {
+    const { __test } = await import("../src/indexer.js");
+    const hash = "0x" + "f".repeat(64);
+
+    const tx = __test.fromBlockscout("ethereum", {
+      hash,
+      status: "ok",
+      value: (10n ** 34n).toString(),
+      fee: { value: (10n ** 34n).toString() },
+    })!;
+    expect(tx.amount).toBeUndefined();
+    expect(tx.fee).toBeUndefined();
+    expect(tx.status).toBe("confirmed");
+  });
+
+  it("never emits an amount the app would refuse, across the whole range", async () => {
+    const { __test } = await import("../src/indexer.js");
+    for (let exp = 0n; exp <= 40n; exp++) {
+      const emitted = __test.appSafeEth(10n ** exp);
+      if (emitted !== null) expect(APP_AMOUNT.test(emitted), `1e${exp} wei -> ${emitted}`).toBe(true);
+    }
+  });
+
+  it("permits the key header on the CORS preflight", async () => {
+    // A custom header makes the browser preflight, and a preflight that does not list
+    // x-wally-key makes it refuse the request. The service requires that header off
+    // loopback, so omitting it here breaks every browser request once a key is set.
+    const response = await app.inject({
+      method: "OPTIONS",
+      url: "/v1/market?currency=usd",
+      headers: {
+        origin: "http://127.0.0.1:8082",
+        "access-control-request-method": "GET",
+        "access-control-request-headers": "x-wally-key",
+      },
+    });
+    expect(response.statusCode).toBe(204);
+    expect(response.headers["access-control-allow-headers"]).toContain("x-wally-key");
+  });
+
+  it("does not trust a forwarded-for header from an arbitrary client", async () => {
+    const { trustProxySetting } = await import("../src/config.js");
+    // `true` would let any caller forge their IP and walk past the rate limiter.
+    expect(trustProxySetting()).not.toBe(true);
+  });
+
+  it("serves the development-only QVAC passthrough only on loopback", async () => {
+    const { onLoopback } = await import("../src/config.js");
+    const models = await app.inject({ method: "GET", url: "/v1/models" });
+    if (onLoopback()) {
+      // Registered here; it answers or fails upstream, but it is not a 404.
+      expect(models.statusCode).not.toBe(404);
+    } else {
+      expect(models.statusCode, "must not be published from a deployed instance").toBe(404);
+    }
+  });
+});

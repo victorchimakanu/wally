@@ -44,6 +44,26 @@ export function formatEth(value: bigint): string {
   return fraction ? `${whole}.${fraction}` : `${whole}`;
 }
 
+/**
+ * The expression the app validates every amount with — `wei()` in
+ * mobile/src/services/wallet-api.ts, copied exactly. It caps the whole part at 13 digits.
+ *
+ * This matters because `parseHistory()` maps `parseTransaction` over the list and throws for
+ * the ENTIRE list if one item fails. A single spam transfer with an absurd value — free to
+ * send on a testnet, and ordinary on Sepolia — would therefore blank Activity completely and
+ * show "Enter an ETH amount with up to 18 decimals" as a load error. Measured 22 Oct 2026.
+ *
+ * `amount` and `fee` are optional in the app's own type and render as "—", so an unusable
+ * value is omitted and the transaction still appears. Dropping the transaction would hide a
+ * real on-chain event; omitting one field does not.
+ */
+const APP_AMOUNT = /^(?:0|[1-9]\d{0,12})(?:\.\d{1,18})?$/;
+
+function appSafeEth(value: bigint): string | null {
+  const text = formatEth(value);
+  return APP_AMOUNT.test(text) ? text : null;
+}
+
 function toBigInt(value: unknown): bigint | null {
   if (typeof value !== "string" || !/^\d+$/.test(value)) return null;
   try {
@@ -79,11 +99,18 @@ function fromEtherscan(chain: Chain, raw: EtherscanTx): LiveTransaction | null {
   if (typeof raw["to"] === "string" && ADDRESS.test(raw["to"])) item.recipient = raw["to"];
 
   const value = toBigInt(raw["value"]);
-  if (value !== null) item.amount = formatEth(value);
+  if (value !== null) {
+    const amount = appSafeEth(value);
+    if (amount !== null) item.amount = amount;
+    else log.warn({ chain, hash }, "amount is larger than the app can display; omitting it");
+  }
 
   const gasUsed = toBigInt(raw["gasUsed"]);
   const gasPrice = toBigInt(raw["gasPrice"]);
-  if (gasUsed !== null && gasPrice !== null) item.fee = formatEth(gasUsed * gasPrice);
+  if (gasUsed !== null && gasPrice !== null) {
+    const fee = appSafeEth(gasUsed * gasPrice);
+    if (fee !== null) item.fee = fee;
+  }
 
   const seconds = toBigInt(raw["timeStamp"]);
   if (seconds !== null) item.submittedAt = Number(seconds) * 1000;
@@ -141,11 +168,18 @@ function fromBlockscout(chain: Chain, raw: Record<string, unknown>): LiveTransac
   if (typeof to?.hash === "string" && ADDRESS.test(to.hash)) item.recipient = to.hash;
 
   const value = toBigInt(raw["value"]);
-  if (value !== null) item.amount = formatEth(value);
+  if (value !== null) {
+    const amount = appSafeEth(value);
+    if (amount !== null) item.amount = amount;
+    else log.warn({ chain, hash }, "amount is larger than the app can display; omitting it");
+  }
 
   const fee = raw["fee"] as { value?: unknown } | undefined;
   const feeValue = toBigInt(fee?.value);
-  if (feeValue !== null) item.fee = formatEth(feeValue);
+  if (feeValue !== null) {
+    const safeFee = appSafeEth(feeValue);
+    if (safeFee !== null) item.fee = safeFee;
+  }
 
   if (typeof raw["timestamp"] === "string") {
     const parsed = Date.parse(raw["timestamp"]);
@@ -185,4 +219,4 @@ export async function fetchHistory(chain: Chain, address: string): Promise<{ ite
   return { items, source: provider };
 }
 
-export const __test = { fromEtherscan, fromBlockscout, formatEth, EXPLORERS, viaBlockscout, viaEtherscan };
+export const __test = { fromEtherscan, fromBlockscout, formatEth, appSafeEth, EXPLORERS, viaBlockscout, viaEtherscan };

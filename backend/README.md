@@ -38,6 +38,17 @@ Responses carry `fetchedAt`, and market responses also carry `fresh`. When an up
 but a cached copy exists, the proxy serves it with `x-wally-cache: stale`, so the app can label
 it "Saved" exactly as it already does for its own caches.
 
+### Amounts the app cannot display are omitted, not passed through
+
+`parseHistory()` in the app maps `parseTransaction` over the list and throws for the **whole
+list** if one item fails, and its `wei()` parser caps the whole part of an amount at 13 digits.
+A single spam transfer with an absurd value — free to send on a testnet — would therefore blank
+Activity entirely and show "Enter an ETH amount with up to 18 decimals" as a load error.
+
+So any amount or fee above that cap is left out of the record. `amount` and `fee` are optional
+in the app's own type and render as `—`, so the transaction still appears; dropping it would
+hide a real on-chain event, while omitting one field does not.
+
 ### `/v1/history` returns both chains in one call
 
 The Activity screen expects a single flat, time-sorted list plus a per-chain `errors[]` — the
@@ -91,6 +102,12 @@ carries `x-wally-cache: hit | miss | bypass`.
 ---
 
 ## Why chat goes through here: a QVAC CORS bug
+
+**These two routes are registered only when the service is bound to loopback.** The app can
+only reach them from a development build — the endpoint is `__DEV__`-gated in
+`mobile/src/demo/store.tsx`, and `localEndpoint()` in `mobile/src/services/qvac.ts` refuses
+anything that is not `127.0.0.1`, `localhost` or `10.0.2.2`. A deployed instance that served
+them would publish a model relay no legitimate client can call, so it answers 404 instead.
 
 **Measured 20 October 2026.** QVAC's HTTP server (`@qvac/cli` 0.15.0) returns
 `access-control-allow-origin` on ordinary JSON responses and on the OPTIONS preflight, but
@@ -162,7 +179,20 @@ EXPO_PUBLIC_WALLY_APP_KEY=<same value>     # mobile/.env.local
 Leave it unset for local development; the server prints a note and stays open on loopback.
 
 **Browsers must be on the allowlist.** `ALLOWED_ORIGINS` gates any request carrying an
-`Origin` header. The native app sends none and is unaffected.
+`Origin` header. The native app sends none and is unaffected. The preflight permits
+`x-wally-key`, which it must: a custom header makes the browser preflight every request and
+refuse it outright if the preflight does not list it, so omitting it breaks every browser
+request the moment a key is configured.
+
+**`X-Forwarded-For` is trusted only from `TRUSTED_PROXY`,** which defaults to the loopback
+address. Setting it to `true` would honour that header from any client and let anyone who can
+reach this port without going through the reverse proxy forge their IP past the rate limiter.
+
+**Rate limiting is per client IP, which is weaker on mobile than it looks.** Carrier-grade NAT
+puts many subscribers behind one public address, so a per-IP budget is shared by everyone on
+that carrier. At the default 120/min and roughly five requests per active user per minute,
+that is about two dozen users per address before legitimate traffic starts getting 429s. This
+needs a per-installation budget before any real user load; see the open decisions below.
 
 ---
 

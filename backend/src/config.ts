@@ -114,6 +114,19 @@ const Schema = z.object({
   /** Requests per minute per client IP, across all routes. */
   rateLimitPerMinute: z.coerce.number().int().positive().default(120),
 
+  /**
+   * Which proxy may set `X-Forwarded-For`.
+   *
+   * `trustProxy: true` trusts that header from ANY client, which turns the rate limiter into
+   * a no-op the moment this port is reachable without going through the reverse proxy — a
+   * firewall mistake, or anyone curling the VPS address directly. Defaulting to the loopback
+   * address matches the documented deployment (Caddy or nginx on the same host) and means a
+   * forged header from outside is ignored.
+   *
+   * Accepts an IP or CIDR list, a hop count, or `false` to use the socket address only.
+   */
+  trustedProxy: z.string().default("127.0.0.1"),
+
   /** Comma-separated origins for the web preview. Native apps send no Origin header. */
   allowedOrigins: z
     .string()
@@ -141,6 +154,11 @@ const Schema = z.object({
   rpcCacheMs: z.coerce.number().int().nonnegative().default(10_000),
 });
 
+/** Shared by the startup guards and by the route gating in server.ts. */
+export function isLoopbackHost(host: string): boolean {
+  return ["127.0.0.1", "localhost", "::1"].includes(host);
+}
+
 function build() {
   const parsed = Schema.safeParse({
     port: process.env["PORT"],
@@ -158,6 +176,7 @@ function build() {
     rpcAllowBroadcast: process.env["RPC_ALLOW_BROADCAST"],
     appKey: process.env["WALLY_APP_KEY"] || undefined,
     rateLimitPerMinute: process.env["RATE_LIMIT_PER_MINUTE"],
+    trustedProxy: process.env["TRUSTED_PROXY"],
     allowedOrigins: process.env["ALLOWED_ORIGINS"],
     upstreamTimeoutMs: process.env["UPSTREAM_TIMEOUT_MS"],
     qvacUrl: process.env["QVAC_URL"],
@@ -177,7 +196,7 @@ function build() {
 
   // Binding off loopback exposes provider quota to the internet. Require a key, and refuse
   // to start without one rather than coming up quietly unprotected.
-  const loopback = ["127.0.0.1", "localhost", "::1"].includes(cfg.host);
+  const loopback = isLoopbackHost(cfg.host);
   if (!loopback && !cfg.appKey) {
     console.error(
       "Configuration error: HOST is not loopback, so WALLY_APP_KEY is required.\n" +
@@ -210,6 +229,23 @@ export function rpcUrl(chain: Chain): string {
 export function indexerUrl(chain: Chain): string {
   return chain === "arbitrum" ? config.indexerArbitrum : config.indexerEthereum;
 }
+/**
+ * Fastify's `trustProxy` in the shape it expects: false, a hop count, or an address list.
+ * Anything else is passed through as a list, which is how a CIDR or several proxies are given.
+ */
+export function trustProxySetting(): boolean | number | string {
+  const raw = config.trustedProxy.trim();
+  if (raw === "" || raw.toLowerCase() === "false") return false;
+  if (raw.toLowerCase() === "true") return true;
+  if (/^\d+$/.test(raw)) return Number(raw);
+  return raw;
+}
+
+/** True when this process is bound to loopback, so dev-only routes may be served. */
+export function onLoopback(): boolean {
+  return isLoopbackHost(config.host);
+}
+
 export function allowedRpcMethods(): readonly string[] {
   return config.rpcAllowBroadcast ? [...RPC_READ_METHODS, "eth_sendRawTransaction"] : RPC_READ_METHODS;
 }
