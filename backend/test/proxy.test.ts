@@ -114,13 +114,18 @@ describe("routes refuse bad input before calling any provider", () => {
     expect(response.json().error).toContain("eth_sign");
   });
 
-  it("rpc rejects batched requests", async () => {
+  it("rpc rejects batched requests, for being a batch", async () => {
     const response = await app.inject({
       method: "POST",
       url: "/v1/rpc/arbitrum",
       payload: [{ method: "eth_chainId" }, { method: "eth_blockNumber" }],
     });
     expect(response.statusCode).toBe(400);
+    // Asserting only the status let this pass with the batch check removed: an array is also
+    // an object, so it fell through to the generic "invalid request" 400 and looked fine.
+    // A batch must be refused for being a batch, since one would otherwise fan out past the
+    // rate limit and around the per-method allowlist.
+    expect(response.json().error).toMatch(/one JSON-RPC request at a time/i);
   });
 
   it("rpc rejects non-array params", async () => {
@@ -194,6 +199,14 @@ describe("shared key enforcement", () => {
 describe("indexer normalisation", () => {
   const { fromEtherscan, fromBlockscout, formatEth, EXPLORERS } = __test;
 
+  it("points at the testnet explorers the app expects, written out literally", () => {
+    // The app refuses any explorerUrl that is not exactly `${explorer}/tx/${hash}`, so these
+    // bases are a contract with mobile/src/services/wallet-api.ts, not an implementation
+    // detail. Pinned here so a change to either side fails loudly.
+    expect(EXPLORERS.arbitrum).toBe("https://sepolia.arbiscan.io");
+    expect(EXPLORERS.ethereum).toBe("https://sepolia.etherscan.io");
+  });
+
   it("converts wei to a decimal the app's parser accepts", () => {
     // The app validates amounts with /^(?:0|[1-9]\d{0,12})(?:\.\d{1,18})?$/
     const ok = /^(?:0|[1-9]\d{0,12})(?:\.\d{1,18})?$/;
@@ -216,8 +229,11 @@ describe("indexer normalisation", () => {
     expect(tx.fee).toBe("0.000021");
     expect(tx.blockNumber).toBe(12345);
     expect(tx.submittedAt).toBe(1700000000000);
-    // parseTransaction rejects any deviation here.
-    expect(tx.explorerUrl).toBe(`${EXPLORERS.arbitrum}/tx/${hash}`);
+    // Written out literally, not as `${EXPLORERS.arbitrum}/...`: referencing the constant
+    // under test made this tautological, and it passed when the base was changed to mainnet
+    // arbiscan. These two strings are CHAINS in mobile/src/services/wallet-api.ts, and
+    // parseTransaction rejects any deviation character for character.
+    expect(tx.explorerUrl).toBe(`https://sepolia.arbiscan.io/tx/${hash}`);
   });
 
   it("treats both Etherscan failure signals as failed", () => {
@@ -244,7 +260,7 @@ describe("indexer normalisation", () => {
     expect(tx.amount).toBe("2");
     expect(tx.fee).toBe("0.000021");
     expect(tx.blockNumber).toBe(999);
-    expect(tx.explorerUrl).toBe(`${EXPLORERS.ethereum}/tx/${hash}`);
+    expect(tx.explorerUrl).toBe(`https://sepolia.etherscan.io/tx/${hash}`);
   });
 
   it("marks a Blockscout record with no status as pending, never confirmed", () => {
