@@ -30,6 +30,15 @@ own backend, and the demo wallet. Everything else on this page is optional.
 | **QVAC AI server** | 11434 | Chat with the assistant. The app does **not** call this directly — it goes through the backend on 8080 | Yes — without it chat uses scripted replies |
 | **Dev wallet API** | 3003 | A real testnet wallet with keys on this computer | Yes — without it the wallet is a demo |
 
+The dev wallet API needs a one-time install of the isolated WDK runtime before it will start:
+
+```bash
+cd mobile && npm run wallet:install
+```
+
+Without it the server exits with that exact command in the error, and the two signing tests in
+`npm test` skip with the same hint rather than failing.
+
 Start only what you need. Each lives in its own terminal because each stays in the foreground.
 
 ---
@@ -233,6 +242,23 @@ build-tools. Java is already installed at `/usr/bin/java`, so the JDK blocker no
 10 October readiness document no longer applies; build-tools are still missing.
 
 ---
+
+## Running the tests
+
+```bash
+cd backend && npm test              # validation, cache, access control, concurrency
+cd backend && npm run test:mutation # proves the tests catch the bugs they claim to
+cd mobile  && npm test              # includes the signing path
+```
+
+**`npm run test:mutation` is worth running after any change to a guard.** It applies one bug at a
+time and checks the suite notices. It exists because a green suite proved almost nothing: on
+22 October 2026, with 52 backend tests passing, seven mutations survived — five of them in
+`server.ts`, including every key being accepted and the rate limiter never refusing.
+
+**The mobile signing tests were not in `npm test` until 23 October 2026** and errored outright on a
+fresh checkout, so the code that builds and signs transactions had tests nobody ran. They are in the
+default suite now, and skip with a visible reason when the WDK runtime is absent.
 
 ## Checking everything works
 
