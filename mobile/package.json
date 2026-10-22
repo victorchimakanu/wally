@@ -52,7 +52,7 @@
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
     "lint": "expo lint",
-    "test": "node --experimental-strip-types --test test/*.test.ts",
+    "test": "node --experimental-strip-types --test test/*.test.ts test/*.test.mjs",
     "export:web": "expo export --platform web --output-dir dist/web",
     "export:android": "expo export --platform android --output-dir dist/android",
     "ai:server": "node scripts/qvac-server.mjs",
