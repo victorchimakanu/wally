@@ -1,11 +1,29 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { request } from 'node:http';
 import { createWalletApi } from '../scripts/wallet-api-server.mjs';
 import { createWalletService, ethDisplay, ethUnits, QuoteBook, visibleRecord } from '../scripts/wallet-api-core.mjs';
+
+/**
+ * The signing tests need the isolated WDK runtime, which is a separate install. Until
+ * 23 Oct 2026 this file was not in `npm test` at all and errored outright on a fresh
+ * checkout, so the most safety-critical code in the repo had tests that never ran.
+ *
+ * It is in `npm test` now. The cases that need WDK skip with a visible reason when the
+ * runtime is missing, rather than failing the suite or — worse — being quietly absent.
+ */
+const WDK_READY = (() => {
+  // Check the isolated runtime's own node_modules, not `require.resolve` from it: Node walks
+  // UP the tree, so resolving @tetherto/wdk-wallet-evm succeeds from the repo-root
+  // node_modules even when the isolated runtime is absent. That false positive is why this
+  // guard did not work on the first attempt.
+  const runtime = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../internal/wallet-api-runtime');
+  return ['@tetherto/wdk-wallet-evm', 'qrcode'].every(pkg => existsSync(path.join(runtime, 'node_modules', pkg)));
+})();
+const needsWdk = { skip: WDK_READY ? false : 'run: npm run wallet:install' };
 
 test('exact ETH units do not round away wei', () => { assert.equal(ethUnits('0.000000000000000001'), 1n); assert.equal(ethDisplay(1000000000000000001n), '1.000000000000000001'); for (const value of ['0', '-1', '1e2', '0.0000000000000000001']) assert.throws(() => ethUnits(value)); });
 test('reviews require the same session, approval, freshness and single use', () => {
@@ -33,7 +51,7 @@ test('local HTTP API rejects unauthorized origins, missing sessions and non-JSON
     assert.equal(confirmations, 0);
   } finally { await new Promise(resolve => server.close(resolve)); }
 });
-test('WDK signs only the reviewed transaction; uncertain broadcast survives restart without a duplicate', async () => {
+test('WDK signs only the reviewed transaction; uncertain broadcast survives restart without a duplicate', needsWdk, async () => {
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../internal');
   const directory = mkdtempSync(path.join(root, 'wallet-test-'));
   let broadcasts = 0, accepted = false, nonce = '0x0', service;
@@ -69,4 +87,48 @@ test('WDK signs only the reviewed transaction; uncertain broadcast survives rest
     const changed = await service.quote('alice', { chain: 'arbitrum', recipient: '0x1111111111111111111111111111111111111111', amount: '0.001' }); nonce = '0x1';
     await assert.rejects(service.confirm('alice', { quoteId: changed.id, approved: true }), /nonce changed/); assert.equal(broadcasts, 1);
   } finally { service?.dispose(); assert.equal(path.dirname(directory), root); assert.match(path.basename(directory), /^wallet-test-/); rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('a broadcast the node refuses is explained, not silently swallowed', needsWdk, async () => {
+  // Measured 23 Oct 2026: a definitively refused broadcast ("nonce too low") resolved
+  // confirm() successfully, left the record 'unknown' with no explanation, and — because
+  // quote() blocks on an unresolved record — permanently prevented sending on that chain.
+  // No number of receipt checks helps: the transaction was never broadcast, so there is
+  // never a receipt. See docs/send-path-lockout.md for the part still open.
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../internal');
+  const directory = mkdtempSync(path.join(root, 'refused-'));
+  const transport = async (url, options) => {
+    if (url.includes('blockscout')) return Response.json({ items: [] });
+    const request = JSON.parse(options.body), chainId = url.includes('arbitrum') ? '0x66eee' : '0xaa36a7';
+    let result;
+    switch (request.method) {
+      case 'eth_chainId': result = chainId; break;
+      case 'eth_getBalance': result = '0xde0b6b3a7640000'; break;
+      case 'eth_getCode': result = '0x'; break;
+      case 'eth_estimateGas': result = '0x5208'; break;
+      case 'eth_gasPrice': case 'eth_maxPriorityFeePerGas': result = '0x3b9aca00'; break;
+      case 'eth_getTransactionCount': result = '0x0'; break;
+      case 'eth_getBlockByNumber': result = { hash: '0x' + '1'.repeat(64), parentHash: '0x' + '0'.repeat(64), number: '0x1', timestamp: '0x1', nonce: '0x0000000000000000', difficulty: '0x0', gasLimit: '0x1c9c380', gasUsed: '0x0', miner: '0x1111111111111111111111111111111111111111', extraData: '0x', transactions: [], baseFeePerGas: '0x1' }; break;
+      // The node answers, and refuses. This transaction will never be accepted.
+      case 'eth_sendRawTransaction': return Response.json({ jsonrpc: '2.0', id: request.id, error: { code: -32000, message: 'nonce too low' } });
+      case 'eth_getTransactionReceipt': result = null; break;
+      default: throw new Error(`Unexpected mock RPC: ${request.method}`);
+    }
+    return Response.json({ jsonrpc: '2.0', id: request.id, result });
+  };
+  let service;
+  try {
+    service = await createWalletService(directory, { transport });
+    const to = '0x1111111111111111111111111111111111111111';
+    const quote = await service.quote('alice', { chain: 'arbitrum', recipient: to, amount: '0.001' });
+    const record = await service.confirm('alice', { quoteId: quote.id, approved: true });
+
+    // The hash and the unknown status stay: a lost response may still have arrived, and that
+    // behaviour must not change. What must not stay is the silence.
+    assert.equal(record.status, 'unknown');
+    assert.match(record.rejection ?? '', /nonce too low/, 'the node\'s reason must reach the user');
+  } finally {
+    service?.dispose();
+    rmSync(directory, { recursive: true, force: true });
+  }
 });

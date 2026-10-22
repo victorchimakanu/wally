@@ -59,7 +59,16 @@ export async function createWalletService(directory, { transport = fetch } = {})
     const network = NETWORKS[chain];
     const response = await transport(network.rpc, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: ++rpcId, method, params }), signal: AbortSignal.timeout(15000) });
     if (!response.ok) throw new Error(`${network.name} RPC is unavailable.`);
-    const data = await response.json(); if (data.error || !Object.hasOwn(data, 'result')) throw new Error(`${network.name} could not complete the ${method} request.`);
+    const data = await response.json();
+    if (data.error || !Object.hasOwn(data, 'result')) {
+      // The node answered and refused, which is different from not reaching it. Keep that
+      // apart, and keep the node's own words: for a broadcast they are the only explanation
+      // the user will ever get, and confirm() currently discards them entirely.
+      const refusal = new Error(`${network.name} could not complete the ${method} request.`);
+      refusal.nodeRefused = true;
+      refusal.nodeMessage = typeof data.error?.message === 'string' ? data.error.message : '';
+      throw refusal;
+    }
     return data.result;
   }
   async function checked(chain) { const actual = Number(BigInt(await rpc(chain, 'eth_chainId'))); if (actual !== NETWORKS[chain].chainId) throw new Error('RPC network mismatch. Testnet operations were blocked.'); }
@@ -117,7 +126,15 @@ export async function createWalletService(directory, { transport = fetch } = {})
       const hash = ethers.keccak256(raw);
       const record = { quoteId: q.id, owner, hash, chain: q.chain, network: NETWORKS[q.chain].name, from: q.from, recipient: q.recipient, amount: q.amount, fee: q.fee, status: 'unknown', submittedAt: Date.now(), explorerUrl: `${NETWORKS[q.chain].explorer}/tx/${hash}`, symbol: 'ETH' };
       journal.unshift(record); save();
-      try { const returned = await rpc(q.chain, 'eth_sendRawTransaction', [raw]); if (returned?.toLowerCase() === hash.toLowerCase()) record.status = 'pending'; } catch { /* The broadcast may have arrived. Keep its known hash and check receipts. */ }
+      try { const returned = await rpc(q.chain, 'eth_sendRawTransaction', [raw]); if (returned?.toLowerCase() === hash.toLowerCase()) record.status = 'pending'; }
+      catch (error) {
+        // A lost response may still have arrived, so the hash and the unknown status stay.
+        // But when the node itself refused, saying nothing leaves the user with a transfer
+        // that never confirms, no explanation, and — because quote() blocks on an unresolved
+        // record — no way to send on this chain again. Record what the node said so the
+        // receipt screen can show it.
+        if (error?.nodeRefused) record.rejection = error.nodeMessage || 'The network refused this transfer.';
+      }
       save(); return visibleRecord(record);
     } finally { sending = false; }
   }
