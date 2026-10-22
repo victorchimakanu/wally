@@ -123,7 +123,9 @@ const Schema = z.object({
    * address matches the documented deployment (Caddy or nginx on the same host) and means a
    * forged header from outside is ignored.
    *
-   * Accepts an IP or CIDR list, a hop count, or `false` to use the socket address only.
+   * Accepts an IP or CIDR list, or `false` to use the socket address only. A hop count is
+   * deliberately NOT accepted: GHSA-3m5p-2c4r-xxw2 is X-Forwarded-* spoofing under exactly
+   * that configuration, so offering it would be handing someone a documented footgun.
    */
   trustedProxy: z.string().default("127.0.0.1"),
 
@@ -233,11 +235,19 @@ export function indexerUrl(chain: Chain): string {
  * Fastify's `trustProxy` in the shape it expects: false, a hop count, or an address list.
  * Anything else is passed through as a list, which is how a CIDR or several proxies are given.
  */
-export function trustProxySetting(): boolean | number | string {
+export function trustProxySetting(): boolean | string {
   const raw = config.trustedProxy.trim();
   if (raw === "" || raw.toLowerCase() === "false") return false;
   if (raw.toLowerCase() === "true") return true;
-  if (/^\d+$/.test(raw)) return Number(raw);
+  // A bare number would be read by Fastify as a hop count; refuse it rather than accept a
+  // configuration with a published spoofing advisory against it.
+  if (/^\d+$/.test(raw)) {
+    console.error(
+      "Configuration error: TRUSTED_PROXY must be an address or CIDR, not a hop count.\n" +
+        "  A hop count is spoofable (GHSA-3m5p-2c4r-xxw2). Use the proxy's address, e.g. 127.0.0.1.",
+    );
+    process.exit(1);
+  }
   return raw;
 }
 
