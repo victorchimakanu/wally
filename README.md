@@ -1,8 +1,24 @@
 # Wally
 
-Phone-local QVAC integration and performance testing: [Android phone test setup and current hardware limitations](docs/QVAC-PHONE-TESTING.md). The native path is prepared; physical-device inference and APK compilation remain unverified.
+A crypto wallet you talk to. The AI runs on your device. The keys never leave it either.
 
-A crypto wallet you talk to. The AI runs on your machine. The keys never leave it either.
+> **Read this first — the repository holds three things.**
+>
+> | Directory | What it is | Status |
+> |---|---|---|
+> | [`mobile/`](mobile/) | The Expo / React Native app | **The product** |
+> | [`backend/`](backend/) | A provider proxy on 8080. Holds no keys, cannot sign | Live, not deployed |
+> | `src/`, `public/` | The original reference app: a browser UI and a server that holds a seed | Reference only |
+>
+> The rest of this README describes the **reference app**. Its custodial shape was rejected for the
+> product in [docs/ADR-001-key-custody.md](docs/ADR-001-key-custody.md) — keys stay on the phone.
+> For the product, start at [docs/RUNNING-LOCALLY.md](docs/RUNNING-LOCALLY.md) and
+> [backend/README.md](backend/README.md).
+>
+> The root `Dockerfile` and `docker-compose.yml` build the **reference app**, carry a seed, and
+> point at **mainnet** RPCs. They are not how the backend gets deployed.
+
+Phone-local QVAC integration and performance testing: [Android phone test setup and current hardware limitations](docs/QVAC-PHONE-TESTING.md). The native path is prepared; physical-device inference and APK compilation remain unverified.
 
 ![Wally](docs/screenshot.png)
 

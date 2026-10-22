@@ -82,13 +82,27 @@ cost at zero per request, and keep the marketing copy truthful without rewriting
 
 ### What the backend becomes
 
-A thin service that holds **no keys, no seeds, and no personal data**:
+A thin service that holds **no keys, no seeds, and no personal data**.
 
-1. RPC and indexer proxy — hides provider keys, absorbs rate limits, fixes the Blockscout
-   Arbitrum Sepolia 403 currently breaking history
-2. Market data proxy — same pattern
-3. Receipt watcher and push — resolves pending transactions while the phone sleeps
-4. Conversion partner proxy — the revenue hinge, once a partner is chosen
+**Status, 23 October 2026 — it exists**, in `backend/`, and the first two items below are built and
+running locally. See [backend/README.md](../backend/README.md).
+
+| | | |
+|---|---|---|
+| 1 | RPC and indexer proxy — hides provider keys, absorbs rate limits, works around the Blockscout Arbitrum Sepolia 403 | **Built.** Needs an Etherscan API key to serve indexed history |
+| 2 | Market data proxy — same pattern | **Built** |
+| 3 | Receipt watcher and push — resolves pending transactions while the phone sleeps | Not started. The one thing a phone genuinely cannot do for itself |
+| 4 | Conversion partner proxy — the revenue hinge, once a partner is chosen | Not started, and gated on a legal question rather than an engineering one. See `OFFRAMP-DESIGN.md` §1 at the workspace base |
+
+The decision below held up under construction: the backend forwards and refuses, and nothing in it
+can sign. The method allowlist is the control, and `eth_sendRawTransaction` is off unless an
+operator turns it on deliberately.
+
+**One consequence worth recording.** A conversion partner supplies a *deposit address*, which is the
+first recipient in the product that the user neither typed nor chose from history. Every existing
+guard passes on it, because it is well-formed and the user does approve it. That path needs its own
+protections — certificate pinning, a second independent read of the order before signing, a per-order
+ceiling — and they do not exist yet.
 
 ---
 
