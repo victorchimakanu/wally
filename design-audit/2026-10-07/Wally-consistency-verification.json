@@ -1,0 +1,8 @@
+{
+  "frameCount": 191,
+  "graphicsChecked": 1050,
+  "issues": [],
+  "check": "Visible icon aspect ratios and children within auto-layout content bounds; excludes deliberate absolute artwork and scroll content.",
+  "review": "809:29673",
+  "correctedHome": "764:16448"
+}

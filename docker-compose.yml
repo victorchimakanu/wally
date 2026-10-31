@@ -1,3 +1,14 @@
+# ⚠️  THIS RUNS THE SEED-HOLDING REFERENCE APP AGAINST MAINNET RPCs.
+#
+# Two things to be clear about before anyone runs `docker compose up` on a server:
+#
+#   1. It builds src/ — the reference server that holds a wallet seed and signs server-side.
+#      docs/ADR-001-key-custody.md rejects that shape for the product: keys stay on the phone.
+#   2. WDK_RPC_ETHEREUM and WDK_RPC_ARBITRUM below are Ethereum mainnet and Arbitrum One,
+#      despite NETWORK_MODE: testnet. Real funds, real chains.
+#
+# The mobile backend is backend/. It holds no keys, listens on 8080, and is not built here.
+
 services:
   wally:
     build: .

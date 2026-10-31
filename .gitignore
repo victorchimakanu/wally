@@ -15,6 +15,21 @@ docs-site/node_modules/
 docs-site/build/
 docs-site/.docusaurus/
 qvac.config.json
+!mobile/qvac.config.json
+mobile/android/
+mobile/ios/
+mobile/qvac/
+mobile/.expo/
 
 # Auto-generated local wallet (single-user self-hosted mode)
 .wally-seed*
+
+# local model cache and scratch scripts
+.qvac/
+.tmp-*
+
+# WDK worklet build output. Regenerate with `npm run wdk:generate` in mobile/.
+# The bundle is ~6MB and derived entirely from wdk.config.cjs plus the pinned
+# @tetherto packages, so it is reproducible and does not belong in history.
+mobile/.wdk-bundle/
+mobile/.wdk/
