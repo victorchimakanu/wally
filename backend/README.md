@@ -270,10 +270,23 @@ Implemented 20 October 2026. `INDEXER_PROVIDER` selects `etherscan` (default) or
 `blockscout`; both are normalised to the same `LiveTransaction` shape the app validates, so
 switching is a config change and the app never notices.
 
-**One thing remains: the API key.** Get a free one at <https://etherscan.io/apis> — a single
-key covers Arbitrum Sepolia and Ethereum Sepolia through the v2 `chainid` parameter — and set
-`ETHERSCAN_API_KEY` in `backend/.env.local`. Without it the route answers 503 and says
-explicitly that no key is configured, rather than looking like a network fault.
+**Done — and verified against the live service on 31 October 2026.** A single key covers both
+chains through the v2 `chainid` parameter; set `ETHERSCAN_API_KEY` in `backend/.env.local`.
+Without one the route answers 503 and says explicitly that no key is configured, rather than
+looking like a network fault.
+
+Until that date the Etherscan mapping had only ever parsed stub responses written by hand, so
+the live shape was unconfirmed. It now is:
+
+| | |
+|---|---|
+| Ethereum Sepolia | 50 live records, every one satisfying `parseTransaction` |
+| **Arbitrum Sepolia** | **25 live records** — the chain Blockscout had been answering with a Cloudflare 403 since 20 October |
+| Both chains merged | 50 items, 25 each, sorted newest first, `errors: []` |
+| Value conversion | `2954047210116000` wei → `0.002954047210116` ETH, checked against a real transfer |
+
+Every record was validated against the exact rules the app enforces: the amount and fee
+expression, the `${explorer}/tx/${hash}` form, hash shape, status enum, and the 50-item cap.
 
 The original comparison is kept below for the record.
 
