@@ -17,6 +17,10 @@ export function WalletProvider({ children }: React.PropsWithChildren) {
   const [offline, setOffline] = useState(() => Platform.OS === 'web' && typeof navigator !== 'undefined' && !navigator.onLine);
   const [saved, setSaved] = useState(true);
   const fetching = useRef(false), fetchingHistory = useRef(false), submitting = useRef(false), quoteGeneration = useRef(0);
+  // The addresses the next history fetch should use. Set on every request; the in-flight
+  // fetch re-reads it when it finishes, so a request made while one is running is honoured
+  // rather than dropped. See refreshHistory.
+  const wantedAddresses = useRef('');
   const alive = useRef(true), current = useRef<WalletSnapshot | null>(null), offlineNow = useRef(offline);
   const clearQuote = useCallback(() => { quoteGeneration.current++; activeQuote.current = null; setQuote(null); }, []);
   const refresh = useCallback(async () => {
@@ -31,15 +35,48 @@ export function WalletProvider({ children }: React.PropsWithChildren) {
     finally { fetching.current = false; if (alive.current) setLoading(false); }
   }, [clearQuote]);
   const refreshHistory = useCallback(async () => {
-    if (!client || fetchingHistory.current || offlineNow.current) return;
-    fetchingHistory.current = true; setHistoryLoading(true); setHistoryError('');
+    if (!client || offlineNow.current) return;
     // Per chain, not one address for both: Arbitrum's smart-account address need not match
-    // the Ethereum EOA. Omitted when no snapshot has loaded yet, which keeps history local.
-    const addresses = Object.fromEntries((current.current?.balances ?? []).map(item => [item.chain, item.address]));
-    try { const data = await client.history(addresses); if (alive.current) setHistory(data); }
+    // the Ethereum EOA.
+    //
+    // Before 31 Oct 2026 this read the addresses once and gave up if the snapshot had not
+    // loaded, which on a cold start meant Activity fetched with none — returning only this
+    // device's own transfers, with the wallet server's "history is unavailable" error still
+    // attached, and no retry, because the effect that calls this has a stable dependency.
+    // The result was an error message that was no longer true, appearing intermittently.
+    // So record what the fetch SHOULD use, and re-run while that keeps changing.
+    wantedAddresses.current = JSON.stringify(
+      Object.fromEntries((current.current?.balances ?? []).map(item => [item.chain, item.address])),
+    );
+    if (fetchingHistory.current) return; // the running fetch will pick up the new addresses
+    fetchingHistory.current = true; setHistoryLoading(true); setHistoryError('');
+    try {
+      let used = '';
+      while (used !== wantedAddresses.current) {
+        used = wantedAddresses.current;
+        const data = await client.history(JSON.parse(used) as Partial<Record<Chain, string>>);
+        if (!alive.current) return;
+        setHistory(data);
+      }
+    }
     catch (failure) { if (alive.current) setHistoryError(failure instanceof Error ? failure.message : 'Activity unavailable.'); }
     finally { fetchingHistory.current = false; if (alive.current) setHistoryLoading(false); }
   }, []);
+  /**
+   * Re-fetch history the moment the wallet's addresses first appear, or change.
+   *
+   * Activity asks for history when it mounts, which on a cold start is before the snapshot
+   * has loaded. That first fetch is still worth making — it shows this device's own
+   * transfers immediately — but it cannot include indexed history, so it has to be followed
+   * by one that can. Keyed on the addresses themselves, so it also covers the wallet being
+   * replaced, and does nothing until there is something to ask with.
+   */
+  const addressKey = (snapshot?.balances ?? []).map(item => `${item.chain}:${item.address}`).sort().join('|');
+  useEffect(() => {
+    if (!addressKey) return;
+    void refreshHistory();
+  }, [addressKey, refreshHistory]);
+
   useEffect(() => {
     alive.current = true;
     void (async () => { try { const raw = await AsyncStorage.getItem(cacheKey); if (raw && alive.current && !current.current) { const data = parseWallet(JSON.parse(raw)); current.current = data; setSnapshot(data); } } catch {} if (alive.current) await refresh(); })();
