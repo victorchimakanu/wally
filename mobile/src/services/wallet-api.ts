@@ -144,7 +144,36 @@ export function mergeHistory(remote: LiveHistory, local: LiveHistory): LiveHisto
   };
 }
 
-export function createWalletClient(endpoint: string, transport: typeof fetch = fetch) {
+/**
+ * Address the wallet API by the same hostname the page was opened with.
+ *
+ * The session cookie is `SameSite=Strict`, which is right for a server holding a seed. But
+ * browsers treat `localhost` and `127.0.0.1` as different sites, so opening the app on one
+ * while the API is configured as the other means the cookie is never stored: the handshake
+ * succeeds, every call after it arrives unauthenticated, and the app reports "Connect to the
+ * local wallet API first" while the server is in fact perfectly healthy. Measured 31 Oct 2026
+ * — `localhost:8082` failed and `127.0.0.1:8082` worked, against the same running server.
+ *
+ * So on web, follow the page. Only the two loopback spellings are ever swapped between, and
+ * both are already what `request()` accepts, so this cannot redirect the wallet API anywhere
+ * new. Native builds have no `location` and are returned unchanged, which keeps the Android
+ * emulator's 10.0.2.2 working.
+ */
+export function sameSiteEndpoint(raw: string, pageHost = globalThis.location?.hostname): string {
+  const LOOPBACK = ['127.0.0.1', 'localhost'];
+  if (!raw || typeof pageHost !== 'string' || !LOOPBACK.includes(pageHost)) return raw;
+  try {
+    const url = new URL(raw);
+    if (!LOOPBACK.includes(url.hostname) || url.hostname === pageHost) return raw;
+    url.hostname = pageHost;
+    return url.origin;
+  } catch {
+    return raw;
+  }
+}
+
+export function createWalletClient(rawEndpoint: string, transport: typeof fetch = fetch) {
+  const endpoint = sameSiteEndpoint(rawEndpoint);
   let connected: Promise<void> | null = null;
   async function request(route: string, body?: unknown) {
     const url = new URL(endpoint);
