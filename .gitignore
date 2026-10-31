@@ -27,3 +27,9 @@ mobile/.expo/
 # local model cache and scratch scripts
 .qvac/
 .tmp-*
+
+# WDK worklet build output. Regenerate with `npm run wdk:generate` in mobile/.
+# The bundle is ~6MB and derived entirely from wdk.config.cjs plus the pinned
+# @tetherto packages, so it is reproducible and does not belong in history.
+mobile/.wdk-bundle/
+mobile/.wdk/

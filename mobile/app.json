@@ -1,13 +1,14 @@
 {
   "expo": {
-    "name": "Wally Preview",
+    "name": "Wally",
     "slug": "wally-mobile",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.wally.app"
     },
     "android": {
       "adaptiveIcon": {
@@ -17,20 +18,20 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.wally.frontendpreview",
+      "package": "com.wally.app",
       "softwareKeyboardLayoutMode": "resize"
     },
     "web": {
       "favicon": "./assets/favicon.png",
       "bundler": "metro",
       "output": "single",
-      "name": "Wally Mobile Preview"
+      "name": "Wally"
     },
     "plugins": [
       "expo-router",
       "expo-image",
       "expo-font"
     ],
-    "scheme": "wally-preview"
+    "scheme": "wally"
   }
 }

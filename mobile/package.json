@@ -8,6 +8,10 @@
     "@qvac/fabric-android-arm64": "0.18.1",
     "@qvac/sdk": "0.21.0",
     "@react-native-async-storage/async-storage": "2.2.0",
+    "@tetherto/pear-wrk-wdk": "1.0.0-beta.17",
+    "@tetherto/wdk": "1.0.0-beta.22",
+    "@tetherto/wdk-wallet-evm": "1.0.0-beta.24",
+    "@tetherto/wdk-wallet-evm-erc-4337": "1.0.0-beta.23",
     "bare-pack": "2.0.1",
     "expo": "~57.0.30",
     "expo-battery": "~57.0.3",
@@ -33,6 +37,7 @@
     "react-native-worklets": "0.10.1"
   },
   "devDependencies": {
+    "@tetherto/wdk-worklet-bundler": "1.0.0-beta.16",
     "@types/node": "^26.6.3",
     "@types/react": "~19.2.2",
     "eslint": "^9.39.5",
@@ -44,8 +49,8 @@
     "wallet:install": "npm install --prefix ../internal/wallet-api-runtime --save-exact @tetherto/wdk-wallet-evm@1.0.0-beta.14 qrcode@1.5.4 --no-audit --no-fund",
     "wallet:server": "node scripts/wallet-api-server.mjs",
     "test:wallet": "node --test test/wallet-server.test.mjs",
-    "wdk:install": "expo install @tetherto/wdk-react-native-core && npm install --save-dev @tetherto/wdk-worklet-bundler",
-    "wdk:generate": "wdk-worklet-bundler generate --install",
+    "wdk:install": "npm install --save-exact @tetherto/wdk @tetherto/pear-wrk-wdk @tetherto/wdk-wallet-evm @tetherto/wdk-wallet-evm-erc-4337 && npm install --save-dev --save-exact @tetherto/wdk-worklet-bundler",
+    "wdk:generate": "wdk-worklet-bundler generate",
     "start": "expo start --go",
     "android": "expo start --go --android",
     "ios": "expo start --go --ios",
@@ -64,7 +69,8 @@
     "phone:prebuild": "node scripts/phone-tools.mjs prebuild",
     "phone:build": "node scripts/phone-tools.mjs build",
     "phone:export": "node scripts/phone-tools.mjs export",
-    "phone:start": "node scripts/phone-tools.mjs start"
+    "phone:start": "node scripts/phone-tools.mjs start",
+    "wdk:validate": "wdk-worklet-bundler validate"
   },
   "private": true,
   "type": "module"
