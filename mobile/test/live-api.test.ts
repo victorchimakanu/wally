@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { chartPoints, formatChange, parseChart, parseMarket, parseSavedChart, parseSavedMarket } from '../src/services/market-api.ts';
-import { CHAINS, createWalletClient, formatEth, parseQuote, parseWallet, wei } from '../src/services/wallet-api.ts';
+import { CHAINS, createWalletClient, formatEth, parseQuote, parseWallet, wei, sameSiteEndpoint } from '../src/services/wallet-api.ts';
 import { quickLiveReply, liveIntentReply } from '../src/services/live-wallet-chat.ts';
 const address = '0x1111111111111111111111111111111111111111';
 const balance = (chain: 'arbitrum' | 'ethereum') => ({ chain, name: CHAINS[chain].name, chainId: CHAINS[chain].id, symbol: 'ETH', address, qr: 'data:image/svg+xml;base64,PHN2Zy8+', balance: '0', balanceWei: '0', error: '' });
@@ -54,4 +54,32 @@ test('wallet totals are formatted from wei without rounding up', () => {
   assert.equal(formatEth(wei('0.1234569')), '0.123456');
   assert.equal(formatEth(1n), '<0.000001');
   assert.equal(formatEth(wei('12345.5')), '12,345.5');
+});
+
+test('the wallet API is addressed by the hostname the page was opened with', () => {
+  // The session cookie is SameSite=Strict. Browsers treat localhost and 127.0.0.1 as
+  // different sites, so a mismatch means the cookie is never stored and every call after the
+  // handshake is unauthenticated — the app then reports "Connect to the local wallet API
+  // first" while the server is healthy. Measured 31 Oct 2026 against a running server:
+  // localhost:8082 failed, 127.0.0.1:8082 worked.
+  assert.equal(sameSiteEndpoint('http://127.0.0.1:3003', 'localhost'), 'http://localhost:3003');
+  assert.equal(sameSiteEndpoint('http://localhost:3003', '127.0.0.1'), 'http://127.0.0.1:3003');
+
+  // Already matching, so untouched. The port is irrelevant to SameSite and must survive.
+  assert.equal(sameSiteEndpoint('http://127.0.0.1:3003', '127.0.0.1'), 'http://127.0.0.1:3003');
+  assert.equal(sameSiteEndpoint('http://localhost:9999', 'localhost'), 'http://localhost:9999');
+
+  // Native has no location: the configured value stands, so the Android emulator's 10.0.2.2
+  // keeps working.
+  assert.equal(sameSiteEndpoint('http://10.0.2.2:3003', undefined), 'http://10.0.2.2:3003');
+  assert.equal(sameSiteEndpoint('http://127.0.0.1:3003', undefined), 'http://127.0.0.1:3003');
+
+  // It swaps between the two loopback spellings and nothing else. A page on some other host
+  // must never be able to point the wallet API, which holds a seed, somewhere new.
+  assert.equal(sameSiteEndpoint('http://127.0.0.1:3003', 'evil.example'), 'http://127.0.0.1:3003');
+  assert.equal(sameSiteEndpoint('http://10.0.2.2:3003', 'localhost'), 'http://10.0.2.2:3003');
+
+  // Unparseable or empty input is returned as given, for request() to reject as it already does.
+  assert.equal(sameSiteEndpoint('not-a-url', 'localhost'), 'not-a-url');
+  assert.equal(sameSiteEndpoint('', 'localhost'), '');
 });
