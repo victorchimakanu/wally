@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { allNotices, noticeText, licenceSummary } from '../src/services/notices.ts';
+import { allNotices, noticeText, licenceSummary, searchNotices } from '../src/services/notices.ts';
 
 /**
  * These back a compliance obligation rather than a feature, so the cases check that the
@@ -46,4 +46,26 @@ test('the summary adds up to the whole tree', () => {
   const summary = licenceSummary();
   assert.equal(summary.reduce((sum, s) => sum + s.count, 0), allNotices().length);
   assert.equal(summary[0]!.license, 'MIT', 'MIT should dominate a JS dependency tree');
+});
+
+test('search finds a package by name and a whole licence family by identifier', () => {
+  // The two things someone actually arrives wanting.
+  const byName = searchNotices('@tetherto/wdk');
+  assert.ok(byName.some(n => n.name === '@tetherto/wdk'), 'the wallet must be findable by name');
+
+  const apache = searchNotices('apache');
+  assert.ok(apache.length > 100, `expected the Apache family, got ${apache.length}`);
+  assert.ok(apache.every(n => /apache/i.test(n.license) || /apache/i.test(n.name)));
+
+  // Case and surrounding space must not matter — people paste package names.
+  assert.deepEqual(searchNotices('  EXPO-ROUTER '), searchNotices('expo-router'));
+  // An empty query is the whole list, not nothing: the screen opens in that state.
+  assert.equal(searchNotices('   ').length, allNotices().length);
+  assert.deepEqual(searchNotices('definitely-not-a-real-package-xyz'), []);
+});
+
+test('the sorted list is memoised, not rebuilt per keystroke', () => {
+  // The screen filters on every keystroke; re-sorting 742 entries each time is work nobody
+  // asked for on a phone.
+  assert.equal(allNotices(), allNotices(), 'allNotices() should return the same array');
 });

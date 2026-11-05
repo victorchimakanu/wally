@@ -19,6 +19,17 @@ import * as Device from 'expo-device';
 import { buildInfo, supportSummary, versionLabel } from '../services/build-info';
 import { backendOrigin } from '../services/backend';
 
+/**
+ * The version for the Settings row, which used to be the string literal "1.0.0 · Frontend
+ * preview". That was wrong twice: the app stopped being a preview when it was renamed, and a
+ * hardcoded version keeps claiming 1.0.0 after a release bumps the real one — the one moment
+ * the number matters. Same source as the card the row now leads to.
+ */
+function settingsBuildLine(): string {
+  const info = buildInfo({ appVersion: Constants.expoConfig?.version, os: Platform.OS, isDevelopment: __DEV__ });
+  return `${versionLabel(info)} · ${info.platform}`;
+}
+
 export function SettingsScreen() { const wallet = useWallet();
   const { state, ai, phone, update } = useDemo();
   const ready = ai.mode === 'qvac' && ai.status === 'ready' && !state.aiPaused;
@@ -32,7 +43,7 @@ export function SettingsScreen() { const wallet = useWallet();
       <SettingRow title="Recovery phrase" subtitle="Wallet setup guidance" icon="99b43.svg" onPress={() => router.push({ pathname: '/preferences', params: { panel: 'security' } })} />
     </View>
     <Label size={12} weight="semibold" color={c.orange}>ABOUT</Label>
-    <View><SettingRow title="App version" subtitle="1.0.0 · Frontend preview" icon="8dca8.svg" /><SettingRow title="Assistant runtime" subtitle={ai.mode === 'qvac' ? 'QVAC · Qwen3 · Local development' : 'Scripted demo responses'} icon="f2470.svg" /></View>
+    <View><SettingRow title="App version" subtitle={settingsBuildLine()} icon="8dca8.svg" onPress={() => router.push({ pathname: '/preferences', params: { panel: 'connection' } })} /><SettingRow title="Open source licences" subtitle="The software Wally is built on" icon="8dca8.svg" onPress={() => router.push('/licences')} /><SettingRow title="Assistant runtime" subtitle={ai.mode === 'qvac' ? 'QVAC · Qwen3 · Local development' : 'Scripted demo responses'} icon="f2470.svg" /></View>
     <Note>{wallet.enabled ? 'This testnet wallet has real signing keys stored privately on your computer. Keys are never sent to chat or the app.' : 'This preview has no real recovery phrase or signing keys.'}</Note>
     <Card><WallyAsset name="c3f35.svg" /><Label size={18} weight="bold">{state.aiPaused ? 'Assistant paused' : ready ? 'Wally is ready' : 'Set up your assistant'}</Label><Label size={16} color={c.muted}>{ai.location === 'phone' ? 'A compatible physical phone and model setup are required.' : ai.location === 'computer' ? 'The Android preview connects to QVAC on your computer.' : 'This preview uses scripted replies.'}</Label><Note>{ready ? 'Model connection verified' : 'Open Assistant model to check the connection'}</Note><Button secondary label="Open Chat" onPress={() => router.push('/chats')} /></Card>
     <Button secondary label="Manage assistant" onPress={() => router.push({ pathname: '/preferences', params: { panel: 'model' } })} />

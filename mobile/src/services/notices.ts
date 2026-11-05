@@ -21,8 +21,30 @@ export type Notice = {
   textRef: number;
 };
 
+/**
+ * Sorted once, not per call.
+ *
+ * The screen filters this on every keystroke, and re-sorting 742 entries each time is work
+ * nobody asked for on a phone. The array is treated as read-only by every caller.
+ */
+let sorted: Notice[] | null = null;
+
 export function allNotices(): Notice[] {
-  return (data.packages as Notice[]).slice().sort((a, b) => a.name.localeCompare(b.name));
+  sorted ??= (data.packages as Notice[]).slice().sort((a, b) => a.name.localeCompare(b.name));
+  return sorted;
+}
+
+/**
+ * Name or licence, case-insensitive.
+ *
+ * Searching matters more here than it looks: 742 rows is not a list anyone scrolls. The two
+ * things a person actually arrives wanting are "is <package> in here" and "show me everything
+ * under <licence>", so both are one query rather than two features.
+ */
+export function searchNotices(query: string): Notice[] {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return allNotices();
+  return allNotices().filter(n => n.name.toLowerCase().includes(needle) || n.license.toLowerCase().includes(needle));
 }
 
 /** The full licence text for a package, or null where it shipped none. */
