@@ -372,7 +372,16 @@ describe("regressions found by auditing against the app, 22 Oct 2026", () => {
     // A custom header makes the browser preflight, and a preflight that does not list
     // x-wally-key makes it refuse the request. The service requires that header off
     // loopback, so omitting it here breaks every browser request once a key is set.
-    const response = await app.inject({
+    // The allowlist is empty by default, so this builds a server that actually allows the
+    // origin it then sends. It used to use the shared `app` and a bare 127.0.0.1 origin,
+    // which passed only on a machine whose gitignored .env.local happened to list it — and
+    // so asserted nothing on a clean checkout. CI found that on its first run.
+    vi.resetModules();
+    vi.stubEnv("ALLOWED_ORIGINS", "http://127.0.0.1:8082");
+    const { buildServer: build } = await import("../src/server.js");
+    const cors = build();
+
+    const response = await cors.inject({
       method: "OPTIONS",
       url: "/v1/market?currency=usd",
       headers: {
@@ -381,6 +390,9 @@ describe("regressions found by auditing against the app, 22 Oct 2026", () => {
         "access-control-request-headers": "x-wally-key",
       },
     });
+    vi.unstubAllEnvs();
+    vi.resetModules();
+
     expect(response.statusCode).toBe(204);
     expect(response.headers["access-control-allow-headers"]).toContain("x-wally-key");
   });
