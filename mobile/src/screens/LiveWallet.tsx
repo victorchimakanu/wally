@@ -65,6 +65,43 @@ export function LiveHistoryScreen() {
   const [search, setSearch] = useState(''), [filter, setFilter] = useState('All');
   return <Screen title="Activity" subtitle="Real testnet transactions"><TextInput accessibilityLabel="Search activity" style={shared.input} placeholder="Search address, amount or network" placeholderTextColor={c.muted} value={search} onChangeText={setSearch} /><View style={shared.row}>{['All', 'Sent', 'Received'].map(value => <Pressable key={value} accessibilityRole="tab" accessibilityState={{ selected: filter === value }} onPress={() => setFilter(value)} style={{ flex: 1, alignItems: 'center', paddingVertical: 12, backgroundColor: filter === value ? c.tint : c.surface, borderRadius: 18 }}><Label>{value}</Label></Pressable>)}</View><LiveActivityCard search={search} filter={filter} /></Screen>;
 }
+/**
+ * "It never arrived" — the deliberate way out of a transfer the chain cannot settle.
+ *
+ * Only reachable for the few records written before Wally journalled nonces. The server
+ * refuses this for anything it can still judge, so a merely-slow transfer cannot be declared
+ * dead from here — that refusal is what stops this becoming a way to send the same money
+ * twice, and the copy below does not promise more than Wally knows.
+ */
+function NeverArrived({ chain, hash, onResolved }: { chain: Chain; hash: string; onResolved: (tx: LiveTransaction) => void }) {
+  const wallet = useWallet();
+  const [asking, setAsking] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState('');
+
+  if (!asking) {
+    return <Button secondary label="This never arrived" onPress={() => setAsking(true)} />;
+  }
+
+  return <Card>
+    <Label weight="semibold">Mark this as never arrived?</Label>
+    <Note>Only do this if the block explorer shows no such transaction. Wally cannot prove what happened to this one, and marking it lets you send on this network again.</Note>
+    {!!problem && <Note error>{problem}</Note>}
+    <Button
+      label={busy ? 'Checking…' : 'Yes, it never arrived'}
+      disabled={busy}
+      onPress={() => {
+        setBusy(true); setProblem('');
+        void wallet.resolve(chain, hash)
+          .then(onResolved)
+          .catch((failure: unknown) => setProblem(failure instanceof Error ? failure.message : 'That could not be resolved.'))
+          .finally(() => setBusy(false));
+      }}
+    />
+    <Button secondary label="Leave it alone" onPress={() => { setAsking(false); setProblem(''); }} />
+  </Card>;
+}
+
 export function LiveTransactionScreen() {
   const params = useLocalSearchParams<{ chain: string; hash: string }>();
   const valid = (params.chain === 'arbitrum' || params.chain === 'ethereum') && typeof params.hash === 'string' && /^0x[\da-f]{64}$/i.test(params.hash);
@@ -74,7 +111,9 @@ function Receipt({ chain, hash }: { chain: Chain; hash: string }) {
   const wallet = useWallet();
   const [tx, setTx] = useState<LiveTransaction | null>(wallet.history?.items.find(item => item.hash === hash && item.chain === chain) ?? null), [error, setError] = useState('');
   const [checking, setChecking] = useState(false), [attempt, setAttempt] = useState(0);
-  const terminal = tx?.status === 'confirmed' || tx?.status === 'failed';
+  // superseded is terminal too: the nonce was spent by another transaction, so no receipt for
+  // this hash can ever exist and polling would continue forever.
+  const terminal = tx?.status === 'confirmed' || tx?.status === 'failed' || tx?.status === 'superseded';
   const receipt = useRef(wallet.receipt); useEffect(() => { receipt.current = wallet.receipt; }, [wallet.receipt]);
   useEffect(() => {
     let stopped = false, active = false;
@@ -83,5 +122,5 @@ function Receipt({ chain, hash }: { chain: Chain; hash: string }) {
     const timer = !terminal && !wallet.offline ? setInterval(() => { void check(); }, 10000) : null;
     return () => { stopped = true; if (timer) clearInterval(timer); };
   }, [chain, hash, terminal, attempt, wallet.offline]);
-  return <Screen title="Testnet receipt"><Pill tone={tx?.status === 'confirmed' ? 'success' : 'warning'}>{CHAINS[chain].name}</Pill><Label size={26} weight="semibold">{tx?.status === 'confirmed' ? 'Confirmed on the network' : tx?.status === 'failed' ? 'The network rejected this transfer' : tx?.status === 'unknown' ? 'Submission needs a network check' : 'Waiting for a network receipt'}</Label>{!terminal && <Note>Confirmation comes from the blockchain receipt. There is no simulated confirmation timer. Do not submit another transfer just because a response is slow.</Note>}<Card>{tx?.amount !== undefined && <Detail label="Amount" value={`${tx.amount} ETH`} />}{tx?.recipient && <><Note>Recipient</Note><Address value={tx.recipient} /></>}{tx?.fee && <Detail label="Approved fee limit" value={`${tx.fee} ETH`} />}<Note>Transaction hash</Note><Label selectable size={12}>{hash}</Label>{tx?.blockNumber !== null && tx?.blockNumber !== undefined && <Detail label="Block" value={String(tx.blockNumber)} />}{tx?.checkedAt && <Note>Receipt checked {new Date(tx.checkedAt).toLocaleTimeString()}</Note>}</Card>{!!error && <Note error>{error}</Note>}<Button secondary label={checking ? 'Checking receipt…' : 'Check receipt'} disabled={checking || wallet.offline} onPress={() => setAttempt(value => value + 1)} /><Button secondary label="Open block explorer" onPress={() => { void Linking.openURL(`${CHAINS[chain].explorer}/tx/${hash}`).catch(() => setError('Could not open the explorer.')); }} /><Button label="Back to wallet" onPress={() => router.replace('/wallet')} /></Screen>;
+  return <Screen title="Testnet receipt"><Pill tone={tx?.status === 'confirmed' ? 'success' : 'warning'}>{CHAINS[chain].name}</Pill><Label size={26} weight="semibold">{tx?.status === 'confirmed' ? 'Confirmed on the network' : tx?.status === 'failed' ? 'The network rejected this transfer' : tx?.status === 'superseded' ? 'This transfer never went through' : tx?.status === 'unknown' ? 'Submission needs a network check' : 'Waiting for a network receipt'}</Label>{tx?.status === 'superseded' && <Note>Another transfer from this wallet used the same slot in the queue, so this one can never arrive. Your money did not move and no fee was charged. If you still want to send it, start again.</Note>}{!terminal && <Note>Confirmation comes from the blockchain receipt. There is no simulated confirmation timer. Do not submit another transfer just because a response is slow.</Note>}<Card>{tx?.amount !== undefined && <Detail label="Amount" value={`${tx.amount} ETH`} />}{tx?.recipient && <><Note>Recipient</Note><Address value={tx.recipient} /></>}{tx?.fee && <Detail label="Approved fee limit" value={`${tx.fee} ETH`} />}<Note>Transaction hash</Note><Label selectable size={12}>{hash}</Label>{tx?.blockNumber !== null && tx?.blockNumber !== undefined && <Detail label="Block" value={String(tx.blockNumber)} />}{tx?.checkedAt && <Note>Receipt checked {new Date(tx.checkedAt).toLocaleTimeString()}</Note>}</Card>{!!error && <Note error>{error}</Note>}{!terminal && <NeverArrived chain={chain} hash={hash} onResolved={setTx} />}<Button secondary label={checking ? 'Checking receipt…' : 'Check receipt'} disabled={checking || wallet.offline} onPress={() => setAttempt(value => value + 1)} /><Button secondary label="Open block explorer" onPress={() => { void Linking.openURL(`${CHAINS[chain].explorer}/tx/${hash}`).catch(() => setError('Could not open the explorer.')); }} /><Button label="Back to wallet" onPress={() => router.replace('/wallet')} /></Screen>;
 }

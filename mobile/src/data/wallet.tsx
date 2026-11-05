@@ -9,7 +9,7 @@ const endpoint = process.env.EXPO_PUBLIC_WALLY_API_URL ?? '';
 export const liveWalletEnabled = !!endpoint;
 const client = endpoint ? createWalletClient(endpoint) : null;
 const cacheKey = `wally.testnet.wallet.v1.${endpoint}`;
-type WalletContext = { enabled: boolean; snapshot: WalletSnapshot | null; history: LiveHistory | null; loading: boolean; historyLoading: boolean; error: string; historyError: string; stale: boolean; offline: boolean; quote: LiveQuote | null; refresh: () => Promise<void>; refreshHistory: () => Promise<void>; prepare: (input: { chain: Chain; recipient: string; amount: string }) => Promise<void>; clearQuote: () => void; confirm: () => Promise<LiveTransaction>; receipt: (chain: Chain, hash: string) => Promise<LiveTransaction> };
+type WalletContext = { enabled: boolean; snapshot: WalletSnapshot | null; history: LiveHistory | null; loading: boolean; historyLoading: boolean; error: string; historyError: string; stale: boolean; offline: boolean; quote: LiveQuote | null; refresh: () => Promise<void>; refreshHistory: () => Promise<void>; prepare: (input: { chain: Chain; recipient: string; amount: string }) => Promise<void>; clearQuote: () => void; confirm: () => Promise<LiveTransaction>; receipt: (chain: Chain, hash: string) => Promise<LiveTransaction>; resolve: (chain: Chain, hash: string) => Promise<LiveTransaction> };
 const Context = createContext<WalletContext | null>(null);
 export function WalletProvider({ children }: React.PropsWithChildren) {
   const [snapshot, setSnapshot] = useState<WalletSnapshot | null>(null), [history, setHistory] = useState<LiveHistory | null>(null);
@@ -123,6 +123,16 @@ export function WalletProvider({ children }: React.PropsWithChildren) {
       finally { submitting.current = false; }
     },
     async receipt(chain, hash) { if (!client || offlineNow.current) throw new Error('Reconnect to check the actual network receipt.'); return client.receipt(chain, hash); },
+    /**
+     * Mark a stranded transfer as never arrived. The server refuses this for anything it can
+     * still judge against the chain, so this cannot declare a slow transfer dead.
+     */
+    async resolve(chain, hash) {
+      if (!client || offlineNow.current) throw new Error('Reconnect before resolving a transfer.');
+      const tx = await client.resolve(chain, hash);
+      void refreshHistory();
+      return tx;
+    },
   };
   return <Context value={value}>{children}</Context>;
 }

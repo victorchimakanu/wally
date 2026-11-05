@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { request } from 'node:http';
 import { createWalletApi } from '../scripts/wallet-api-server.mjs';
-import { createWalletService, ethDisplay, ethUnits, QuoteBook, visibleRecord } from '../scripts/wallet-api-core.mjs';
+import { createWalletService, ethDisplay, ethUnits, QuoteBook, visibleRecord, superseded, SETTLED, manualResolve } from '../scripts/wallet-api-core.mjs';
 
 /**
  * The signing tests need the isolated WDK runtime, which is a separate install. Until
@@ -178,4 +178,58 @@ test('a receipt that is not buried yet is pending, not confirmed', needsWdk, asy
     service?.dispose();
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test('superseded: a nonce the chain has moved past can never land, and everything else stays pending', () => {
+  // The rule that unwedges a chain, so the cases are the ones where being wrong costs money.
+  // It must never say "dead" about a transfer that could still arrive — that is how someone
+  // sends the same money twice.
+  assert.equal(superseded({ hasReceipt: false, recordNonce: 7, confirmedNonce: 8 }), true, 'the nonce was spent by something else');
+  assert.equal(superseded({ hasReceipt: false, recordNonce: 7, confirmedNonce: 99 }), true);
+
+  assert.equal(superseded({ hasReceipt: false, recordNonce: 7, confirmedNonce: 7 }), false, 'still the next nonce: in flight');
+  assert.equal(superseded({ hasReceipt: false, recordNonce: 7, confirmedNonce: 6 }), false, 'the chain is behind this transfer');
+  assert.equal(superseded({ hasReceipt: true, recordNonce: 7, confirmedNonce: 99 }), false, 'a receipt settles it, whatever the nonce says');
+
+  // A record written before nonces were journalled cannot be judged. It must not be guessed
+  // at — those go through the explicit user action instead.
+  for (const missing of [undefined, null, NaN, '7', 7.5, Infinity]) {
+    assert.equal(superseded({ hasReceipt: false, recordNonce: missing, confirmedNonce: 99 }), false, `recordNonce ${String(missing)}`);
+    assert.equal(superseded({ hasReceipt: false, recordNonce: 7, confirmedNonce: missing }), false, `confirmedNonce ${String(missing)}`);
+  }
+
+  // Nonce 0 is a real nonce — the first transfer a wallet ever makes.
+  assert.equal(superseded({ hasReceipt: false, recordNonce: 0, confirmedNonce: 1 }), true);
+  assert.equal(superseded({ hasReceipt: false, recordNonce: 0, confirmedNonce: 0 }), false);
+});
+
+test('SETTLED is exactly the statuses that stop blocking the chain', () => {
+  // quote() refuses while anything on a chain is unsettled, so this list is the difference
+  // between a usable wallet and a permanently wedged one.
+  assert.deepEqual([...SETTLED].sort(), ['confirmed', 'failed', 'superseded']);
+  for (const blocking of ['unknown', 'pending']) {
+    assert.equal(SETTLED.includes(blocking), false, `${blocking} must keep blocking`);
+  }
+});
+
+test('marking a transfer as never arrived is refused whenever the chain can answer instead', () => {
+  // The refusal is the point. Letting a person override a judgement Wally can make itself is
+  // the one way this mechanism could cause a double-send: a slow transfer declared dead, the
+  // chain unblocked, the same money sent twice.
+  assert.deepEqual(manualResolve({ status: 'unknown', nonce: 4 }).allowed, false, 'a nonce means the chain can be asked');
+  assert.match(manualResolve({ status: 'unknown', nonce: 4 }).reason, /may arrive/);
+  assert.deepEqual(manualResolve({ status: 'pending', nonce: 0 }).allowed, false, 'nonce 0 is a real nonce');
+
+  // Only the records Wally genuinely cannot judge.
+  assert.deepEqual(manualResolve({ status: 'unknown' }), { allowed: true });
+  assert.deepEqual(manualResolve({ status: 'pending', nonce: undefined }), { allowed: true });
+
+  // Already settled: nothing to do, and not an error either.
+  for (const status of SETTLED) {
+    assert.equal(manualResolve({ status }).allowed, false, status);
+    assert.equal(manualResolve({ status }).reason, 'settled', status);
+  }
+
+  assert.equal(manualResolve(undefined).allowed, false);
+  assert.equal(manualResolve(null).allowed, false);
 });

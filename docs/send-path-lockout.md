@@ -1,11 +1,32 @@
-# A refused broadcast locks the chain, and only Kojo should decide the fix
+# A refused broadcast locked the chain — fixed 5 November 2026
 
-**Status: half fixed. The silence is fixed; the lockout is not, because unwedging it safely
-needs a judgement about the send guard that is not mine to make.**
+**Status: fixed.** Both halves. The node's reason reaches the user, and a transfer that can no
+longer land is now detected and stops blocking the chain.
 
-Measured 23 October 2026 against the real `createWalletService`, not a reproduction.
+The fix is the one this document argued for rather than the one it warned against: **ask the
+chain, do not parse the node's error text.** If the account's nonce has moved past a
+transaction's nonce and that transaction has no receipt, some other transaction consumed the
+nonce. A nonce is spent once, so the transfer is dead and the money never moved. No string
+matching, and no risk of calling `already known` a failure while it confirms.
 
----
+The same rule closes `FEATURE-AUDIT.md` §28.3 — the same recovery phrase sending from two
+phones, where both read one nonce and only one can win — because they were never two problems.
+Both are a record that can never resolve, and `quote()` blocking on it forever.
+
+Three details worth knowing:
+
+- **The nonce is read a few blocks behind the head**, not at it, using the same
+  `CONFIRMATIONS` table the receipt check already uses. A reorg that reversed this verdict
+  would have to be as deep as one that reverses a confirmed transfer. A terminal verdict a
+  reorg can undo is how somebody sends twice.
+- **`confirm()` resolves what is outstanding before it decides to block.** Otherwise the
+  unblocking would only happen when somebody opened Activity, so a dead transfer would keep
+  the chain wedged for as long as nobody looked.
+- **Records written before nonces were journalled cannot be judged**, so they get a deliberate
+  user action — "this never arrived" — which the server refuses for anything it *can* judge.
+  That refusal is what stops the escape hatch becoming a way to send the same money twice.
+
+The history below is kept because the reasoning still matters.
 
 ## What happens
 
