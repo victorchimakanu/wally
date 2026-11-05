@@ -11,6 +11,7 @@
     "build": "tsc && cp src/db/schema.sql dist/db/schema.sql",
     "start": "node dist/server.js",
     "dev": "tsx src/server.ts",
+    "dev:sim": "node scripts/dev-sim.mjs",
     "dev:watch": "tsx watch src/server.ts",
     "cli": "tsx src/cli.ts",
     "typecheck": "tsc --noEmit",

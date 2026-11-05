@@ -1,0 +1,32 @@
+{
+  "loggerLevel": "info",
+  "rpcInitTimeoutMs": 120000,
+  "httpConnectionTimeoutMs": 30000,
+  "serve": {
+    "models": {
+      "wally-llm": {
+        "default": true,
+        "preload": true,
+        "config": {
+          "device": "cpu",
+          "gpu_layers": 0,
+          "ctx_size": 2048,
+          "load_mode": "mmap"
+        },
+        "src": "https://huggingface.co/unsloth/Qwen3-1.7B-GGUF/resolve/d7f544eead698dbd1f15126ef60b45a1e1933222/Qwen3-1.7B-Q4_0.gguf",
+        "type": "llm"
+      }
+    },
+    "cors": {
+      "origins": [
+        "http://localhost:8082",
+        "http://127.0.0.1:8082"
+      ]
+    }
+  },
+  "plugins": [
+    "@qvac/sdk/llamacpp-completion/plugin"
+  ],
+  "requireHttpChecksum": true,
+  "requireSecureTransport": true
+}
