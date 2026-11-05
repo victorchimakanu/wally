@@ -481,3 +481,34 @@ describe("history pagination", () => {
     expect(response.json().items.length).toBeLessThanOrEqual(50);
   });
 });
+
+describe("the stop button", () => {
+  it("reports sending enabled by default, so a forgotten variable cannot disable the wallet", async () => {
+    const response = await app.inject({ method: "GET", url: "/v1/status" });
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body.sendingEnabled, "the safe state must also be the default").toBe(true);
+    expect(body.reason).toBe("");
+    expect(body.version).toBe(1);
+  });
+
+  it("is never cached, because a stop button nobody can refresh is not one", async () => {
+    const response = await app.inject({ method: "GET", url: "/v1/status" });
+    expect(response.headers["cache-control"]).toContain("no-store");
+  });
+
+  it("turns sending off for every app when a reason is set", async () => {
+    vi.resetModules();
+    vi.stubEnv("SENDING_DISABLED_REASON", "A send bug is being fixed. Your funds are untouched.");
+    const { buildServer: build } = await import("../src/server.js");
+    const disabled = build();
+
+    const body = (await disabled.inject({ method: "GET", url: "/v1/status" })).json();
+    expect(body.sendingEnabled).toBe(false);
+    // The text is shown to users verbatim, so it has to survive intact.
+    expect(body.reason).toBe("A send bug is being fixed. Your funds are untouched.");
+
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+});

@@ -107,6 +107,14 @@ const MUTATIONS = [
    "    `${host}/api/v2/addresses/${address}/transactions?filter=to%20%7C%20from`,",
    "the 422 regression returns"],
 
+  // the stop button
+  ["stop-button-ignored", "src/routes/status.ts",
+   "      sendingEnabled: disabled.length === 0,", "      sendingEnabled: true,",
+   "the kill switch reports enabled even when an operator disabled sending"],
+  ["stop-button-cached", "src/server.ts",
+   '    reply.header("Cache-Control", "no-store");', "    ;",
+   "responses become cacheable, including the stop button after it is pressed"],
+
   // concurrency
   ["no-coalescing-rpc", "src/routes/rpc.ts",
    "      const result = await flight.run(flightKey, () =>",

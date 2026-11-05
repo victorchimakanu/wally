@@ -111,6 +111,22 @@ const Schema = z.object({
    */
   appKey: z.string().optional(),
 
+  /**
+   * Set this to a sentence and /v1/status tells every app to stop sending, showing this text
+   * as the reason. Empty means sending is enabled, so the safe state is also the default and
+   * nobody can disable the wallet by forgetting a variable.
+   *
+   * The sentence is shown to users verbatim, so write it as a person: what is wrong, that
+   * their funds are untouched, and when to try again.
+   */
+  sendingDisabledReason: z.string().default(""),
+
+  /**
+   * Builds below this refuse to send. Empty disables the check, which is the default — a
+   * version gate nobody maintains is a way to brick working installs.
+   */
+  minimumAppVersion: z.string().default(""),
+
   /** Requests per minute per client IP, across all routes. */
   rateLimitPerMinute: z.coerce.number().int().positive().default(120),
 
@@ -177,6 +193,8 @@ function build() {
     coingeckoApiKey: process.env["COINGECKO_API_KEY"] || undefined,
     rpcAllowBroadcast: process.env["RPC_ALLOW_BROADCAST"],
     appKey: process.env["WALLY_APP_KEY"] || undefined,
+    sendingDisabledReason: process.env["SENDING_DISABLED_REASON"],
+    minimumAppVersion: process.env["MINIMUM_APP_VERSION"],
     rateLimitPerMinute: process.env["RATE_LIMIT_PER_MINUTE"],
     trustedProxy: process.env["TRUSTED_PROXY"],
     allowedOrigins: process.env["ALLOWED_ORIGINS"],
@@ -215,6 +233,9 @@ function build() {
       "Note: INDEXER_PROVIDER=etherscan but ETHERSCAN_API_KEY is unset — Activity will fail.\n" +
         "  Get a free key at https://etherscan.io/apis (one key covers both chains).",
     );
+  }
+  if (cfg.sendingDisabledReason.trim()) {
+    console.error(`SENDING IS DISABLED for every app: "${cfg.sendingDisabledReason.trim()}"\n  Unset SENDING_DISABLED_REASON and restart to re-enable.`);
   }
   if (loopback && !cfg.appKey) {
     console.error("Note: no WALLY_APP_KEY set. Fine on loopback; required before exposing this service.");
