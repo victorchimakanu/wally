@@ -90,3 +90,18 @@ test('a build number is shown in parentheses, and omitted rather than faked', ()
   // It has to survive into the string someone pastes, not just the card.
   assert.match(supportSummary(buildInfo({ appVersion: '1.0.0', buildNumber: '42', os: 'ios' })), /Wally 1\.0\.0 \(42\)/);
 });
+
+test('no version is hardcoded in the Settings screen', async () => {
+  // The "App version" row used to read `subtitle="1.0.0 · Frontend preview"` — a literal that
+  // was already stale (the app stopped being a preview when it was renamed) and that would
+  // keep claiming 1.0.0 after a release bumped the real version, which is the one moment the
+  // number matters. A literal is easy to reintroduce, so this guards the source itself.
+  const { readFile } = await import('node:fs/promises');
+  const source = await readFile(new URL('../src/screens/Settings.tsx', import.meta.url), 'utf8');
+  // Comments are stripped first: the ones above explain the old literal by quoting it, and
+  // documenting the bug must not trip the guard against it.
+  const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const hardcoded = code.match(/["'`][^"'`]*\b\d+\.\d+\.\d+\b[^"'`]*["'`]/g) ?? [];
+  assert.deepEqual(hardcoded, [], `version literals must come from app.json: ${hardcoded.join(', ')}`);
+  assert.match(source, /Constants\.expoConfig\?\.version/, 'the version must be read from the app config');
+});
