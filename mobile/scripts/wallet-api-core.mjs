@@ -8,7 +8,24 @@ export const NETWORKS = {
   arbitrum: { name: 'Arbitrum Sepolia', chainId: 421614, rpc: 'https://sepolia-rollup.arbitrum.io/rpc', explorer: 'https://sepolia.arbiscan.io', indexer: 'https://arbitrum-sepolia.blockscout.com' },
   ethereum: { name: 'Ethereum Sepolia', chainId: 11155111, rpc: 'https://ethereum-sepolia-rpc.publicnode.com', explorer: 'https://sepolia.etherscan.io', indexer: 'https://eth-sepolia.blockscout.com' },
 };
-export function ethUnits(text) {
+/**
+ * Accept a comma as a decimal separator. Must stay identical to normaliseAmount() in
+ * mobile/src/services/wallet-api.ts — the app validates an amount before sending it here, and
+ * two parsers that disagree is a transfer that passes one check and fails the other.
+ *
+ * A lone comma is always a decimal point. `1,250` is ambiguous, and of the two readings the
+ * decimal one risks sending a thousand times less while the grouping one risks sending a
+ * thousand times more. Anything more ambiguous is refused rather than guessed at.
+ */
+export function normaliseAmount(text) {
+  if (typeof text !== 'string') return text;
+  const commas = (text.match(/,/g) ?? []).length;
+  if (commas === 0) return text;
+  if (commas > 1 || text.includes('.')) return text;
+  return text.replace(',', '.');
+}
+export function ethUnits(raw) {
+  const text = normaliseAmount(raw);
   if (typeof text !== 'string' || !/^(?:0|[1-9]\d{0,3})(?:\.\d{1,18})?$/.test(text)) throw new Error('Enter an ETH amount with up to 18 decimals.');
   const [whole, fraction = ''] = text.split('.');
   const value = BigInt(whole) * 10n ** 18n + BigInt(fraction.padEnd(18, '0'));
@@ -138,11 +155,34 @@ export async function createWalletService(directory, { transport = fetch } = {})
       save(); return visibleRecord(record);
     } finally { sending = false; }
   }
+  /**
+   * How deep a receipt must be before a transfer is called confirmed.
+   *
+   * A receipt alone is not finality. A chain reorganisation can remove a block that already
+   * had one, and until 5 Nov 2026 this said "confirmed" the instant a receipt appeared — so
+   * Wally could tell someone their money arrived and never correct itself when it had not.
+   *
+   * Ethereum Sepolia reorgs a block or two routinely, so three. Arbitrum's sequencer makes
+   * single-block reorgs the realistic case, so two — still more than one, because the point is
+   * not to trust the first answer.
+   */
+  const CONFIRMATIONS = { ethereum: 3, arbitrum: 2 };
+
   async function receipt(chain, hash) {
     if (!Object.hasOwn(NETWORKS, chain) || !/^0x[\da-f]{64}$/i.test(hash)) throw new Error('Invalid transaction lookup.');
     await checked(chain); const result = await rpc(chain, 'eth_getTransactionReceipt', [hash]);
     const record = journal.find(item => item.hash.toLowerCase() === hash.toLowerCase() && item.chain === chain);
-    const status = result ? BigInt(result.status) === 1n ? 'confirmed' : 'failed' : record?.status ?? 'pending';
+    let status = result ? BigInt(result.status) === 1n ? 'confirmed' : 'failed' : record?.status ?? 'pending';
+    // A successful receipt that is not yet deep enough stays pending: it is on chain, but it
+    // is not yet safe to say so. A failed one is reported immediately — a reorg cannot make a
+    // failure into a success without also changing the hash.
+    if (status === 'confirmed') {
+      try {
+        const head = BigInt(await rpc(chain, 'eth_blockNumber'));
+        const depth = head - BigInt(result.blockNumber) + 1n;
+        if (depth < BigInt(CONFIRMATIONS[chain] ?? 3)) status = 'pending';
+      } catch { status = 'pending'; } // cannot prove depth, so do not claim confirmation
+    }
     if (record && record.status !== status) { record.status = status; save(); }
     return { ...(record ? visibleRecord(record) : { hash, chain, explorerUrl: `${NETWORKS[chain].explorer}/tx/${hash}` }), status, blockNumber: result?.blockNumber ? Number(BigInt(result.blockNumber)) : null, checkedAt: Date.now() };
   }

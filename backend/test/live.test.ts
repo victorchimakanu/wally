@@ -421,3 +421,63 @@ describe("regressions found by auditing against the app, 22 Oct 2026", () => {
     }
   });
 });
+
+describe("history pagination", () => {
+  /** Returns `count` distinct Etherscan rows, so a full page can be simulated. */
+  function rows(count: number, seed: string) {
+    return Array.from({ length: count }, (_, i) => ({
+      hash: "0x" + `${seed}${i}`.padStart(64, "0"),
+      from: ADDR("1"), to: ADDR("2"), value: "1000000000000000000",
+      gasUsed: "21000", gasPrice: "1000000000",
+      timeStamp: String(1_700_000_000 - i), blockNumber: String(900 - i), isError: "0",
+    }));
+  }
+
+  it("asks the indexer for the page the caller requested", async () => {
+    const calls = stubByChain(() => ({ status: 200, body: etherscanOk(rows(2, "a")) }));
+    const response = await app.inject({ method: "GET", url: `/v1/history?chain=ethereum&address=${ADDR("3")}&page=4` });
+
+    expect(response.statusCode).toBe(200);
+    expect(calls[0]).toContain("page=4");
+    expect(response.json().page).toBe(4);
+  });
+
+  it("defaults to page 1 and reports when there is more", async () => {
+    // A full page from one chain means there is probably more behind it.
+    stubByChain(() => ({ status: 200, body: etherscanOk(rows(50, "b")) }));
+    const full = await app.inject({ method: "GET", url: `/v1/history?chain=ethereum&address=${ADDR("4")}` });
+    expect(full.json().page).toBe(1);
+    expect(full.json().hasMore, "a full page implies more history exists").toBe(true);
+
+    stubByChain(() => ({ status: 200, body: etherscanOk(rows(3, "c")) }));
+    const partial = await app.inject({ method: "GET", url: `/v1/history?chain=ethereum&address=${ADDR("5")}` });
+    expect(partial.json().hasMore, "a short page is the end").toBe(false);
+  });
+
+  it("refuses a page that is not a sensible number", async () => {
+    for (const bad of ["0", "-1", "1.5", "abc", "999999"]) {
+      const response = await app.inject({ method: "GET", url: `/v1/history?chain=ethereum&address=${ADDR("6")}&page=${bad}` });
+      expect(response.statusCode, `page=${bad} must be refused`).toBe(400);
+    }
+  });
+
+  it("caches each page separately, so page 2 is not served page 1", async () => {
+    const calls = stubByChain(() => ({ status: 200, body: etherscanOk(rows(2, "d")) }));
+    // A distinct address: the history cache is module-level and shared across this file, and
+    // an earlier case already warmed ADDR("7") at page 1, which made this look like a cache
+    // bug when it was a colliding fixture.
+    const address = "0x" + "9a".repeat(20);
+    await app.inject({ method: "GET", url: `/v1/history?chain=ethereum&address=${address}&page=1` });
+    await app.inject({ method: "GET", url: `/v1/history?chain=ethereum&address=${address}&page=2` });
+    // Two different questions, so two upstream calls despite the same address.
+    expect(calls).toHaveLength(2);
+    expect(calls[1]).toContain("page=2");
+  });
+
+  it("still never returns more than parseHistory accepts", async () => {
+    stubByChain(() => ({ status: 200, body: etherscanOk(rows(50, "e")) }));
+    const response = await app.inject({ method: "GET", url: `/v1/history?address=${ADDR("8")}` });
+    // Both chains return 50 each; the merged response must still cap at 50.
+    expect(response.json().items.length).toBeLessThanOrEqual(50);
+  });
+});

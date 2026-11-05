@@ -21,7 +21,7 @@
  * shown to be tested.
  */
 import { spawnSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -81,7 +81,13 @@ const MUTATIONS = [
    "        if (seen.has(id)) return false;", "        if (false) return false;",
    "the same transaction appears twice"],
   ["history-cap-raised", "src/routes/history.ts",
-   "      .slice(0, 50);", "      .slice(0, 500);", "more items than parseHistory accepts"],
+   "      .slice(0, PAGE_SIZE);", "      .slice(0, 500);", "more items than parseHistory accepts"],
+  ["history-page-ignored", "src/routes/history.ts",
+   "fetchHistory(chain, address, page)", "fetchHistory(chain, address, 1)",
+   "every page returns page 1, so old history stays unreachable"],
+  ["history-page-unvalidated", "src/routes/history.ts",
+   "    if (!Number.isInteger(page) || page < 1 || page > MAX_PAGE) {", "    if (false) {",
+   "a nonsense page reaches the provider and spends quota"],
   ["history-weak-address", "src/routes/history.ts",
    "const ADDRESS = /^0x[0-9a-fA-F]{40}$/;", "const ADDRESS = /^0x/;",
    "a malformed address reaches the indexer"],
@@ -128,8 +134,46 @@ const MUTATIONS = [
 const suitePasses = () =>
   spawnSync("npx", ["vitest", "run"], { cwd: BACKEND, encoding: "utf8" }).status === 0;
 
-/** Restore the bytes we read, so uncommitted work survives a run. */
-const restore = (file, original) => writeFileSync(file, original);
+/**
+ * Where a pristine copy lives while its file is mutated.
+ *
+ * `finally` is not enough. On 5 Nov 2026 this process was killed mid-run and left
+ * `broadcast-always-on` applied to src/config.ts — the mutation that makes
+ * eth_sendRawTransaction allowed regardless of RPC_ALLOW_BROADCAST. A security guard was
+ * disabled in the working tree, silently, by the tool meant to prove guards work.
+ *
+ * So the copy goes to disk before the mutation, and `recover()` puts it back on the next run.
+ * A SIGKILL cannot run a finally block, but it also cannot stop the next invocation reading
+ * what is sitting here.
+ */
+const SAFE = path.join(BACKEND, ".mutation-backup");
+
+/** Restore anything a previous run left behind. Runs before anything else. */
+function recover() {
+  if (!existsSync(SAFE)) return;
+  const left = readdirSync(SAFE);
+  for (const name of left) {
+    const rel = Buffer.from(name, "base64url").toString("utf8");
+    const target = path.join(BACKEND, rel);
+    writeFileSync(target, readFileSync(path.join(SAFE, name)));
+    console.error(`  recovered ${rel} — a previous run was interrupted while it was mutated`);
+  }
+  rmSync(SAFE, { recursive: true, force: true });
+  if (left.length) console.error("");
+}
+
+const stash = (rel, original) => {
+  mkdirSync(SAFE, { recursive: true });
+  writeFileSync(path.join(SAFE, Buffer.from(rel).toString("base64url")), original);
+};
+
+/** Restore the bytes we read, and drop the on-disk copy once the file is safe again. */
+const restore = (file, original, rel) => {
+  writeFileSync(file, original);
+  rmSync(path.join(SAFE, Buffer.from(rel).toString("base64url")), { force: true });
+};
+
+recover();
 
 if (!suitePasses()) {
   console.error("The suite is already failing. Fix that before mutation testing means anything.");
@@ -148,12 +192,13 @@ for (const [id, rel, find, replace, meaning] of MUTATIONS) {
     survived.push([id, rel, "anchor missing; this mutation no longer tests anything"]);
     continue;
   }
+  stash(rel, original);
   writeFileSync(file, original.replace(find, replace));
   let caught;
   try {
     caught = !suitePasses();
   } finally {
-    restore(file, original);
+    restore(file, original, rel);
   }
   if (caught) killed++;
   else survived.push([id, rel, meaning]);

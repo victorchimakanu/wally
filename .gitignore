@@ -33,3 +33,4 @@ mobile/.expo/
 # @tetherto packages, so it is reproducible and does not belong in history.
 mobile/.wdk-bundle/
 mobile/.wdk/
+backend/.mutation-backup/

@@ -14,9 +14,48 @@ export type LiveQuote = { id: string; chain: Chain; chainId: number; network: st
 export type LiveTransaction = { hash: string; chain: Chain; status: 'unknown' | 'pending' | 'confirmed' | 'failed'; explorerUrl: string; from?: string; recipient?: string; amount?: string; fee?: string; submittedAt?: number; blockNumber?: number | null; checkedAt?: number };
 export type LiveHistory = { version: 1; fetchedAt: number; source: string; items: LiveTransaction[]; errors: string[] };
 export function isAddress(value: unknown): value is string { return typeof value === 'string' && /^0x[\da-f]{40}$/i.test(value) && !/^0x0{40}$/i.test(value); }
+/**
+ * Accept a comma as a decimal separator, which most of the world and much of Nigeria uses.
+ *
+ * The rule is chosen for its failure direction, not its cleverness. `1,250` is genuinely
+ * ambiguous — 1250 under thousands grouping, 1.250 under a decimal comma — and the two
+ * readings differ by a factor of a thousand. Reading it as a decimal means a user who meant
+ * 1250 sends 1.25: wrong, annoying, recoverable. Reading it as thousands means a user who
+ * meant 1.250 sends 1250: wrong, and their money is gone.
+ *
+ * So a lone comma is always a decimal point, and anything more ambiguous than that — two
+ * commas, or a comma and a period together — is refused rather than guessed at.
+ */
+export function normaliseAmount(value: string): string {
+  if (typeof value !== 'string') return value;
+  const commas = (value.match(/,/g) ?? []).length;
+  if (commas === 0) return value;
+  if (commas > 1 || value.includes('.')) return value; // ambiguous; let the test below refuse it
+  return value.replace(',', '.');
+}
+
 export function wei(value: string): bigint {
-  if (!/^(?:0|[1-9]\d{0,12})(?:\.\d{1,18})?$/.test(value)) throw new Error('Enter an ETH amount with up to 18 decimals.');
-  const [whole, part = ''] = value.split('.'); return BigInt(whole) * 10n ** 18n + BigInt(part.padEnd(18, '0'));
+  const text = normaliseAmount(value);
+  if (!/^(?:0|[1-9]\d{0,12})(?:\.\d{1,18})?$/.test(text)) throw new Error('Enter an ETH amount with up to 18 decimals.');
+  const [whole, part = ''] = text.split('.'); return BigInt(whole) * 10n ** 18n + BigInt(part.padEnd(18, '0'));
+}
+
+/**
+ * The most that can be sent while still leaving enough for the network fee.
+ *
+ * A user cannot send their whole balance — gas has to come out of it — and without this they
+ * type the full number, get "not enough to cover the amount and network fee", and reasonably
+ * read that as a bug. Returns 0n when the balance will not cover a fee at all.
+ *
+ * `bufferPercent` guards against the gas price rising between this estimate and the send.
+ * Erring high costs the user a little dust left behind; erring low costs them a failed
+ * transaction, so the default leans high.
+ */
+export function maxSendable(balanceWei: bigint, gasPriceWei: bigint, gasLimit = 21000n, bufferPercent = 20n): bigint {
+  if (balanceWei <= 0n || gasPriceWei <= 0n || gasLimit <= 0n) return 0n;
+  const fee = gasLimit * gasPriceWei;
+  const reserve = fee + (fee * bufferPercent) / 100n;
+  return balanceWei > reserve ? balanceWei - reserve : 0n;
 }
 /** Wei as ETH for display, cut (never rounded up) to `decimals` places; dust shows as "<0.000001". */
 export function formatEth(value: bigint, decimals = 6): string {

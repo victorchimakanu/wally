@@ -69,6 +69,9 @@ test('WDK signs only the reviewed transaction; uncertain broadcast survives rest
       case 'eth_getBlockByNumber': result = { hash: '0x' + '1'.repeat(64), parentHash: '0x' + '0'.repeat(64), number: '0x1', timestamp: '0x1', nonce: '0x0000000000000000', difficulty: '0x0', gasLimit: '0x1c9c380', gasUsed: '0x0', miner: '0x1111111111111111111111111111111111111111', extraData: '0x', transactions: [], baseFeePerGas: '0x1' }; break;
       case 'eth_sendRawTransaction': broadcasts++; assert.match(request.params[0], /^0x/); throw new Error('Response lost after submission');
       case 'eth_getTransactionReceipt': result = accepted ? { status: '0x1', blockNumber: '0x2' } : null; break;
+      // A receipt alone is not finality: receipt() requires the block to be buried before it
+      // will say confirmed, so the mock has to report a head deep enough past block 0x2.
+      case 'eth_blockNumber': result = '0x9'; break;
       default: throw new Error(`Unexpected mock RPC: ${request.method}`);
     }
     return Response.json({ jsonrpc: '2.0', id: request.id, result });
@@ -112,6 +115,7 @@ test('a broadcast the node refuses is explained, not silently swallowed', needsW
       // The node answers, and refuses. This transaction will never be accepted.
       case 'eth_sendRawTransaction': return Response.json({ jsonrpc: '2.0', id: request.id, error: { code: -32000, message: 'nonce too low' } });
       case 'eth_getTransactionReceipt': result = null; break;
+      case 'eth_blockNumber': result = '0x9'; break;
       default: throw new Error(`Unexpected mock RPC: ${request.method}`);
     }
     return Response.json({ jsonrpc: '2.0', id: request.id, result });
@@ -127,6 +131,49 @@ test('a broadcast the node refuses is explained, not silently swallowed', needsW
     // behaviour must not change. What must not stay is the silence.
     assert.equal(record.status, 'unknown');
     assert.match(record.rejection ?? '', /nonce too low/, 'the node\'s reason must reach the user');
+  } finally {
+    service?.dispose();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('a receipt that is not buried yet is pending, not confirmed', needsWdk, async () => {
+  // Until 5 Nov 2026 a receipt alone meant "confirmed". A chain reorganisation can remove a
+  // block that already had one, so Wally could tell someone their money had arrived and never
+  // correct itself when it had not.
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../internal');
+  const directory = mkdtempSync(path.join(root, 'depth-'));
+  let head = '0x2';                       // the receipt's own block: depth 1
+  const transport = async (url, options) => {
+    if (url.includes('blockscout')) return Response.json({ items: [] });
+    const request = JSON.parse(options.body), chainId = url.includes('arbitrum') ? '0x66eee' : '0xaa36a7';
+    let result;
+    switch (request.method) {
+      case 'eth_chainId': result = chainId; break;
+      case 'eth_getBalance': result = '0xde0b6b3a7640000'; break;
+      case 'eth_getCode': result = '0x'; break;
+      case 'eth_estimateGas': result = '0x5208'; break;
+      case 'eth_gasPrice': case 'eth_maxPriorityFeePerGas': result = '0x3b9aca00'; break;
+      case 'eth_getTransactionCount': result = '0x0'; break;
+      case 'eth_blockNumber': result = head; break;
+      case 'eth_getBlockByNumber': result = { hash: '0x' + '1'.repeat(64), parentHash: '0x' + '0'.repeat(64), number: '0x1', timestamp: '0x1', nonce: '0x0000000000000000', difficulty: '0x0', gasLimit: '0x1c9c380', gasUsed: '0x0', miner: '0x1111111111111111111111111111111111111111', extraData: '0x', transactions: [], baseFeePerGas: '0x1' }; break;
+      case 'eth_sendRawTransaction': result = null; break;
+      case 'eth_getTransactionReceipt': result = { status: '0x1', blockNumber: '0x2' }; break;
+      default: throw new Error(`Unexpected mock RPC: ${request.method}`);
+    }
+    return Response.json({ jsonrpc: '2.0', id: request.id, result });
+  };
+  let service;
+  try {
+    service = await createWalletService(directory, { transport });
+    const hash = '0x' + 'a'.repeat(64);
+
+    // Depth 1: on chain, but not yet safe to say so.
+    assert.equal((await service.receipt('arbitrum', hash)).status, 'pending', 'depth 1 must not be confirmed');
+
+    // Bury it and the same receipt becomes confirmed.
+    head = '0x9';
+    assert.equal((await service.receipt('arbitrum', hash)).status, 'confirmed');
   } finally {
     service?.dispose();
     rmSync(directory, { recursive: true, force: true });

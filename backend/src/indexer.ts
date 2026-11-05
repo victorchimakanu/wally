@@ -121,14 +121,21 @@ function fromEtherscan(chain: Chain, raw: EtherscanTx): LiveTransaction | null {
   return item;
 }
 
-async function viaEtherscan(chain: Chain, address: string): Promise<LiveTransaction[]> {
+/**
+ * Pages are 1-based and capped. The cap exists because each page spends provider quota, and a
+ * client asking for page 5000 is a bug or an attack rather than a user scrolling.
+ */
+export const MAX_PAGE = 20;
+export const PAGE_SIZE = 50;
+
+async function viaEtherscan(chain: Chain, address: string, page: number): Promise<LiveTransaction[]> {
   const url = new URL(config.etherscanBase);
   url.searchParams.set("chainid", String(chain === "arbitrum" ? 421614 : 11155111));
   url.searchParams.set("module", "account");
   url.searchParams.set("action", "txlist");
   url.searchParams.set("address", address);
-  url.searchParams.set("page", "1");
-  url.searchParams.set("offset", "50");
+  url.searchParams.set("page", String(page));
+  url.searchParams.set("offset", String(PAGE_SIZE));
   url.searchParams.set("sort", "desc");
   if (config.etherscanApiKey) url.searchParams.set("apikey", config.etherscanApiKey);
 
@@ -192,7 +199,13 @@ function fromBlockscout(chain: Chain, raw: Record<string, unknown>): LiveTransac
   return item;
 }
 
-async function viaBlockscout(chain: Chain, address: string): Promise<LiveTransaction[]> {
+/**
+ * Blockscout v2 pages by opaque cursor (`next_page_params`), not by number, so it serves the
+ * first page only. That is a known limitation of the fallback provider rather than of the API:
+ * Etherscan is the default and does support numbered pages.
+ */
+async function viaBlockscout(chain: Chain, address: string, page: number): Promise<LiveTransaction[]> {
+  if (page > 1) return [];
   const host = chain === "arbitrum" ? config.indexerArbitrum : config.indexerEthereum;
   // No `filter`: the endpoint already returns transactions in both directions, and the only
   // accepted values are the singular "to" or "from". Asking for `filter=to | from` is a 422
@@ -205,17 +218,17 @@ async function viaBlockscout(chain: Chain, address: string): Promise<LiveTransac
   );
   if (!Array.isArray(body.items)) return [];
   return body.items
-    .slice(0, 50)
+    .slice(0, PAGE_SIZE)
     .map((raw) => fromBlockscout(chain, raw as Record<string, unknown>))
     .filter((tx): tx is LiveTransaction => tx !== null);
 }
 
 // ─── Entry point ──────────────────────────────────────────────────────────────
 
-export async function fetchHistory(chain: Chain, address: string): Promise<{ items: LiveTransaction[]; source: string }> {
+export async function fetchHistory(chain: Chain, address: string, page = 1): Promise<{ items: LiveTransaction[]; source: string }> {
   const provider = config.indexerProvider;
-  log.debug({ chain, provider }, "fetching history");
-  const items = provider === "etherscan" ? await viaEtherscan(chain, address) : await viaBlockscout(chain, address);
+  log.debug({ chain, provider, page }, "fetching history");
+  const items = provider === "etherscan" ? await viaEtherscan(chain, address, page) : await viaBlockscout(chain, address, page);
   return { items, source: provider };
 }
 
