@@ -17,8 +17,11 @@ name: CI
 
 on:
   pull_request:
+  # Integration branches too, not just main. Two pull requests can each be green and still
+  # break once merged — which is precisely what happened on 5 November: `correctness` went red
+  # on a merge and the only thing that noticed was an unrelated pull request's run.
   push:
-    branches: [main]
+    branches: [main, correctness]
 
 # A new push supersedes the run in progress for the same ref. Without this, a branch pushed
 # three times in a minute queues three full runs and the mutation harness is 94 seconds each.
@@ -82,6 +85,14 @@ jobs:
           cache: npm
           cache-dependency-path: mobile/package-lock.json
       - run: npm ci
+
+      # The WDK worklet bundle is generated, 6MB, and gitignored — so a fresh checkout has no
+      # .wdk/ at all, and `wallet-worklet.native.ts` imports it. That typechecked on the
+      # machine that wrote it and nowhere else, which is exactly what CI caught on its first
+      # merge. Generating it takes 2 seconds and has a second benefit: it validates
+      # wdk.config.cjs, a file that was silently broken for weeks because nothing ran it.
+      - run: npm run wdk:generate
+
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test
