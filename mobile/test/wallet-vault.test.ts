@@ -19,12 +19,6 @@ function fakeStorage(): SecureStorage & { items: Map<string, string>; deleted: s
   };
 }
 
-/** Deterministic, so a test can assert the exact stored value. */
-const counting = (): ((n: number) => Uint8Array) => {
-  let call = 0;
-  return (n: number) => { call++; return Uint8Array.from({ length: n }, (_, i) => (i + call) % 256); };
-};
-
 test('base64 encodes with correct padding at every length', () => {
   assert.equal(toBase64(new Uint8Array([])), '');
   assert.equal(toBase64(new Uint8Array([77])), 'TQ==');
@@ -35,22 +29,41 @@ test('base64 encodes with correct padding at every length', () => {
   assert.deepEqual(new Uint8Array(Buffer.from(toBase64(key), 'base64')), key);
 });
 
-test('the encryption key is created once and then reused', async () => {
+test('the encryption key is stored, never invented here', async () => {
   const storage = fakeStorage();
-  const vault = createWalletVault(storage, counting());
+  const vault = createWalletVault(storage);
 
-  const first = await vault.encryptionKey();
-  const second = await vault.encryptionKey();
+  // No wallet yet. This used to generate and store a key, which looked like a sensible
+  // create-once pattern and was wrong: the worklet's generateEntropyAndEncrypt chooses the
+  // key itself and returns it, so a key invented here would never decrypt the ciphertext it
+  // was supposed to belong to. Absent must read as absent.
+  assert.equal(await vault.encryptionKey(), null);
+  assert.equal(storage.items.size, 0, 'reading a key must not create one');
 
-  // A second key would make the stored ciphertext permanently undecryptable.
-  assert.equal(first, second, 'the key must never be regenerated over an existing wallet');
+  await vault.storeEncryptionKey('d29ya2xldC1rZXk=');
+  assert.equal(await vault.encryptionKey(), 'd29ya2xldC1rZXk=');
+
+  // Idempotent for the same key, so a retried setup step is harmless.
+  await vault.storeEncryptionKey('d29ya2xldC1rZXk=');
   assert.equal(storage.items.size, 1);
-  assert.ok(first.length > 0);
+});
+
+test('a second, different key is refused rather than overwriting the first', async () => {
+  const storage = fakeStorage();
+  const vault = createWalletVault(storage);
+  await vault.storeEncryptionKey('Zmlyc3Q=');
+
+  // Overwriting makes the existing wallet permanently unopenable, and the phrase is the only
+  // way back. Replacing a wallet goes through clear() instead.
+  await assert.rejects(() => vault.storeEncryptionKey('c2Vjb25k'), /already stored/);
+  assert.equal(await vault.encryptionKey(), 'Zmlyc3Q=');
+
+  await assert.rejects(() => vault.storeEncryptionKey('   '), /empty encryption key/);
 });
 
 test('a corrupt or partial record reads as absent, never as repaired', async () => {
   const storage = fakeStorage();
-  const vault = createWalletVault(storage, counting());
+  const vault = createWalletVault(storage);
 
   for (const bad of [
     'not json at all',
@@ -68,7 +81,7 @@ test('a corrupt or partial record reads as absent, never as repaired', async () 
 
 test('a good record round-trips and reports the wallet as present', async () => {
   const storage = fakeStorage();
-  const vault = createWalletVault(storage, counting());
+  const vault = createWalletVault(storage);
 
   assert.equal(await vault.has(), false);
   await vault.write({ encryptedEntropy: 'ZW50', encryptedSeed: 'c2VlZA==', wordCount: 12, backedUpAt: 0 });
@@ -83,7 +96,7 @@ test('a good record round-trips and reports the wallet as present', async () => 
 
 test('a malformed write is refused rather than stored', async () => {
   const storage = fakeStorage();
-  const vault = createWalletVault(storage, counting());
+  const vault = createWalletVault(storage);
 
   await assert.rejects(
     () => vault.write({ encryptedEntropy: '', encryptedSeed: 'x', wordCount: 12, backedUpAt: 0 }),
@@ -94,7 +107,7 @@ test('a malformed write is refused rather than stored', async () => {
 
 test('backed-up state is recorded, and cannot be set without a wallet', async () => {
   const storage = fakeStorage();
-  const vault = createWalletVault(storage, counting());
+  const vault = createWalletVault(storage);
 
   await assert.rejects(() => vault.markBackedUp(1_700_000_000_000), /no wallet/);
 
@@ -110,9 +123,9 @@ test('backed-up state is recorded, and cannot be set without a wallet', async ()
 
 test('clear removes the key as well as the record', async () => {
   const storage = fakeStorage();
-  const vault = createWalletVault(storage, counting());
+  const vault = createWalletVault(storage);
 
-  await vault.encryptionKey();
+  await vault.storeEncryptionKey('d29ya2xldC1rZXk=');
   await vault.write({ encryptedEntropy: 'ZW50', encryptedSeed: 'c2VlZA==', wordCount: 12, backedUpAt: 0 });
   await vault.clear();
 
@@ -132,4 +145,21 @@ test('isVaultRecord rejects everything that is not exactly the shape', () => {
     isVaultRecord({ version: 1, encryptedEntropy: 'a', encryptedSeed: 'b', wordCount: 12, backedUpAt: 0 }),
     true,
   );
+});
+
+test('base64 round-trips, and refuses damaged key material rather than returning part of it', async () => {
+  const { fromBase64 } = await import('../src/services/wallet-vault.ts');
+
+  for (const length of [0, 1, 2, 3, 16, 31, 32, 64, 65]) {
+    const bytes = Uint8Array.from({ length }, (_, i) => (i * 37 + 11) % 256);
+    assert.deepEqual(fromBase64(toBase64(bytes)), bytes, `${length} bytes must round-trip`);
+  }
+
+  // Agreement with Node's own decoder, so the hand-rolled pair is not merely self-consistent.
+  const key = Uint8Array.from({ length: 32 }, (_, i) => (i * 7) % 256);
+  assert.deepEqual(fromBase64(Buffer.from(key).toString('base64')), key);
+
+  // Half a key is not a key. A silent partial decode would mean a decrypt that yields rubbish.
+  assert.throws(() => fromBase64('not base64!'), /not valid base64/);
+  assert.throws(() => fromBase64('AAAAA'), /truncated/);
 });
