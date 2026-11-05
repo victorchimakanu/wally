@@ -24,7 +24,7 @@ import { bundle } from '../../.wdk/index.js';
 import { createWalletVault } from './wallet-vault.ts';
 import { createKeystore, type Keystore, type WorkletRpc } from './wallet-keystore.ts';
 import { loadSecureStorage } from './secure-storage.ts';
-import { backendOrigin } from './backend.ts';
+import { backendOrigin, backendHeaders } from './backend.ts';
 import { Platform } from 'react-native';
 
 export const keystoreAvailable = true;
@@ -35,24 +35,53 @@ let shared: Keystore | null = null;
 /**
  * The networks WDK boots with, as a JSON string.
  *
- * It points at the backend proxy's own RPC route rather than a node url, for the same reason
- * the rest of the app does: the proxy keeps provider keys off the device and enforces a method
- * allowlist. That has one consequence worth knowing before this ships — **broadcasting a
- * signed transaction through the proxy needs `RPC_ALLOW_BROADCAST=true`**, which is open
- * decision 4 in CLAUDE.md and is off by default. Reads work either way; a send will be
- * refused by the proxy until that is decided.
+ * Everything points at the backend proxy rather than at a provider directly, for the same
+ * reason throughout: the keys stay off the device. For the bundler and paymaster that matters
+ * more than for the RPC — Pimlico puts its API key in the endpoint URL, so an app carrying it
+ * hands anyone who unzips the APK a sponsorship budget to spend.
  *
- * Built from the same origin Activity and balances use, so a wallet cannot sign against one
- * chain while history is read from another — the class of bug that makes a transfer look lost.
+ * **Gasless is Arbitrum only, and it is sponsorship rather than fees-in-USDT.** The README's
+ * promise — "fees in USDT" — cannot be delivered on the chain this app actually runs on: no
+ * USDT paymaster exists on Arbitrum Sepolia. Pimlico's supported tokens there are USDC, EURe,
+ * ostUSDC and PIM; USDT appears only on Arbitrum One (verified against Pimlico's own
+ * supported-token list, 5 Nov 2026). So on testnet Wally sponsors the gas, which keeps the
+ * part of the promise that matters to a user — they never need to hold ETH — and leaves
+ * fees-in-USDT as a mainnet change rather than a fiction.
+ *
+ * Ethereum gets no bundler or paymaster because it is a plain EOA (`@tetherto/wdk-wallet-evm`).
+ * There is no user operation to sponsor.
  */
-function workletConfig(): string {
+async function workletConfig(): Promise<string> {
   const origin = backendOrigin();
   if (!origin) {
     throw new Error('No Wally backend is configured, so the wallet has no chain to talk to. Set EXPO_PUBLIC_WALLY_PROXY_URL.');
   }
+
+  /**
+   * Ask whether gasless is switched on, and treat any failure as "no".
+   *
+   * Falling back to paying gas in native coins is the safe direction. A wallet that asks for
+   * ETH is usable by someone who has ETH; a wallet configured for a paymaster that is not
+   * there fails at the moment of signing, which is the worst place to find out.
+   */
+  let gasless: { available?: unknown; submitEnabled?: unknown } = {};
+  try {
+    const response = await fetch(`${origin}/v1/gasless`, { headers: { Accept: 'application/json', ...backendHeaders(origin) } });
+    if (response.ok) gasless = (await response.json()) as typeof gasless;
+  } catch { /* treated as unavailable */ }
+
+  const arbitrum: Record<string, unknown> = { rpcUrl: `${origin}/v1/rpc/arbitrum` };
+  if (gasless.available === true) {
+    arbitrum['bundlerUrl'] = `${origin}/v1/bundler/arbitrum`;
+    arbitrum['paymasterUrl'] = `${origin}/v1/paymaster/arbitrum`;
+    // Sponsorship mode: Wally pays. `isSponsored` is what selects it over the ERC-20 token
+    // mode, which needs a paymasterAddress and a token address that testnet does not have.
+    arbitrum['isSponsored'] = true;
+  }
+
   return JSON.stringify({
     networks: {
-      arbitrum: { blockchain: 'arbitrum', config: { rpcUrl: `${origin}/v1/rpc/arbitrum` } },
+      arbitrum: { blockchain: 'arbitrum', config: arbitrum },
       ethereum: { blockchain: 'ethereum', config: { rpcUrl: `${origin}/v1/rpc/ethereum` } },
     },
   });

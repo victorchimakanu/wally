@@ -46,11 +46,13 @@ export function createWalletApi(service, { port = 3003, origins = ['http://127.0
       if (req.method === 'GET' && url.pathname === '/api/wallet') return send(200, await service.wallet());
       if (req.method === 'GET' && url.pathname === '/api/wallet/history') return send(200, await service.history());
       if (req.method === 'GET' && url.pathname === '/api/wallet/receipt') return send(200, await service.receipt(url.searchParams.get('chain'), url.searchParams.get('hash')));
-      if (req.method === 'POST' && ['/api/wallet/quote', '/api/wallet/confirm'].includes(url.pathname)) {
+      if (req.method === 'POST' && ['/api/wallet/quote', '/api/wallet/confirm', '/api/wallet/resolve'].includes(url.pathname)) {
         if (!String(req.headers['content-type'] ?? '').startsWith('application/json')) return send(415, { error: 'JSON is required.' });
         let body = ''; for await (const chunk of req) { body += chunk; if (Buffer.byteLength(body) > 4096) return send(413, { error: 'Request too large.' }); }
         let parsed; try { parsed = JSON.parse(body); } catch { return send(400, { error: 'Invalid JSON.' }); }
-        const result = url.pathname.endsWith('/quote') ? await service.quote(session, parsed) : await service.confirm(session, parsed);
+        const result = url.pathname.endsWith('/quote') ? await service.quote(session, parsed)
+          : url.pathname.endsWith('/resolve') ? await service.resolve(session, parsed)
+          : await service.confirm(session, parsed);
         return send(200, result);
       }
       return send(404, { error: 'Unknown API route.' });

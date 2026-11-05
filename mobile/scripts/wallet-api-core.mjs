@@ -34,6 +34,64 @@ export function ethUnits(raw) {
 }
 export function ethDisplay(value) { const n = BigInt(value), whole = n / 10n ** 18n, fraction = (n % 10n ** 18n).toString().padStart(18, '0').replace(/0+$/, ''); return `${whole}${fraction ? '.' + fraction : ''}`; }
 export function validAddress(address) { return typeof address === 'string' && /^0x[\da-fA-F]{40}$/.test(address) && !/^0x0{40}$/i.test(address); }
+/**
+ * Statuses that are final. A record in one of these no longer blocks sending on its chain.
+ *
+ * `unknown` and `pending` are the two that block, and until now nothing could ever leave
+ * `unknown`: a broadcast the node refused recorded the reason and kept the status, so
+ * `quote()` blocked on it forever and that chain could never be used again. See
+ * docs/send-path-lockout.md.
+ */
+export const SETTLED = ['confirmed', 'failed', 'superseded'];
+
+/**
+ * Can this transaction still land?
+ *
+ * The question is answered by asking the chain, not by reading the node's error text. If the
+ * account's nonce has already moved past this transaction's nonce and this transaction has no
+ * receipt, then some *other* transaction consumed that nonce. Nothing can change that: a nonce
+ * is used once. The transfer is dead and the money never moved.
+ *
+ * That single rule covers both of the ways a transfer gets stranded today — a broadcast the
+ * node refused, and the same recovery phrase sending from two phones at once, where both read
+ * the same nonce and only one can win (FEATURE-AUDIT §28.3). Parsing error strings would not:
+ * `already known` means the node *has* it, and calling that a failure would tell someone their
+ * transfer failed while it was confirming.
+ *
+ * Deliberately conservative. Every uncertain case returns false and the record stays pending,
+ * because the cost of being wrong here is someone sending twice.
+ */
+export function superseded({ hasReceipt, recordNonce, confirmedNonce }) {
+  if (hasReceipt) return false;
+  // A record written before nonces were journalled cannot be judged this way. Those are
+  // resolved by an explicit user action instead — see `resolve()`.
+  if (!Number.isInteger(recordNonce) || !Number.isInteger(confirmedNonce)) return false;
+  return confirmedNonce > recordNonce;
+}
+
+/**
+ * May the user declare this transfer dead by hand?
+ *
+ * Only when Wally has no way to find out for itself. A record that carries a nonce can be
+ * judged against the chain, and allowing a person to override *that* is the one way this whole
+ * mechanism could make things worse: a transfer that is merely slow would be declared dead,
+ * the chain unblocked, and the same money sent again.
+ *
+ * So the answer is no whenever the automatic rule applies, and the reason is returned rather
+ * than a bare false, because the refusal is the interesting part.
+ */
+export function manualResolve(record) {
+  if (!record) return { allowed: false, reason: 'That transfer is not one this wallet submitted.' };
+  if (SETTLED.includes(record.status)) return { allowed: false, reason: 'settled' };
+  if (typeof record.nonce === 'number') {
+    return {
+      allowed: false,
+      reason: 'Wally can check this transfer against the network, and the network still says it may arrive. It cannot be marked as never arrived.',
+    };
+  }
+  return { allowed: true };
+}
+
 export function visibleRecord(record) { const { owner, ...visible } = record; return visible; }
 export class QuoteBook {
   constructor(now = Date.now) { this.now = now; this.items = new Map(); }
@@ -131,7 +189,19 @@ export async function createWalletService(directory, { transport = fetch } = {})
     if (sending) throw new Error('A transfer is already being submitted. Check its receipt first.');
     const q = book.claim(owner, body.quoteId, body.approved); sending = true;
     try {
-      if (journal.some(item => item.chain === q.chain && ['unknown', 'pending'].includes(item.status))) throw new Error('A transfer on this network still needs a receipt. Check Activity before sending again.');
+      // Ask the chain about anything still outstanding on this network first. Without this the
+      // unblocking would only happen when somebody opened Activity, so a transfer that can no
+      // longer land would keep the chain wedged for as long as nobody looked.
+      for (const item of journal.filter(item => item.chain === q.chain && !SETTLED.includes(item.status))) {
+        try { await receipt(item.chain, item.hash); } catch { /* leave it outstanding */ }
+      }
+      const outstanding = journal.find(item => item.chain === q.chain && !SETTLED.includes(item.status));
+      if (outstanding) {
+        throw new Error(outstanding.nonce === undefined
+          // Pre-dates journalled nonces, so the rule cannot settle it. Say what to do.
+          ? 'An earlier transfer on this network was never resolved, and it was sent before Wally recorded enough to check it. Open it in Activity and mark it as never arrived to carry on.'
+          : 'A transfer on this network still needs a receipt. Check Activity before sending again.');
+      }
       await checked(q.chain);
       const a = await account(q.chain), tx = q.tx;
       const balance = await a.getBalance(); if (balance < tx.value + BigInt(q.feeWei)) throw new Error('The balance changed. Request a fresh review.');
@@ -141,7 +211,9 @@ export async function createWalletService(directory, { transport = fetch } = {})
       const raw = await a.signTransaction(tx), decoded = ethers.Transaction.from(raw);
       if (decoded.to !== tx.to || decoded.from?.toLowerCase() !== q.from.toLowerCase() || decoded.value !== tx.value || decoded.data !== '0x' || decoded.chainId !== BigInt(tx.chainId) || decoded.nonce !== tx.nonce || decoded.gasLimit !== tx.gasLimit || decoded.gasPrice !== tx.gasPrice || decoded.type !== 0) throw new Error('The signed transaction did not match the approved review. Nothing was broadcast.');
       const hash = ethers.keccak256(raw);
-      const record = { quoteId: q.id, owner, hash, chain: q.chain, network: NETWORKS[q.chain].name, from: q.from, recipient: q.recipient, amount: q.amount, fee: q.fee, status: 'unknown', submittedAt: Date.now(), explorerUrl: `${NETWORKS[q.chain].explorer}/tx/${hash}`, symbol: 'ETH' };
+      // nonce is journalled so a stranded record can later be judged against the chain: if the
+      // account has moved past this nonce and this hash has no receipt, it can never land.
+      const record = { quoteId: q.id, owner, hash, chain: q.chain, network: NETWORKS[q.chain].name, from: q.from, recipient: q.recipient, amount: q.amount, fee: q.fee, nonce: tx.nonce, status: 'unknown', submittedAt: Date.now(), explorerUrl: `${NETWORKS[q.chain].explorer}/tx/${hash}`, symbol: 'ETH' };
       journal.unshift(record); save();
       try { const returned = await rpc(q.chain, 'eth_sendRawTransaction', [raw]); if (returned?.toLowerCase() === hash.toLowerCase()) record.status = 'pending'; }
       catch (error) {
@@ -183,9 +255,64 @@ export async function createWalletService(directory, { transport = fetch } = {})
         if (depth < BigInt(CONFIRMATIONS[chain] ?? 3)) status = 'pending';
       } catch { status = 'pending'; } // cannot prove depth, so do not claim confirmation
     }
+    // No receipt: the transaction may still be in flight, or its nonce may already have been
+    // spent by another transaction — from a second phone holding the same recovery phrase, or
+    // a replacement — in which case it is dead and the money never moved.
+    //
+    // The account nonce is read a few blocks behind the head rather than at it. A reorg that
+    // reversed this verdict would then have to be as deep as one that reverses a confirmed
+    // transfer, which is the same bar the app already accepts above for calling anything
+    // confirmed. A terminal verdict that a reorg could undo is how someone ends up sending
+    // twice, and the saving would have been seconds.
+    if (!result && record && typeof record.nonce === 'number' && !SETTLED.includes(status)) {
+      try {
+        const head = BigInt(await rpc(chain, 'eth_blockNumber'));
+        const behind = BigInt(CONFIRMATIONS[chain] ?? 3);
+        if (head >= behind) {
+          const buried = ethers.toQuantity(head - behind);
+          const confirmedNonce = Number(BigInt(await rpc(chain, 'eth_getTransactionCount', [record.from, buried])));
+          if (superseded({ hasReceipt: false, recordNonce: record.nonce, confirmedNonce })) status = 'superseded';
+        }
+      } catch { /* cannot prove it, so claim nothing and leave the record as it was */ }
+    }
     if (record && record.status !== status) { record.status = status; save(); }
     return { ...(record ? visibleRecord(record) : { hash, chain, explorerUrl: `${NETWORKS[chain].explorer}/tx/${hash}` }), status, blockNumber: result?.blockNumber ? Number(BigInt(result.blockNumber)) : null, checkedAt: Date.now() };
   }
+  /**
+   * "This never arrived" — the deliberate way out for a record the chain cannot settle.
+   *
+   * Only for records written before nonces were journalled. Everything newer is judged against
+   * the chain, and letting a user override *that* would be the one way this work could make
+   * things worse: a transfer that is merely slow would be declared dead, the chain unblocked,
+   * and the same money sent twice.
+   *
+   * So this refuses whenever the automatic rule applies. Wally cannot prove what happened to
+   * the records it does accept, and the copy around this action says so — the block explorer is
+   * where the truth is.
+   */
+  async function resolve(owner, body) {
+    if (!body || typeof body !== 'object' || Object.keys(body).some(key => !['chain', 'hash'].includes(key)) || !Object.hasOwn(NETWORKS, body.chain) || !/^0x[\da-f]{64}$/i.test(String(body.hash))) {
+      throw new Error('Name the exact transfer to resolve.');
+    }
+    const record = journal.find(item => item.owner === owner && item.chain === body.chain && item.hash.toLowerCase() === String(body.hash).toLowerCase());
+    if (!record) throw new Error('That transfer is not one this wallet submitted.');
+    const verdict = manualResolve(record);
+    if (!verdict.allowed) {
+      if (verdict.reason === 'settled') return visibleRecord(record);
+      // Ask the chain once more rather than simply refusing — it may have become answerable
+      // since the screen was drawn, in which case the user gets the real verdict instead of a
+      // refusal they can do nothing about.
+      try { await receipt(record.chain, record.hash); } catch { /* fall through to the refusal */ }
+      const current = journal.find(item => item.hash === record.hash && item.chain === record.chain);
+      if (current && SETTLED.includes(current.status)) return visibleRecord(current);
+      throw new Error(verdict.reason);
+    }
+    record.status = 'superseded';
+    record.resolvedByUser = Date.now();
+    save();
+    return visibleRecord(record);
+  }
+
   async function history() {
     const errors = [], items = [];
     await Promise.all(Object.entries(NETWORKS).map(async ([chain, network]) => {
@@ -195,6 +322,6 @@ export async function createWalletService(directory, { transport = fetch } = {})
     await Promise.all(journal.slice(0, 25).map(async record => { try { await receipt(record.chain, record.hash); } catch {} if (!items.some(item => item.hash === record.hash && item.chain === record.chain)) items.push(visibleRecord(record)); }));
     return { version: 1, source: 'Blockscout and local submission receipts', fetchedAt: Date.now(), items: items.sort((a, b) => b.submittedAt - a.submittedAt).slice(0, 50), errors };
   }
-  return { wallet, quote, confirm, receipt, history, dispose: () => { for (const manager of managers.values()) manager.dispose(); }, seedFile };
+  return { wallet, quote, confirm, receipt, resolve, history, dispose: () => { for (const manager of managers.values()) manager.dispose(); }, seedFile };
 }
 export function newSession() { return randomBytes(32).toString('hex'); }

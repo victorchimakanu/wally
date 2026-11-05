@@ -29,6 +29,23 @@ const BACKEND = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 
 /** [id, file relative to backend/, find, replace, what the bug would mean] */
 const MUTATIONS = [
+  // gasless: the one route that spends money when it is used
+  ["gasless-method-allowlist-gone", "src/routes/gasless.ts",
+   "    if (!allowed.includes(body.method)) {", "    if (false) {",
+   "any bundler or paymaster method is forwarded"],
+  ["gasless-serves-without-config", "src/routes/gasless.ts",
+   "    if (!target) {", "    if (false) {",
+   "an unconfigured service forwards to undefined instead of refusing"],
+  ["gasless-submit-always-allowed", "src/config.ts",
+   "  return config.rpcAllowBroadcast ? [...BUNDLER_READ_METHODS, \"eth_sendUserOperation\"] : BUNDLER_READ_METHODS;",
+   "  return [...BUNDLER_READ_METHODS, \"eth_sendUserOperation\"];",
+   "a user operation is submitted while broadcasting is switched off"],
+  ["gasless-batches-accepted", "src/routes/gasless.ts",
+   "    if (Array.isArray(body)) {", "    if (false) {",
+   "a batch fans out past the rate limit that protects the budget"],
+  ["gasless-returns-upstream-id", "src/routes/gasless.ts",
+   "      return reply.send({ ...result, id });", "      return reply.send(result);",
+   "a coalesced response carries another caller's JSON-RPC id"],
   // access control
   ["auth-always-match", "src/server.ts",
    "  return timingSafeEqual(a, b);", "  return true;", "any key is accepted"],

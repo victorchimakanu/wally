@@ -112,6 +112,20 @@ const Schema = z.object({
   appKey: z.string().optional(),
 
   /**
+   * ERC-4337 bundler and paymaster, for Arbitrum only.
+   *
+   * Arbitrum is the only chain running a smart account — Ethereum uses
+   * `@tetherto/wdk-wallet-evm`, a plain EOA, where there is no user operation to bundle and
+   * nothing a paymaster could sponsor. Separate variables rather than one, because Pimlico
+   * happens to serve both from a single URL and another provider may not.
+   *
+   * Both are optional and absent by default. Gasless is off until an operator configures it,
+   * and the routes say so rather than failing obscurely.
+   */
+  bundlerArbitrum: z.string().url().optional(),
+  paymasterArbitrum: z.string().url().optional(),
+
+  /**
    * Set this to a sentence and /v1/status tells every app to stop sending, showing this text
    * as the reason. Empty means sending is enabled, so the safe state is also the default and
    * nobody can disable the wallet by forgetting a variable.
@@ -193,6 +207,8 @@ function build() {
     coingeckoApiKey: process.env["COINGECKO_API_KEY"] || undefined,
     rpcAllowBroadcast: process.env["RPC_ALLOW_BROADCAST"],
     appKey: process.env["WALLY_APP_KEY"] || undefined,
+    bundlerArbitrum: process.env["BUNDLER_URL_ARBITRUM"] || undefined,
+    paymasterArbitrum: process.env["PAYMASTER_URL_ARBITRUM"] || undefined,
     sendingDisabledReason: process.env["SENDING_DISABLED_REASON"],
     minimumAppVersion: process.env["MINIMUM_APP_VERSION"],
     rateLimitPerMinute: process.env["RATE_LIMIT_PER_MINUTE"],
@@ -280,3 +296,53 @@ export function onLoopback(): boolean {
 export function allowedRpcMethods(): readonly string[] {
   return config.rpcAllowBroadcast ? [...RPC_READ_METHODS, "eth_sendRawTransaction"] : RPC_READ_METHODS;
 }
+
+/**
+ * Bundler and paymaster urls, or undefined when gasless is not configured.
+ *
+ * Arbitrum only, deliberately: see the schema above.
+ */
+export function bundlerUrl(chain: Chain): string | undefined {
+  return chain === "arbitrum" ? config.bundlerArbitrum : undefined;
+}
+export function paymasterUrl(chain: Chain): string | undefined {
+  return chain === "arbitrum" ? config.paymasterArbitrum : undefined;
+}
+
+/**
+ * The methods a bundler is asked for, taken from `abstractionkit` — the library the installed
+ * `@tetherto/wdk-wallet-evm-erc-4337` actually calls — rather than from a provider's docs.
+ *
+ * `eth_sendUserOperation` is behind the same flag as `eth_sendRawTransaction`, because it is
+ * the same decision: whether this service is willing to put a user's transaction on chain.
+ * Allowing a user operation while refusing a raw transaction would be an accident, not a
+ * policy.
+ */
+const BUNDLER_READ_METHODS = [
+  "eth_estimateUserOperationGas",
+  "eth_getUserOperationByHash",
+  "eth_getUserOperationReceipt",
+  "eth_supportedEntryPoints",
+  "eth_chainId",
+  "pimlico_getUserOperationGasPrice",
+] as const;
+
+export function allowedBundlerMethods(): readonly string[] {
+  return config.rpcAllowBroadcast ? [...BUNDLER_READ_METHODS, "eth_sendUserOperation"] : BUNDLER_READ_METHODS;
+}
+
+/**
+ * Paymaster methods, from the same source.
+ *
+ * `pimlico_getTokenQuotes` belongs to the ERC-20 fee mode, which Wally does not use on testnet
+ * — no USDT paymaster exists on Arbitrum Sepolia (verified against Pimlico's supported-token
+ * list, 5 Nov 2026). It is allowed anyway so the mainnet token mode needs no code change here,
+ * and because a quote is a read that spends nothing.
+ */
+export const PAYMASTER_METHODS = [
+  "pm_getPaymasterData",
+  "pm_getPaymasterStubData",
+  "pm_supportedEntryPoints",
+  "pm_chainId",
+  "pimlico_getTokenQuotes",
+] as const;

@@ -11,7 +11,13 @@ export const CHAINS = { arbitrum: { name: 'Arbitrum Sepolia', id: 421614, explor
 export type WalletBalance = { chain: Chain; name: string; chainId: number; symbol: 'ETH'; address: string; qr: string; balance: string | null; balanceWei: string | null; error: string };
 export type WalletSnapshot = { version: 1; network: 'testnet'; location: 'computer'; fetchedAt: number; balances: WalletBalance[]; tokenNotice: string };
 export type LiveQuote = { id: string; chain: Chain; chainId: number; network: string; symbol: 'ETH'; from: string; recipient: string; amount: string; fee: string; total: string; expiresAt: number };
-export type LiveTransaction = { hash: string; chain: Chain; status: 'unknown' | 'pending' | 'confirmed' | 'failed'; explorerUrl: string; from?: string; recipient?: string; amount?: string; fee?: string; submittedAt?: number; blockNumber?: number | null; checkedAt?: number };
+/**
+ * `superseded` means the transfer can never land: the account's nonce was spent by a different
+ * transaction, so this one is dead and the money never moved. It is deliberately not `failed` —
+ * a failed transaction ran on the chain and cost a fee, and only `superseded` carries the
+ * guarantee that nothing happened at all. See FEATURE-AUDIT §28.3.
+ */
+export type LiveTransaction = { hash: string; chain: Chain; status: 'unknown' | 'pending' | 'confirmed' | 'failed' | 'superseded'; explorerUrl: string; from?: string; recipient?: string; amount?: string; fee?: string; submittedAt?: number; blockNumber?: number | null; checkedAt?: number };
 export type LiveHistory = { version: 1; fetchedAt: number; source: string; items: LiveTransaction[]; errors: string[] };
 export function isAddress(value: unknown): value is string { return typeof value === 'string' && /^0x[\da-f]{40}$/i.test(value) && !/^0x0{40}$/i.test(value); }
 /**
@@ -86,7 +92,7 @@ export function parseQuote(value: unknown): LiveQuote {
 }
 export function parseTransaction(value: unknown): LiveTransaction {
   const item = object(value), key = chain(item.chain);
-  if (typeof item.hash !== 'string' || !/^0x[\da-f]{64}$/i.test(item.hash) || !['unknown', 'pending', 'confirmed', 'failed'].includes(String(item.status)) || item.explorerUrl !== `${CHAINS[key].explorer}/tx/${item.hash}` || item.amount !== undefined && (typeof item.amount !== 'string' || wei(item.amount) < 0n) || item.fee !== undefined && (typeof item.fee !== 'string' || wei(item.fee) < 0n)) throw new Error('Invalid transaction receipt.');
+  if (typeof item.hash !== 'string' || !/^0x[\da-f]{64}$/i.test(item.hash) || !['unknown', 'pending', 'confirmed', 'failed', 'superseded'].includes(String(item.status)) || item.explorerUrl !== `${CHAINS[key].explorer}/tx/${item.hash}` || item.amount !== undefined && (typeof item.amount !== 'string' || wei(item.amount) < 0n) || item.fee !== undefined && (typeof item.fee !== 'string' || wei(item.fee) < 0n)) throw new Error('Invalid transaction receipt.');
   return item as unknown as LiveTransaction;
 }
 export function parseHistory(value: unknown): LiveHistory {
@@ -249,6 +255,19 @@ export function createWalletClient(rawEndpoint: string, transport: typeof fetch 
     },
     async quote(input: { chain: Chain; recipient: string; amount: string }) { await connect(); const q = parseQuote(await request('/api/wallet/quote', input)); if (q.chain !== input.chain || q.recipient.toLowerCase() !== input.recipient.toLowerCase() || wei(q.amount) !== wei(input.amount)) throw new Error('The review did not match your transfer.'); return q; },
     async confirm(q: LiveQuote) { await connect(); const tx = parseTransaction(await request('/api/wallet/confirm', { quoteId: q.id, approved: true })); if (tx.chain !== q.chain || tx.recipient?.toLowerCase() !== q.recipient.toLowerCase() || tx.from?.toLowerCase() !== q.from.toLowerCase() || tx.amount === undefined || wei(tx.amount) !== wei(q.amount) || tx.fee === undefined || wei(tx.fee) !== wei(q.fee)) throw new Error('Unexpected submission response. Check Activity before sending again.'); return tx; },
+    /**
+     * Mark a stranded transfer as never arrived, for the records the chain cannot settle.
+     *
+     * The server refuses this for any transfer it can still judge against the chain, so a
+     * merely-slow transfer cannot be declared dead from here — that refusal is the thing
+     * stopping this from becoming a way to send the same money twice.
+     */
+    async resolve(key: Chain, hash: string) {
+      await connect();
+      const tx = parseTransaction(await request('/api/wallet/resolve', { chain: key, hash }));
+      if (tx.chain !== key || tx.hash.toLowerCase() !== hash.toLowerCase()) throw new Error('That response did not match the transfer.');
+      return tx;
+    },
     async receipt(key: Chain, hash: string) { await connect(); const tx = parseTransaction(await request(`/api/wallet/receipt?chain=${key}&hash=${encodeURIComponent(hash)}`)); if (tx.chain !== key || tx.hash.toLowerCase() !== hash.toLowerCase()) throw new Error('Receipt did not match the transaction.'); return tx; },
   };
 }
