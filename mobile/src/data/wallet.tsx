@@ -2,6 +2,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { AppState, Platform } from 'react-native';
 import { createWalletClient, parseWallet, type Chain, type LiveHistory, type LiveQuote, type LiveTransaction, type WalletSnapshot } from '../services/wallet-api';
+// Extensionless: Metro picks the native biometric path on a phone, the no-op on web.
+import { requireUnlock } from '../services/unlock';
 
 const endpoint = process.env.EXPO_PUBLIC_WALLY_API_URL ?? '';
 export const liveWalletEnabled = !!endpoint;
@@ -101,6 +103,20 @@ export function WalletProvider({ children }: React.PropsWithChildren) {
       const q = activeQuote.current;
       if (!client || offlineNow.current || !q || q.expiresAt <= Date.now()) throw new Error('Request a fresh review before confirming.');
       if (submitting.current) throw new Error('Submission is already in progress.');
+
+      // The last gate before anything irreversible, and the only one in the app: every live
+      // spend comes through here. Asked on every send regardless of how recently the phone was
+      // unlocked — a previous unlock is not consent for a later transfer.
+      //
+      // Deliberately before `submitting` is set and before the quote is cleared, so a
+      // cancelled prompt leaves the review exactly as it was and the user can simply confirm
+      // again. Clearing first would make a mis-tap cost them a fresh quote.
+      //
+      // Where the phone has no screen lock, or on web, this passes straight through: there is
+      // no protection to perform, and refusing would leave such a user unable to send at all.
+      const unlocked = await requireUnlock('send', `${q.amount} ${q.symbol}`);
+      if (!unlocked.ok) throw new Error(unlocked.message);
+
       submitting.current = true; clearQuote();
       try { const tx = await client.confirm(q); void refresh(); void refreshHistory(); return tx; }
       catch (failure) { void refreshHistory(); throw failure; }

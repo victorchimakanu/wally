@@ -6,6 +6,7 @@ import { backupPositions, checkBackup, phraseWords } from '../services/recovery'
 import { getKeystore } from '../services/wallet-worklet';
 // Extensionless: Metro picks the native implementation on a phone and the no-op on web.
 import { useScreenPrivacy } from '../services/screen-privacy';
+import { requireUnlock } from '../services/unlock';
 import { colors as c, fonts } from '../theme';
 
 /**
@@ -40,10 +41,21 @@ export function RecoveryPhraseScreen() {
   const [wrong, setWrong] = useState<number[]>([]);
   const [busy, setBusy] = useState(false);
 
+  // Bumped to retry after a refused unlock, rather than leaving the user on a dead end.
+  const [attempt, setAttempt] = useState(0);
+  const [refused, setRefused] = useState('');
+
   useEffect(() => {
     let live = true;
     (async () => {
       try {
+        // Asked every time, including straight after creation. A carve-out for "they just made
+        // it, so they must be the owner" is exactly the kind of exception that becomes a hole,
+        // and the prompt is one tap.
+        const unlocked = await requireUnlock('phrase');
+        if (!unlocked.ok) { if (live) setRefused(unlocked.message); return; }
+        if (live) setRefused('');
+
         const keystore = await getKeystore();
         const revealed = await keystore.reveal();
         if (live) setPhrase(revealed);
@@ -54,7 +66,7 @@ export function RecoveryPhraseScreen() {
     // Dropping the reference on unmount is the only control available: a JS string cannot be
     // zeroed, which the worklet's own handler notes as a known accepted gap.
     return () => { live = false; setPhrase(null); };
-  }, []);
+  }, [attempt]);
 
   const words = useMemo(() => (phrase ? phraseWords(phrase) : []), [phrase]);
   // Fixed once per visit, so re-rendering while typing does not reshuffle which words are
@@ -83,6 +95,14 @@ export function RecoveryPhraseScreen() {
   if (error) {
     return <Screen title="Recovery phrase">
       <Card><Label weight="semibold">The phrase could not be shown</Label><Note error>{error}</Note><Note>Nothing has changed and your funds are untouched.</Note></Card>
+      <Button secondary label="Back" onPress={() => router.back()} />
+    </Screen>;
+  }
+
+  if (refused) {
+    return <Screen title="Recovery phrase">
+      <Card><Label weight="semibold">Not shown</Label><Note error>{refused}</Note></Card>
+      <Button label="Try again" onPress={() => setAttempt(attempt + 1)} />
       <Button secondary label="Back" onPress={() => router.back()} />
     </Screen>;
   }

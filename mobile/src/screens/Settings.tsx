@@ -18,7 +18,9 @@ import Constants from 'expo-constants';
 import * as Device from 'expo-device';
 import { buildInfo, supportSummary, versionLabel } from '../services/build-info';
 import { backendOrigin } from '../services/backend';
-import { walletStatus, keystoreUnavailableReason, type WalletStatus as VaultStatus } from '../services/wallet-worklet';
+import { walletStatus, keystoreAvailable, keystoreUnavailableReason, type WalletStatus as VaultStatus } from '../services/wallet-worklet';
+import { lockCapability, lockEnabled, type LockCapability } from '../services/app-lock';
+import { readDeviceLock, readLockPreference, writeLockPreference } from '../services/device-lock';
 
 /**
  * The version for the Settings row, which used to be the string literal "1.0.0 · Frontend
@@ -40,7 +42,7 @@ export function SettingsScreen() { const wallet = useWallet();
       <SettingRow title="Network" subtitle={wallet.enabled ? 'Arbitrum & Ethereum Sepolia · Testnet' : state.offline ? 'Arbitrum · Offline preview' : 'Arbitrum · Demo wallet'} icon="de282.svg" onPress={() => router.push({ pathname: '/preferences', params: { panel: 'connection' } })} />
       <SettingRow title="Assistant model" subtitle={state.aiPaused ? 'Paused · Manual wallet available' : phone?.phase === 'loading' ? 'Loading model…' : ai.location === 'phone' ? 'QVAC on this phone' : ai.location === 'computer' ? 'QVAC on your computer' : 'Scripted preview'} icon="de282.svg" onPress={() => router.push({ pathname: '/preferences', params: { panel: 'model' } })} />
       <SettingRow title="Address book" subtitle="Your saved recipients" icon="9a2cd.svg" onPress={() => router.push('/address-book')} />
-      <SettingRow title="App lock" subtitle="Not enabled · Frontend preview" icon="43454.svg" onPress={() => router.push({ pathname: '/preferences', params: { panel: 'security' } })} />
+      <SettingRow title="App lock" subtitle="Fingerprint, face or passcode" icon="43454.svg" onPress={() => router.push({ pathname: '/preferences', params: { panel: 'security' } })} />
       <SettingRow title="Recovery phrase" subtitle="Wallet setup guidance" icon="99b43.svg" onPress={() => router.push({ pathname: '/preferences', params: { panel: 'security' } })} />
     </View>
     <Label size={12} weight="semibold" color={c.orange}>ABOUT</Label>
@@ -88,6 +90,64 @@ function BuildCard() {
     <Label size={12} color={c.muted} selectable>Backend: {info.backend}</Label>
     <Note>Include this if you report a problem. It names the build and the device, and nothing about you or your wallet.</Note>
     <Button secondary label={copied ? 'Copied' : 'Copy for support'} onPress={() => { void copy(); }} />
+  </Card>;
+}
+
+/**
+ * The app lock setting.
+ *
+ * On by default wherever the phone can back it, because a safe default matters most for the
+ * people who never open settings — and this is money. It can be turned off, and the choice is
+ * stored in the OS keystore rather than ordinary app storage: "app lock is off" is a
+ * security-relevant claim, and somewhere an attacker with the handset could flip it is the
+ * wrong place to keep it.
+ *
+ * Only rendered on a build that can hold a wallet. In the browser there is nothing to lock,
+ * and telling someone their *phone* has no screen lock when they are on a laptop would be
+ * nonsense.
+ */
+function AppLockCard() {
+  const [capability, setCapability] = useState<LockCapability | null>(null);
+  const [preference, setPreference] = useState<boolean | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    void (async () => {
+      const [device, stored] = await Promise.all([readDeviceLock(), readLockPreference()]);
+      if (!live) return;
+      setCapability(lockCapability(device));
+      setPreference(stored);
+    })().catch(() => { /* leaves the card in its loading state rather than claiming a state */ });
+    return () => { live = false; };
+  }, []);
+
+  async function choose(next: boolean) {
+    setSaving(true);
+    setPreference(next);
+    try { await writeLockPreference(next); }
+    catch { setPreference(!next); }  // Not stored means not changed; say so by reverting.
+    finally { setSaving(false); }
+  }
+
+  if (!capability) return null;
+
+  return <Card>
+    <Label size={12} weight="semibold" color={c.orange}>APP LOCK</Label>
+    {capability.available ? <>
+      <Toggle
+        label={capability.level === 'biometric' ? 'Ask for fingerprint or face' : 'Ask for your passcode'}
+        subtitle="Before showing your recovery phrase, and before every transfer"
+        value={lockEnabled(capability, preference)}
+        onChange={next => { void choose(next); }}
+      />
+      {!lockEnabled(capability, preference) && <Note error>With this off, anyone holding this phone unlocked can see your recovery phrase and spend your money.</Note>}
+      <Note>Balances, receiving and Activity are never locked — checking whether money arrived should not cost you a prompt.</Note>
+      {saving && <Note>Saving…</Note>}
+    </> : <>
+      <Label>Not available on this phone</Label>
+      <Note error>{capability.reason}</Note>
+    </>}
   </Card>;
 }
 
@@ -152,6 +212,7 @@ export function PreferencesScreen() { const wallet = useWallet();
     {panel === 'security' ? <>
       <View style={[shared.orb, { marginVertical: 20 }]}><Icon name="shield" /></View><Label size={24} weight="semibold">Your wallet. Your keys.</Label><Label color={c.muted}>The full wallet will guide you through creating or importing a wallet, backing up your recovery phrase, and unlocking securely.</Label>
       <WalletKeysCard devWallet={wallet.enabled} />
+      {keystoreAvailable && <AppLockCard />}
       <Card><Note>Never enter a recovery phrase into chat. Wally will never ask you for it.</Note></Card>
       <Button label="Back to settings" onPress={() => router.replace('/settings')} />
     </> : panel === 'model' ? <>
