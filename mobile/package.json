@@ -72,7 +72,9 @@
     "phone:build": "node scripts/phone-tools.mjs build",
     "phone:export": "node scripts/phone-tools.mjs export",
     "phone:start": "node scripts/phone-tools.mjs start",
-    "wdk:validate": "wdk-worklet-bundler validate"
+    "wdk:validate": "wdk-worklet-bundler validate",
+    "notices": "node scripts/generate-notices.mjs",
+    "notices:check": "node scripts/generate-notices.mjs --check"
   },
   "private": true,
   "type": "module"
