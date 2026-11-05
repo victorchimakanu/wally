@@ -16,6 +16,7 @@ import { healthRoutes } from "./routes/health.js";
 import { marketRoutes } from "./routes/market.js";
 import { rpcRoutes } from "./routes/rpc.js";
 import { statusRoutes } from "./routes/status.js";
+import { gaslessRoutes } from "./routes/gasless.js";
 import { historyRoutes } from "./routes/history.js";
 import { qvacRoutes } from "./routes/qvac.js";
 
@@ -130,6 +131,7 @@ export function buildServer() {
   void app.register(rpcRoutes);
   void app.register(historyRoutes);
   void app.register(statusRoutes);
+  void app.register(gaslessRoutes);
 
   /**
    * The QVAC passthrough exists only to work around a CORS bug in the browser preview, and

@@ -53,7 +53,7 @@ function build(overrides: Partial<WorkletRpc> = {}) {
   let closed = 0;
   const keystore = createKeystore(vault, {
     async connect() { return { rpc, close() { closed++; } }; },
-    config: () => '{"networks":{}}',
+    config: async () => '{"networks":{}}',
   });
   return { keystore, vault, storage, calls, closed: () => closed };
 }

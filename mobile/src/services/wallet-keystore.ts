@@ -67,8 +67,12 @@ export type WorkletRpc = {
 export type KeystoreDeps = {
   /** Opens the worklet and returns a client for it. Called at most once per keystore. */
   connect(): Promise<{ rpc: WorkletRpc; close(): void }>;
-  /** The JSON WDK config (networks and RPC urls), already stringified. */
-  config(): string;
+  /**
+   * The JSON WDK config (networks, RPC urls and, where available, the bundler and paymaster),
+   * already stringified. Async because whether gasless is available is something only the
+   * backend can answer.
+   */
+  config(): Promise<string>;
 };
 
 /** Ciphertext is stored as base64 text, because that is what the OS keystore takes. */
@@ -161,7 +165,7 @@ export function createKeystore(vault: WalletVault, deps: KeystoreDeps) {
       await client.initializeWDK({
         encryptionKey: fromBase64(key),
         encryptedSeed: fromBase64(record.encryptedSeed),
-        config: deps.config(),
+        config: await deps.config(),
       });
     },
 

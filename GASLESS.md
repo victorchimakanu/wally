@@ -1,5 +1,18 @@
 # Gasless USDT: the intended Wally setup
 
+> **Scope, added 5 November 2026.** This document sets up the **reference app** on **Arbitrum
+> One**, and it is accurate for that. It does not describe the mobile app.
+>
+> The mobile app runs on **Arbitrum Sepolia**, where **no USDT paymaster exists** — Pimlico's
+> supported tokens there are USDC, EURe, ostUSDC and PIM, and USDT appears only on Arbitrum One
+> (checked against Pimlico's own supported-token list on that date). The mobile app therefore
+> uses **sponsorship**: Wally pays the gas through a paymaster policy, so a user still never
+> needs ETH, and fees-in-USDT stays a mainnet change.
+>
+> The mobile app also never talks to Pimlico directly. Both the bundler and the paymaster go
+> through the backend proxy's `/v1/bundler/:chain` and `/v1/paymaster/:chain`, because the API
+> key lives in the endpoint URL and an app bundle carrying it leaks a spendable budget.
+
 This is Wally's default story: **you hold USDT, you send USDT, and the network fee comes out
 in USDT.** The wallet never holds ETH. This guide takes about ten minutes, and at the end your
 Arbitrum wallet is a smart account (ERC-4337) whose gas is paid by a paymaster and charged

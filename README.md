@@ -24,7 +24,18 @@ Phone-local QVAC integration and performance testing: [Android phone test setup 
 
 You type plain English. Wally understands it with a local model, quotes the fee, asks you to confirm, and executes on-chain. No cloud AI, no API keys, no custodian.
 
-- **USDT in, USDT out, fees in USDT.** Wally's home chain is Arbitrum with an ERC-4337 smart account: you hold USDT, you send USDT, and the network fee is paid in USDT. The wallet never needs to hold ETH. ([setup](GASLESS.md))
+- **The wallet never needs to hold ETH.** Wally's home chain is Arbitrum with an ERC-4337 smart
+  account, so the network fee does not have to come out of a balance of ETH the user never asked
+  for. **What that means today depends on which app and which chain**, and the honest version is
+  worth stating on the front page:
+  - **Fees paid in USDT** is the reference app on **Arbitrum One**, via Pimlico's ERC-20
+    paymaster. That is what [GASLESS.md](GASLESS.md) sets up, and it works.
+  - **On Arbitrum Sepolia** — the chain the mobile app runs — **no USDT paymaster exists.**
+    Pimlico's supported tokens there are USDC, EURe, ostUSDC and PIM. So the mobile app uses
+    *sponsorship* instead: Wally pays the gas, the user holds no ETH, and fees-in-USDT becomes a
+    configuration change when the app reaches mainnet rather than a promise made in advance.
+  - Gasless is off until an operator configures a bundler and paymaster, and the app asks the
+    backend whether it is available rather than assuming.
 - **Local intelligence.** [QVAC](https://qvac.tether.io), Tether's on-device AI runtime, runs a quantized Qwen3 4B on your laptop, served through the QVAC CLI's OpenAI-compatible HTTP server. With the default loopback setup your messages never leave the machine to be understood; pointing at a remote QVAC server is an explicit opt-in that requires https and an API key.
 - **Local keys.** [WDK](https://wdk.tether.io), Tether's Wallet Development Kit, derives your wallet from a seed phrase and signs locally. Only signed transactions touch the network.
 - **A human gate on every spend.** The AI proposes a transaction. Nothing moves until you press CONFIRM inside a 60 second window.
