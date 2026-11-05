@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
-import { StyleSheet, View } from 'react-native';
+import { Platform, StyleSheet, View } from 'react-native';
 import { Button, Card, Divider, Icon, Label, Note, Pill, Screen, shared } from '../components/ui';
 import { SettingsToggle as Toggle } from '../components/SettingsToggle';
 import { WallyAsset } from '../components/WallyAsset';
@@ -13,6 +13,11 @@ import { PHONE_MODELS, type PhoneModel, type PhoneBackend } from '../services/ph
 import { marketSource } from '../services/market-api';
 import { historySource } from '../services/wallet-api';
 import { phoneCompatibility } from '../services/phone-adapter';
+import * as Clipboard from 'expo-clipboard';
+import Constants from 'expo-constants';
+import * as Device from 'expo-device';
+import { buildInfo, supportSummary, versionLabel } from '../services/build-info';
+import { backendOrigin } from '../services/backend';
 
 export function SettingsScreen() { const wallet = useWallet();
   const { state, ai, phone, update } = useDemo();
@@ -35,6 +40,43 @@ export function SettingsScreen() { const wallet = useWallet();
     <SettingRow title="Phone performance" subtitle="Compare models on a physical phone" icon="0aca9.svg" onPress={() => router.push('/phone-performance')} />
     <Button secondary label="Demo controls" onPress={() => router.push({ pathname: '/preferences', params: { panel: 'demo' } })} />
   </Screen>;
+}
+
+/**
+ * What this build is, where support can find it.
+ *
+ * A support conversation cannot start without a version, and until now the app never showed
+ * one. Copyable in a single tap because asking someone to type "Wally 1.0.0 (release) ·
+ * android 14 · Pixel 6a" by hand is asking them not to bother.
+ *
+ * Nothing here identifies a person — no address, no install id. The device model identifies a
+ * product, and it is assembled only when someone chooses to copy it.
+ */
+function BuildCard() {
+  const [copied, setCopied] = useState(false);
+  const info = buildInfo({
+    appVersion: Constants.expoConfig?.version,
+    os: Platform.OS,
+    // Device.osVersion, not Platform.Version: it is the documented API for this (expo-constants
+    // marks its own equivalent deprecated in favour of expo-device), and it returns null rather
+    // than a placeholder where the OS version is unknown. Platform.Version reported "0.0.0" on
+    // web, which reads as a bug in the support tool rather than as an absent value.
+    osVersion: Device.osVersion ?? undefined,
+    deviceModel: Device.modelName ?? undefined,
+    isDevelopment: __DEV__,
+    backendOrigin: backendOrigin(),
+  });
+  async function copy() {
+    try { setCopied(await Clipboard.setStringAsync(supportSummary(info))); } catch { setCopied(false); }
+  }
+  return <Card>
+    <Label size={12} weight="semibold" color={c.orange}>THIS BUILD</Label>
+    <Label size={16}>Wally {versionLabel(info)}</Label>
+    <Label size={12} color={c.muted} selectable>{info.platform} · {info.device}</Label>
+    <Label size={12} color={c.muted} selectable>Backend: {info.backend}</Label>
+    <Note>Include this if you report a problem. It names the build and the device, and nothing about you or your wallet.</Note>
+    <Button secondary label={copied ? 'Copied' : 'Copy for support'} onPress={() => { void copy(); }} />
+  </Card>;
 }
 
 export function PreferencesScreen() { const wallet = useWallet();
@@ -64,7 +106,7 @@ export function PreferencesScreen() { const wallet = useWallet();
       {ai.mode === 'qvac' && <Card><Label weight="medium">{ai.status === 'ready' ? 'Verified: model answered' : ai.status === 'working' ? 'Checking local AI…' : ai.status === 'error' ? 'Connection needs attention' : 'Connection not checked yet'}</Label>{!!ai.error && <Note error>{ai.error}</Note>}<Button label={ai.status === 'working' ? 'Cancel check' : 'Test AI connection'} onPress={ai.status === 'working' ? cancelAi : checkAi} disabled={state.aiPaused || (state.offline && ai.location !== 'phone')} /><Note>The test sends a sample balance question and checks an actual model response.</Note></Card>}
       <Toggle label="Pause chat" subtitle="Keep using the wallet’s manual controls." value={state.aiPaused} onChange={aiPaused => update({ aiPaused })} /><Button label="Open a new chat" onPress={() => router.push({ pathname: '/chat', params: { id: newChat() } })} /><Button label="Use manual send" secondary onPress={() => router.push('/send')} />
     </> : panel === 'connection' ? <>
-      {wallet.enabled && <WalletStatus />}<Pill tone={state.offline ? 'warning' : 'success'}>{state.offline ? 'Offline preview' : 'Online preview'}</Pill><Toggle label="Simulate offline" subtitle="Keep drafts; disable quotes and sending." value={state.offline} onChange={offline => update({ offline })} /><Note>This switch changes the simulated connection state. The switch blocks new reviews and sends; real balances still require the wallet API.</Note><Card><Label size={12} weight="semibold" color={c.orange}>MARKET DATA</Label><Label size={16}>{marketSource().label}</Label><Label size={12} color={c.muted} selectable>{marketSource().url}</Label><Note>{marketSource().mode === 'proxy' ? 'Prices and charts go through your Wally backend, which caches them and keeps the provider key off this device.' : 'Prices come straight from the provider. Set EXPO_PUBLIC_WALLY_PROXY_URL and restart Metro to use your backend.'}</Note></Card>{wallet.enabled && <Card><Label size={12} weight="semibold" color={c.orange}>ACTIVITY</Label><Label size={16}>{historySource().label}</Label><Label size={12} color={c.muted} selectable>{historySource().url}</Label><Note>{historySource().mode === 'proxy' ? 'Transaction history is read from your Wally backend and merged with transfers sent from this device.' : 'History comes from the local wallet server. Set EXPO_PUBLIC_WALLY_PROXY_URL and restart Metro to use your backend.'}</Note></Card>}<Button label="Try offline chat" onPress={() => { update({ offline: true }); router.push({ pathname: '/chat', params: { id: newChat() } }); }} /><Button label="Return to wallet" secondary onPress={() => router.replace('/wallet')} />
+      {wallet.enabled && <WalletStatus />}<Pill tone={state.offline ? 'warning' : 'success'}>{state.offline ? 'Offline preview' : 'Online preview'}</Pill><Toggle label="Simulate offline" subtitle="Keep drafts; disable quotes and sending." value={state.offline} onChange={offline => update({ offline })} /><Note>This switch changes the simulated connection state. The switch blocks new reviews and sends; real balances still require the wallet API.</Note><Card><Label size={12} weight="semibold" color={c.orange}>MARKET DATA</Label><Label size={16}>{marketSource().label}</Label><Label size={12} color={c.muted} selectable>{marketSource().url}</Label><Note>{marketSource().mode === 'proxy' ? 'Prices and charts go through your Wally backend, which caches them and keeps the provider key off this device.' : 'Prices come straight from the provider. Set EXPO_PUBLIC_WALLY_PROXY_URL and restart Metro to use your backend.'}</Note></Card>{wallet.enabled && <Card><Label size={12} weight="semibold" color={c.orange}>ACTIVITY</Label><Label size={16}>{historySource().label}</Label><Label size={12} color={c.muted} selectable>{historySource().url}</Label><Note>{historySource().mode === 'proxy' ? 'Transaction history is read from your Wally backend and merged with transfers sent from this device.' : 'History comes from the local wallet server. Set EXPO_PUBLIC_WALLY_PROXY_URL and restart Metro to use your backend.'}</Note></Card>}<BuildCard /><Button label="Try offline chat" onPress={() => { update({ offline: true }); router.push({ pathname: '/chat', params: { id: newChat() } }); }} /><Button label="Return to wallet" secondary onPress={() => router.replace('/wallet')} />
     </> : <>
       <Card style={styles.demoIntro}>
         <Label size={20} weight="semibold">Try every outcome</Label>
