@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Platform, StyleSheet, View } from 'react-native';
 import { Button, Card, Divider, Icon, Label, Note, Pill, Screen, shared } from '../components/ui';
@@ -18,6 +18,7 @@ import Constants from 'expo-constants';
 import * as Device from 'expo-device';
 import { buildInfo, supportSummary, versionLabel } from '../services/build-info';
 import { backendOrigin } from '../services/backend';
+import { walletStatus, keystoreUnavailableReason, type WalletStatus as VaultStatus } from '../services/wallet-worklet';
 
 /**
  * The version for the Settings row, which used to be the string literal "1.0.0 · Frontend
@@ -90,6 +91,56 @@ function BuildCard() {
   </Card>;
 }
 
+/**
+ * What this phone holds, and the four things a user can do about it.
+ *
+ * This panel used to promise that "the full wallet will guide you through creating or
+ * importing a wallet, backing up your recovery phrase, and unlocking securely". None of those
+ * screens existed — FEATURE-AUDIT §1. They do now, and this is where they are reached.
+ *
+ * The dev-server wallet is reported separately and on purpose. It is a different wallet with a
+ * different seed, living on the developer's computer, and conflating the two would be the
+ * worst possible confusion to introduce on a screen about recovery.
+ */
+function WalletKeysCard({ devWallet }: { devWallet: boolean }) {
+  const [status, setStatus] = useState<VaultStatus | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    void walletStatus().then(next => { if (live) setStatus(next); }).catch(() => { if (live) setStatus({ available: false }); });
+    return () => { live = false; };
+  }, []);
+
+  return <>
+    {status?.available === true && (status.exists ? <Card>
+      <Pill tone={status.backedUpAt ? 'success' : 'warning'}>{status.backedUpAt ? 'WALLET ON THIS PHONE' : 'NOT BACKED UP'}</Pill>
+      <Label>{status.backedUpAt
+        ? `Your keys are held on this phone. You confirmed your recovery phrase on ${new Date(status.backedUpAt).toLocaleDateString()}.`
+        : 'Your keys are held on this phone, and your recovery phrase is not written down yet. Until it is, sending stays switched off — there would be no way back if you lost this phone.'}</Label>
+      <Button
+        label={status.backedUpAt ? 'Show recovery phrase' : 'Write down my recovery phrase'}
+        secondary={!!status.backedUpAt}
+        onPress={() => router.push({ pathname: '/recovery-phrase', params: { mode: status.backedUpAt ? 'view' : 'setup' } })}
+      />
+      <Button secondary label="Remove this wallet" onPress={() => router.push('/reset-wallet')} />
+    </Card> : <Card>
+      <Pill>NO WALLET ON THIS PHONE</Pill>
+      <Label>Create one, or bring in an existing wallet with its recovery phrase.</Label>
+      <Button label="Set up a wallet" onPress={() => router.push('/wallet-setup')} />
+    </Card>)}
+
+    {status?.available === false && <Card>
+      <Pill>PREVIEW</Pill>
+      <Label>{keystoreUnavailableReason()}</Label>
+    </Card>}
+
+    {devWallet && <Card>
+      <Pill>DEVELOPER WALLET</Pill>
+      <Label>Balances and sending currently come from the wallet server on your computer, whose seed is stored under internal/testnet-wallet/wallet.seed. That is a different wallet from any held on this phone — back up that file separately.</Label>
+    </Card>}
+  </>;
+}
+
 export function PreferencesScreen() { const wallet = useWallet();
   const { panel } = useLocalSearchParams<{ panel: string }>();
   const { state, ai, phone, phoneMetrics, loadPhone, releasePhone, checkAi, cancelAi, update, reset, newChat } = useDemo();
@@ -100,7 +151,9 @@ export function PreferencesScreen() { const wallet = useWallet();
   return <Screen title={title} subtitle={panel === 'demo' || !panel ? undefined : 'Frontend preview settings'}>
     {panel === 'security' ? <>
       <View style={[shared.orb, { marginVertical: 20 }]}><Icon name="shield" /></View><Label size={24} weight="semibold">Your wallet. Your keys.</Label><Label color={c.muted}>The full wallet will guide you through creating or importing a wallet, backing up your recovery phrase, and unlocking securely.</Label>
-      <Card><Pill>{wallet.enabled ? 'LOCAL TESTNET WALLET' : 'FRONTEND PREVIEW'}</Pill><Label>{wallet.enabled ? 'Your wallet seed is stored under internal/testnet-wallet/wallet.seed on this computer. The API and chat cannot reveal it. Back up that private file securely before deleting or moving this setup.' : 'No wallet has been created in this demo. There is no recovery phrase to reveal or back up.'}</Label><Note>Never enter a recovery phrase into chat. App lock and phone-local key storage are not implemented yet.</Note></Card><Button label="Back to settings" onPress={() => router.replace('/settings')} />
+      <WalletKeysCard devWallet={wallet.enabled} />
+      <Card><Note>Never enter a recovery phrase into chat. Wally will never ask you for it.</Note></Card>
+      <Button label="Back to settings" onPress={() => router.replace('/settings')} />
     </> : panel === 'model' ? <>
       <Card style={{ backgroundColor: c.tint }}><View style={shared.row}><Icon name="spark" /><Label size={18} weight="semibold">{ai.mode === 'qvac' ? (ai.location === 'phone' ? 'QVAC on this phone' : 'QVAC development connection') : 'Chat without the setup'}</Label></View><Label>{ai.mode === 'qvac' ? (ai.location === 'phone' ? 'Set up a model once, then run chat inside this phone. No AI server is contacted for inference. Wallet controls fetch data separately from the model.' : 'The Android preview calls QVAC on this computer through a local connection. No model is bundled in the phone yet. The model interprets requests; wallet controls fetch data separately.') : 'This build demonstrates the interface with scripted replies. It does not download or run an AI model.'}</Label></Card>
       {ai.location === 'phone' && <Card><Label weight="semibold">Run AI on this phone</Label><Note>{phoneCompatibility().reason || 'CPU is the starting option. Try GPU after measuring this phone.'}</Note>

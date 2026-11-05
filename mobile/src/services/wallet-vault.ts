@@ -24,9 +24,6 @@ export type SecureStorage = {
   deleteItemAsync(key: string): Promise<void>;
 };
 
-/** Injected so tests do not need native randomness. */
-export type RandomBytes = (byteCount: number) => Uint8Array;
-
 export type VaultRecord = {
   /** Ciphertext produced by the worklet. Base64. */
   encryptedEntropy: string;
@@ -42,7 +39,6 @@ export type VaultRecord = {
 
 const KEY_ENCRYPTION = 'wally.wallet.encryptionKey.v1';
 const KEY_RECORD = 'wally.wallet.record.v1';
-const KEY_BYTES = 32;
 
 /** base64 without relying on Buffer, which React Native does not provide by default. */
 export function toBase64(bytes: Uint8Array): string {
@@ -54,6 +50,39 @@ export function toBase64(bytes: Uint8Array): string {
     out += chars[((a & 3) << 4) | ((b ?? 0) >> 4)];
     out += b === undefined ? '=' : chars[((b & 15) << 2) | ((c ?? 0) >> 6)];
     out += c === undefined ? '=' : chars[c & 63];
+  }
+  return out;
+}
+
+/**
+ * The inverse of toBase64, for handing stored ciphertext back to the worklet.
+ *
+ * The worklet's handlers run `Buffer.isBuffer()` on these (pear-wrk-wdk
+ * src/utils/validation.js:50), but a Uint8Array is what should be sent: the HRPC wire format
+ * encodes a buffer field through compact-encoding's `uint8array` codec and decodes it with
+ * `subarray`, so what arrives inside the Bare runtime is a real Buffer regardless of which of
+ * the two was passed in. React Native has no Buffer, so Uint8Array is also the only option.
+ *
+ * Throws on anything that is not valid base64 rather than returning partial bytes. Half a key
+ * is not a key, and failing here is far better than a decrypt that silently yields rubbish.
+ */
+export function fromBase64(text: string): Uint8Array {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  const clean = text.replace(/=+$/, '');
+  if (!/^[A-Za-z0-9+/]*$/.test(clean)) throw new Error('Stored key material is not valid base64.');
+  if (clean.length % 4 === 1) throw new Error('Stored key material is truncated.');
+
+  const out = new Uint8Array(Math.floor((clean.length * 3) / 4));
+  let bits = 0;
+  let accumulator = 0;
+  let at = 0;
+  for (const character of clean) {
+    accumulator = (accumulator << 6) | chars.indexOf(character);
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      out[at++] = (accumulator >> bits) & 0xff;
+    }
   }
   return out;
 }
@@ -70,18 +99,39 @@ export function isVaultRecord(value: unknown): value is VaultRecord {
   );
 }
 
-export function createWalletVault(storage: SecureStorage, randomBytes: RandomBytes) {
+export function createWalletVault(storage: SecureStorage) {
   return {
     /**
-     * The key the worklet encrypts with. Created once and then reused for the life of the
-     * install. Never leaves the keystore except to be handed to the worklet.
+     * The key the entropy and seed were encrypted with, or null when this install has no
+     * wallet.
+     *
+     * **This used to generate a key when none was stored**, which read as a sensible
+     * create-once-and-reuse pattern and was wrong. The worklet does not accept a key: WDK's
+     * `generateEntropyAndEncrypt` calls `encryptSecrets` internally and *returns* the key it
+     * chose, alongside the ciphertext — see pear-wrk-wdk `src/handlers/secrets.js`. A key
+     * invented here would never decrypt anything the worklet produced, so the failure would
+     * have surfaced as an unopenable wallet rather than as an error at the point of the
+     * mistake. It is a read now, and `storeEncryptionKey` records what the worklet sent back.
      */
-    async encryptionKey(): Promise<string> {
+    async encryptionKey(): Promise<string | null> {
+      return await storage.getItemAsync(KEY_ENCRYPTION);
+    },
+
+    /**
+     * Record the key the worklet returned. Called once, with the ciphertext it belongs to.
+     *
+     * Refuses to overwrite silently: a second wallet's key written over the first makes the
+     * first wallet permanently unopenable, and the phrase is the only way back. A caller that
+     * means to replace a wallet calls `clear()` first, which is the path "start over" and
+     * restore-over-existing already take.
+     */
+    async storeEncryptionKey(key: string): Promise<void> {
+      if (!key.trim()) throw new Error('Refusing to store an empty encryption key.');
       const existing = await storage.getItemAsync(KEY_ENCRYPTION);
-      if (existing) return existing;
-      const created = toBase64(randomBytes(KEY_BYTES));
-      await storage.setItemAsync(KEY_ENCRYPTION, created);
-      return created;
+      if (existing && existing !== key) {
+        throw new Error('A wallet key is already stored. Clear the vault before storing another.');
+      }
+      await storage.setItemAsync(KEY_ENCRYPTION, key);
     },
 
     /** True when this install already has a wallet. */
