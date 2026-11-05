@@ -7,6 +7,8 @@ import { LiveActivityCard, LiveReceiveCard, NetworkChoice, WalletStatus } from '
 import { useWallet } from '../data/wallet';
 import { useDemo } from '../demo/store';
 import { CHAINS, isAddress, wei, type Chain, type LiveTransaction } from '../services/wallet-api';
+import { addressTrust, trustWarning } from '../services/address-safety.ts';
+import { usePreferences } from '../demo/preferences';
 import { colors as c } from '../theme';
 
 export function LiveSendScreen() {
@@ -15,6 +17,21 @@ export function LiveSendScreen() {
   const [chain, setChain] = useState<Chain>(params.chain === 'ethereum' ? 'ethereum' : 'arbitrum');
   const [recipient, setRecipient] = useState(params.recipient ?? ''), [amount, setAmount] = useState(params.amount ?? ''), [error, setError] = useState(''), [busy, setBusy] = useState(false);
   const balance = wallet.snapshot?.balances.find(item => item.chain === chain);
+  const { preferences } = usePreferences();
+
+  /**
+   * Warn when a recipient merely *looks* like one the user saved.
+   *
+   * Address poisoning sends dust from an address sharing the first and last characters of one
+   * you use, so the truncated form every screen renders is identical. Compared only against
+   * addresses the user deliberately saved — never against ones that merely appeared in
+   * history, because that is exactly where a poisoned entry lives.
+   */
+  const lookalike = trustWarning(addressTrust(
+    recipient.trim(),
+    preferences.recipients.map(item => ({ address: item.address, label: item.name })),
+  ));
+
   async function review() {
     if (busy) return;
     setError('');
@@ -26,7 +43,7 @@ export function LiveSendScreen() {
     } catch (failure) { setError(failure instanceof Error ? failure.message : 'Could not prepare the transfer.'); }
     finally { setBusy(false); }
   }
-  return <Screen title="Send testnet ETH" subtitle="A real testnet transfer" footer={<Button label={busy ? 'Checking network fee…' : 'Review transfer'} disabled={busy || wallet.offline || state.offline || !balance || balance.balance === null} onPress={() => { void review(); }} />}><Pill>TESTNET ONLY</Pill><NetworkChoice value={chain} onChange={next => { wallet.clearQuote(); setChain(next); setError(''); }} /><Note>Available on {CHAINS[chain].name}: {balance?.balance ?? 'Unavailable'} ETH</Note><Label weight="medium">Recipient address</Label><TextInput accessibilityLabel="Recipient address" value={recipient} editable={!busy} autoCapitalize="none" autoCorrect={false} placeholder="0x…" placeholderTextColor={c.muted} onChangeText={value => { wallet.clearQuote(); setRecipient(value); }} style={shared.input} /><Button secondary label="Choose saved recipient" disabled={busy} onPress={() => router.push('/address-book')} /><Label weight="medium">Amount in ETH</Label><TextInput accessibilityLabel="Amount in ETH" value={amount} editable={!busy} keyboardType="decimal-pad" placeholder="0.001" placeholderTextColor={c.muted} onChangeText={value => { wallet.clearQuote(); setAmount(value); }} style={shared.input} /><Note>Only native testnet ETH to ordinary wallet addresses is supported. Fees are estimated from the selected network. Nothing is sent until you approve the next screen.</Note>{balance?.balance === '0' && <Card style={{ backgroundColor: c.warningTint }}><Label weight="semibold">Fund your testnet wallet first</Label><Note>Request ETH from a {CHAINS[chain].name} faucet for your Receive address. Testnet tokens have no monetary value.</Note><Button secondary label="Open receive address" onPress={() => router.push('/receive')} /></Card>}{!!error && <Note error>{error}</Note>}<WalletStatus /></Screen>;
+  return <Screen title="Send testnet ETH" subtitle="A real testnet transfer" footer={<Button label={busy ? 'Checking network fee…' : 'Review transfer'} disabled={busy || wallet.offline || state.offline || !balance || balance.balance === null} onPress={() => { void review(); }} />}><Pill>TESTNET ONLY</Pill><NetworkChoice value={chain} onChange={next => { wallet.clearQuote(); setChain(next); setError(''); }} /><Note>Available on {CHAINS[chain].name}: {balance?.balance ?? 'Unavailable'} ETH</Note><Label weight="medium">Recipient address</Label><TextInput accessibilityLabel="Recipient address" value={recipient} editable={!busy} autoCapitalize="none" autoCorrect={false} placeholder="0x…" placeholderTextColor={c.muted} onChangeText={value => { wallet.clearQuote(); setRecipient(value); }} style={shared.input} /><Button secondary label="Choose saved recipient" disabled={busy} onPress={() => router.push('/address-book')} /><Label weight="medium">Amount in ETH</Label><TextInput accessibilityLabel="Amount in ETH" value={amount} editable={!busy} keyboardType="decimal-pad" placeholder="0.001" placeholderTextColor={c.muted} onChangeText={value => { wallet.clearQuote(); setAmount(value); }} style={shared.input} /><Note>Only native testnet ETH to ordinary wallet addresses is supported. Fees are estimated from the selected network. Nothing is sent until you approve the next screen.</Note>{balance?.balance === '0' && <Card style={{ backgroundColor: c.warningTint }}><Label weight="semibold">Fund your testnet wallet first</Label><Note>Request ETH from a {CHAINS[chain].name} faucet for your Receive address. Testnet tokens have no monetary value.</Note><Button secondary label="Open receive address" onPress={() => router.push('/receive')} /></Card>}{!!lookalike && <Card style={{ backgroundColor: c.warningTint }}><Label weight="semibold">Check this address carefully</Label><Note>{lookalike}</Note></Card>}{!!error && <Note error>{error}</Note>}<WalletStatus /></Screen>;
 }
 export function LiveReviewScreen() {
   const wallet = useWallet(), { state } = useDemo();

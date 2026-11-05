@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
+import { createClipboardSafety, copyNotice } from '../services/clipboard-safety.ts';
 import { Pressable, Share, View } from 'react-native';
 import { Button, Card, Label, Note, QrTile, ReceiveAddress, shared } from './ui';
 import { useWallet } from '../data/wallet';
@@ -52,7 +53,19 @@ export function LiveReceiveCard() {
   const [chain, setChain] = useState<Chain>('arbitrum'), [notice, setNotice] = useState(''), [copied, setCopied] = useState(false);
   const balance = wallet.snapshot?.balances.find(item => item.chain === chain);
   useEffect(() => { if (!copied) return; const timer = setTimeout(() => setCopied(false), 2000); return () => clearTimeout(timer); }, [copied]);
-  async function copy() { if (!balance) return; try { const ok = await Clipboard.setStringAsync(balance.address); setCopied(ok); setNotice(ok ? '' : 'Copy is unavailable on this device. Share the address instead.'); } catch { setNotice('Copy is unavailable on this device. Share the address instead.'); } }
+  // An address left in the clipboard is readable by every app on the device for as long as it
+  // sits there, and clipboard-swapping malware is ordinary in this space. This clears it after
+  // a minute, and only if it is still the address we put there.
+  const clipboard = useMemo(() => createClipboardSafety(Clipboard), []);
+  useEffect(() => () => clipboard.cancel(), [clipboard]);
+  async function copy() {
+    if (!balance) return;
+    try {
+      const result = await clipboard.copy(balance.address);
+      setCopied(result.copied);
+      setNotice(result.copied ? '' : copyNotice(result));
+    } catch { setNotice('Copy is unavailable on this device. Share the address instead.'); }
+  }
   return <Card style={{ gap: 16 }}>
     <View style={{ gap: 4 }}><Label size={18} weight="bold" style={{ lineHeight: 22 }}>Receive testnet ETH</Label><Note>{CHAINS[chain].name} · Testnet</Note></View>
     <NetworkChoice value={chain} onChange={next => { setChain(next); setNotice(''); setCopied(false); }} />
