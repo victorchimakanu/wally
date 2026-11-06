@@ -40,8 +40,18 @@ function row(hash: string, seconds: number): Record<string, unknown> {
   };
 }
 
-/** Routes every stubbed call by the `chainid` Etherscan V2 selects the chain with. */
-function stubByChain(handler: (chainId: string, url: string) => { status: number; body: unknown }) {
+/**
+ * Routes every stubbed call by the `chainid` Etherscan V2 selects the chain with.
+ *
+ * Token queries answer empty unless a case opts in with `tokens: true`. Etherscan keeps
+ * `txlist` and `tokentx` apart — a native query never returns an ERC-20 transfer — so a stub
+ * that answered both from one handler would be modelling a provider that does not exist, and
+ * every native-history expectation would silently gain a duplicate row.
+ */
+function stubByChain(
+  handler: (chainId: string, url: string) => { status: number; body: unknown },
+  { tokens = false }: { tokens?: boolean } = {},
+) {
   const calls: string[] = [];
   vi.stubGlobal(
     "fetch",
@@ -49,6 +59,12 @@ function stubByChain(handler: (chainId: string, url: string) => { status: number
       const url = String(input);
       calls.push(url);
       const chainId = new URL(url).searchParams.get("chainid") ?? "";
+      if (!tokens && new URL(url).searchParams.get("action") === "tokentx") {
+        return new Response(JSON.stringify(etherscanOk([])), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
       const { status, body } = handler(chainId, url);
       return new Response(JSON.stringify(body), {
         status,
@@ -70,8 +86,15 @@ describe("/v1/history serves both chains in one call", () => {
     expect(response.statusCode).toBe(200);
 
     const body = response.json();
-    // Both chains were queried, not just a default one.
-    expect(calls).toHaveLength(2);
+    // Both chains were queried, not just a default one — and Arbitrum is asked for its pinned
+    // token as well, which Etherscan keeps in a separate list. Asserting the shape rather than
+    // a count, so adding a token to another chain fails here with a readable diff instead of
+    // an off-by-one.
+    const actions = calls.map((url) => {
+      const params = new URL(url).searchParams;
+      return `${params.get("action")}:${params.get("chainid")}`;
+    }).sort();
+    expect(actions).toEqual(["tokentx:421614", "txlist:11155111", "txlist:421614"]);
     expect(body.items.map((item: { chain: string }) => item.chain)).toEqual(["arbitrum", "ethereum"]);
     expect(body.errors).toEqual([]);
     // The shape parseHistory() in mobile/src/services/wallet-api.ts requires.

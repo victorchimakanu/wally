@@ -29,6 +29,19 @@ const BACKEND = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 
 /** [id, file relative to backend/, find, replace, what the bug would mean] */
 const MUTATIONS = [
+  // USDt: the arithmetic that is wrong by a factor of a million million when it is wrong
+  ["token-decimals-from-record", "src/indexer.ts",
+   "    const amount = appSafeAmount(value, token.decimals);",
+   "    const amount = appSafeAmount(value, declared !== null ? Number(declared) : token.decimals);",
+   "a remote contract decides how an amount is scaled on screen"],
+  ["token-contract-unchecked", "src/indexer.ts",
+   "  if (typeof contract !== \"string\" || contract.toLowerCase() !== token.address.toLowerCase()) {",
+   "  if (false) {",
+   "a transfer of some other token is rendered as USDt"],
+  ["token-amount-uncapped", "src/indexer.ts",
+   "function appSafeAmount(value: bigint, decimals: number): string | null {\n  const text = formatUnits(value, decimals);\n  return APP_AMOUNT.test(text) ? text : null;\n}",
+   "function appSafeAmount(value: bigint, decimals: number): string | null {\n  return formatUnits(value, decimals);\n}",
+   "one spam token transfer blanks the whole Activity list"],
   // gasless: the one route that spends money when it is used
   ["gasless-method-allowlist-gone", "src/routes/gasless.ts",
    "    if (!allowed.includes(body.method)) {", "    if (false) {",

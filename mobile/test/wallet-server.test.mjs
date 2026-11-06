@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { request } from 'node:http';
 import { createWalletApi } from '../scripts/wallet-api-server.mjs';
-import { createWalletService, ethDisplay, ethUnits, QuoteBook, visibleRecord, superseded, SETTLED, manualResolve } from '../scripts/wallet-api-core.mjs';
+import { createWalletService, ethDisplay, ethUnits, QuoteBook, visibleRecord, superseded, SETTLED, manualResolve, tokenDisplay } from '../scripts/wallet-api-core.mjs';
 
 /**
  * The signing tests need the isolated WDK runtime, which is a separate install. Until
@@ -232,4 +232,49 @@ test('marking a transfer as never arrived is refused whenever the chain can answ
 
   assert.equal(manualResolve(undefined).allowed, false);
   assert.equal(manualResolve(null).allowed, false);
+});
+
+test('the dev server builds a snapshot the app will actually accept', async () => {
+  // The loop neither side closes on its own: the dev server formats balances and the app
+  // validates them, with three separate copies of the token list between them. A disagreement
+  // about USDt's decimals does not raise an error anywhere — it shows a different amount. So
+  // the server's output is built here exactly as `wallet()` builds it and run through the
+  // app's real parser.
+  const { TOKENS, tokenDisplay, NETWORKS } = await import('../scripts/wallet-api-core.mjs');
+  const { parseWallet } = await import('../src/services/wallet-api.ts');
+
+  const address = '0x1111111111111111111111111111111111111111';
+  const qr = 'data:image/svg+xml;base64,PHN2Zy8+';
+  const balances = Object.entries(NETWORKS).flatMap(([chain, network]) => {
+    const common = { chain, name: network.name, chainId: network.chainId, address, qr, error: '' };
+    return [
+      { ...common, symbol: 'ETH', balanceWei: '1000000000000000', balance: '0.001' },
+      ...(TOKENS[chain] ?? []).map(token => ({
+        ...common,
+        symbol: token.symbol,
+        balanceWei: '10500000',
+        balance: tokenDisplay('10500000', token.decimals),
+      })),
+    ];
+  });
+
+  const snapshot = { version: 1, network: 'testnet', location: 'computer', fetchedAt: Date.now(), balances, tokenNotice: 'x' };
+  const parsed = parseWallet(snapshot);
+
+  const usdt = parsed.balances.find(item => item.symbol === 'USDT');
+  assert.ok(usdt, 'the snapshot must carry USDt');
+  // 10_500_000 base units at six decimals is 10.5 — the number a person reads. If either side
+  // used eighteen, parseWallet would have thrown above.
+  assert.equal(usdt.balance, '10.5');
+  assert.equal(parsed.balances.filter(item => item.symbol === 'ETH').length, 2);
+});
+
+test('tokenDisplay scales by the token decimals, not by eighteen', () => {
+  assert.equal(tokenDisplay('1000000', 6), '1');
+  assert.equal(tokenDisplay('10500000', 6), '10.5');
+  assert.equal(tokenDisplay('1', 6), '0.000001');
+  assert.equal(tokenDisplay('0', 6), '0');
+  assert.equal(tokenDisplay('5', 0), '5');
+  // The same integer under the two scales must differ, or the bug is present.
+  assert.notEqual(tokenDisplay('1000000', 6), tokenDisplay('1000000', 18));
 });

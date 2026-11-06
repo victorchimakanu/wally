@@ -9,7 +9,7 @@
  * server as well as to the phone (measured 20 Oct 2026) — so it cannot be the default.
  * Etherscan V2 covers both chains through one endpoint and one key.
  */
-import { config, type Chain } from "./config.js";
+import { config, tokensFor, type Chain, type TokenSpec } from "./config.js";
 import { fetchJson } from "./upstream.js";
 import { getLogger } from "./logger.js";
 
@@ -35,6 +35,11 @@ export type LiveTransaction = {
   fee?: string;
   submittedAt?: number;
   blockNumber?: number | null;
+  /**
+   * What `amount` is denominated in. Omitted for the chain's native coin, which keeps every
+   * record written before USDt existed valid — the app treats absence as ETH.
+   */
+  symbol?: string;
 };
 
 /** Wei to a decimal string the app's `wei()` parser accepts. Never rounds up. */
@@ -61,6 +66,28 @@ const APP_AMOUNT = /^(?:0|[1-9]\d{0,12})(?:\.\d{1,18})?$/;
 
 function appSafeEth(value: bigint): string | null {
   const text = formatEth(value);
+  return APP_AMOUNT.test(text) ? text : null;
+}
+
+/**
+ * The same pair for a token, with its own decimals.
+ *
+ * Separate arguments rather than a hardcoded 18, because USDt has 6 — and a token amount run
+ * through the ETH scale is not slightly wrong, it is wrong by a factor of a million million.
+ * The cap is the app's, exactly as above: an amount the app's parser would reject is omitted
+ * so the transaction still appears, rather than blanking the whole list.
+ */
+export function formatUnits(value: bigint, decimals: number): string {
+  const scale = 10n ** BigInt(decimals);
+  const whole = value / scale;
+  const fraction = decimals === 0
+    ? ""
+    : (value % scale).toString().padStart(decimals, "0").replace(/0+$/, "");
+  return fraction ? `${whole}.${fraction}` : `${whole}`;
+}
+
+function appSafeAmount(value: bigint, decimals: number): string | null {
+  const text = formatUnits(value, decimals);
   return APP_AMOUNT.test(text) ? text : null;
 }
 
@@ -122,21 +149,86 @@ function fromEtherscan(chain: Chain, raw: EtherscanTx): LiveTransaction | null {
 }
 
 /**
+ * One ERC-20 transfer, from Etherscan's `tokentx`.
+ *
+ * Deliberately narrower than the native mapping. A token transfer record carries no
+ * `isError`/`txreceipt_status` — `tokentx` only lists transfers that actually happened, so a
+ * record existing *is* the success, and `confirmed` is the honest status rather than a guess.
+ *
+ * The decimals come from our own pinned token, never from the record's `tokenDecimal` field.
+ * That field is whatever the contract says, and trusting a remote number to scale an amount on
+ * screen is exactly the mistake this code exists to avoid. If they disagree, the pinned value
+ * wins and the mismatch is logged.
+ */
+function fromEtherscanToken(chain: Chain, token: TokenSpec, raw: EtherscanTx): LiveTransaction | null {
+  const hash = raw["hash"];
+  if (typeof hash !== "string" || !HASH.test(hash)) return null;
+
+  // Only the token we asked for. `contractaddress` already filters upstream, but a provider
+  // returning something else must not be rendered under the wrong symbol.
+  const contract = raw["contractAddress"];
+  if (typeof contract !== "string" || contract.toLowerCase() !== token.address.toLowerCase()) {
+    log.warn({ chain, hash }, "tokentx returned a different contract than requested; dropping it");
+    return null;
+  }
+
+  const item = base(chain, hash);
+  item.status = "confirmed";
+  item.symbol = token.symbol;
+
+  if (typeof raw["from"] === "string" && ADDRESS.test(raw["from"])) item.from = raw["from"];
+  if (typeof raw["to"] === "string" && ADDRESS.test(raw["to"])) item.recipient = raw["to"];
+
+  const declared = toBigInt(raw["tokenDecimal"]);
+  if (declared !== null && Number(declared) !== token.decimals) {
+    log.warn(
+      { chain, hash, declared: Number(declared), pinned: token.decimals },
+      "token decimals disagree with the pinned value; using the pinned one",
+    );
+  }
+
+  const value = toBigInt(raw["value"]);
+  if (value !== null) {
+    const amount = appSafeAmount(value, token.decimals);
+    if (amount !== null) item.amount = amount;
+    else log.warn({ chain, hash }, "token amount is larger than the app can display; omitting it");
+  }
+
+  // The fee is native ETH even for a token transfer, so it uses the ETH scale.
+  const gasUsed = toBigInt(raw["gasUsed"]);
+  const gasPrice = toBigInt(raw["gasPrice"]);
+  if (gasUsed !== null && gasPrice !== null) {
+    const fee = appSafeEth(gasUsed * gasPrice);
+    if (fee !== null) item.fee = fee;
+  }
+
+  const seconds = toBigInt(raw["timeStamp"]);
+  if (seconds !== null) item.submittedAt = Number(seconds) * 1000;
+
+  const block = toBigInt(raw["blockNumber"]);
+  item.blockNumber = block === null ? null : Number(block);
+
+  return item;
+}
+
+/**
  * Pages are 1-based and capped. The cap exists because each page spends provider quota, and a
  * client asking for page 5000 is a bug or an attack rather than a user scrolling.
  */
 export const MAX_PAGE = 20;
 export const PAGE_SIZE = 50;
 
-async function viaEtherscan(chain: Chain, address: string, page: number): Promise<LiveTransaction[]> {
+/** One Etherscan `account` query, with the shared error handling. */
+async function etherscanRows(chain: Chain, action: string, address: string, page: number, extra: Record<string, string> = {}): Promise<EtherscanTx[]> {
   const url = new URL(config.etherscanBase);
   url.searchParams.set("chainid", String(chain === "arbitrum" ? 421614 : 11155111));
   url.searchParams.set("module", "account");
-  url.searchParams.set("action", "txlist");
+  url.searchParams.set("action", action);
   url.searchParams.set("address", address);
   url.searchParams.set("page", String(page));
   url.searchParams.set("offset", String(PAGE_SIZE));
   url.searchParams.set("sort", "desc");
+  for (const [key, value] of Object.entries(extra)) url.searchParams.set(key, value);
   if (config.etherscanApiKey) url.searchParams.set("apikey", config.etherscanApiKey);
 
   const body = await fetchJson<{ status?: unknown; message?: unknown; result?: unknown }>(
@@ -156,7 +248,50 @@ async function viaEtherscan(chain: Chain, address: string, page: number): Promis
   }
 
   if (!Array.isArray(body.result)) throw new Error("etherscan: unexpected result shape");
-  return body.result.map((raw) => fromEtherscan(chain, raw as EtherscanTx)).filter((tx): tx is LiveTransaction => tx !== null);
+  return body.result as EtherscanTx[];
+}
+
+/**
+ * Native transfers and the pinned tokens' transfers, merged.
+ *
+ * Two lists, because Etherscan keeps them apart: `txlist` never contains an ERC-20 transfer,
+ * so a USDt send would simply be absent from Activity without this — which is how a user
+ * concludes their money vanished.
+ *
+ * **Only pinned tokens are asked for**, one `contractaddress` query each. That is both a
+ * correctness rule — an unpinned token has unknown decimals and the proxy will not guess — and
+ * a free defence against the airdropped-spam tokens that fill a Sepolia address's history.
+ *
+ * A token query that fails does not fail the whole chain: native history is the more important
+ * of the two, and losing the token rows is better than losing everything. The failure is
+ * logged, and `/v1/history` already carries a per-chain `errors[]` for the native case.
+ *
+ * Pagination is approximate when both lists are non-empty — page N of each is merged and
+ * sorted, rather than page N of a single interleaved sequence that no provider offers. For a
+ * wallet with few token transfers, which is every wallet here, the difference is invisible;
+ * it is written down because at scale it is not.
+ */
+async function viaEtherscan(chain: Chain, address: string, page: number): Promise<LiveTransaction[]> {
+  const native = (await etherscanRows(chain, "txlist", address, page))
+    .map((raw) => fromEtherscan(chain, raw))
+    .filter((tx): tx is LiveTransaction => tx !== null);
+
+  const tokens = await Promise.all(
+    tokensFor(chain).map(async (token) => {
+      try {
+        return (await etherscanRows(chain, "tokentx", address, page, { contractaddress: token.address }))
+          .map((raw) => fromEtherscanToken(chain, token, raw))
+          .filter((tx): tx is LiveTransaction => tx !== null);
+      } catch (error) {
+        log.warn({ chain, token: token.symbol, error: String(error) }, "token history unavailable; native history is unaffected");
+        return [];
+      }
+    }),
+  );
+
+  return [...native, ...tokens.flat()]
+    .sort((a, b) => (b.submittedAt ?? 0) - (a.submittedAt ?? 0))
+    .slice(0, PAGE_SIZE);
 }
 
 // ─── Blockscout ───────────────────────────────────────────────────────────────
@@ -232,4 +367,4 @@ export async function fetchHistory(chain: Chain, address: string, page = 1): Pro
   return { items, source: provider };
 }
 
-export const __test = { fromEtherscan, fromBlockscout, formatEth, appSafeEth, EXPLORERS, viaBlockscout, viaEtherscan };
+export const __test = { fromEtherscan, fromEtherscanToken, fromBlockscout, formatEth, formatUnits, appSafeEth, appSafeAmount, EXPLORERS, viaBlockscout, viaEtherscan, etherscanRows };
