@@ -33,6 +33,38 @@ export const CHAINS = {
   ethereum: { id: 11155111, name: "Ethereum Sepolia" },
 } as const;
 export type Chain = keyof typeof CHAINS;
+/**
+ * ERC-20 tokens the proxy will report history for.
+ *
+ * **This must agree with `TOKENS` in `mobile/src/services/tokens.ts`** — address and decimals
+ * both. The app formats and validates amounts with its own copy, so a disagreement here does
+ * not produce an error, it produces a wrong number next to someone's money. The two cannot
+ * import each other (separate packages), which is the same coupling `CHAINS` already has, and
+ * `backend/test/usdt.test.ts` pins the values so a one-sided edit fails a test rather than
+ * shipping.
+ *
+ * There is no official Tether testnet USDT; this address is a third-party deployment, verified
+ * by `eth_call` on 6 November 2026 to report symbol "USDT" and 6 decimals. The long version is
+ * in the app's copy. Do not carry it to mainnet by habit.
+ *
+ * Only pinned tokens are indexed. An unpinned token has unknown decimals, and the proxy would
+ * have to guess — which is how an amount lands on screen wrong by a factor of a million
+ * million. Spam tokens are also excluded for free by the same rule.
+ */
+export const TOKENS = {
+  arbitrum: [
+    { address: "0xE5b6C29411b3ad31C3613BbA0145293fC9957256", symbol: "USDT", decimals: 6 },
+  ],
+  // Native ETH only, deliberately: Arbitrum is the home chain.
+  ethereum: [],
+} as const satisfies Record<keyof typeof CHAINS, readonly { address: string; symbol: string; decimals: number }[]>;
+
+export type TokenSpec = { address: string; symbol: string; decimals: number };
+
+export function tokensFor(chain: Chain): readonly TokenSpec[] {
+  return TOKENS[chain];
+}
+
 export function isChain(value: unknown): value is Chain {
   // Object.hasOwn, not `in`: `"__proto__" in CHAINS` is true and would pass validation,
   // letting an attacker-chosen key reach the lookup. Caught by test/proxy.test.ts.

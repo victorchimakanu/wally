@@ -9,6 +9,30 @@ export const NETWORKS = {
   ethereum: { name: 'Ethereum Sepolia', chainId: 11155111, rpc: 'https://ethereum-sepolia-rpc.publicnode.com', explorer: 'https://sepolia.etherscan.io', indexer: 'https://eth-sepolia.blockscout.com' },
 };
 /**
+ * ERC-20 tokens this dev server reports balances for.
+ *
+ * **Third copy of this list.** The others are `TOKENS` in mobile/src/services/tokens.ts and in
+ * backend/src/config.ts. None of the three can import the others — a .mjs script cannot read a
+ * .ts module and the backend is a separate package — so `backend/test/usdt.test.ts` asserts all
+ * three agree. A one-sided edit fails that test rather than putting a wrong number beside
+ * somebody's money.
+ *
+ * 6 decimals, not 18. See the app's copy for what this address is and is not.
+ */
+export const TOKENS = {
+  arbitrum: [{ address: '0xE5b6C29411b3ad31C3613BbA0145293fC9957256', symbol: 'USDT', decimals: 6 }],
+  ethereum: [],
+};
+
+/** Base units to a decimal string, at the token's own scale. Never rounds up. */
+export function tokenDisplay(value, decimals) {
+  const n = BigInt(value), scale = 10n ** BigInt(decimals);
+  const whole = n / scale;
+  const fraction = decimals === 0 ? '' : (n % scale).toString().padStart(decimals, '0').replace(/0+$/, '');
+  return `${whole}${fraction ? '.' + fraction : ''}`;
+}
+
+/**
  * Accept a comma as a decimal separator. Must stay identical to normaliseAmount() in
  * mobile/src/services/wallet-api.ts — the app validates an amount before sending it here, and
  * two parsers that disagree is a transfer that passes one check and fails the other.
@@ -155,13 +179,50 @@ export async function createWalletService(directory, { transport = fetch } = {})
   for (const chain of Object.keys(NETWORKS)) { const a = await account(chain), address = await a.getAddress(); if (!validAddress(address)) throw new Error('WDK returned an invalid address.'); const svg = await qr.toString(address, { type: 'svg', width: 160, margin: 2 }); accountInfo.set(chain, { address, qr: `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}` }); }
   // Managers retain the seed internally. No API response includes the seed or signed bytes.
   phrase = null;
+  /**
+   * One ERC-20 balance, by `eth_call` rather than through a Provider object.
+   *
+   * The result is decoded as a plain 32-byte integer. A contract that answers with anything
+   * else is treated as unavailable rather than as zero: showing a balance of nothing when the
+   * call failed is the one wrong answer here.
+   */
+  async function tokenBalance(chain, token, holder) {
+    const data = `0x70a08231${holder.toLowerCase().replace(/^0x/, '').padStart(64, '0')}`;
+    const result = await rpc(chain, 'eth_call', [{ to: token.address, data }, 'latest']);
+    if (typeof result !== 'string' || !/^0x[\da-f]{1,64}$/i.test(result) || result === '0x') {
+      throw new Error(`${token.symbol} balance could not be read.`);
+    }
+    return BigInt(result);
+  }
+
   async function wallet() {
-    const balances = await Promise.all(Object.entries(NETWORKS).map(async ([chain, network]) => {
+    // One entry per chain AND asset now, which is the shape parseWallet() in
+    // mobile/src/services/wallet-api.ts derives from the same token list.
+    const balances = await Promise.all(Object.entries(NETWORKS).flatMap(([chain, network]) => {
       const info = accountInfo.get(chain);
-      try { await checked(chain); const value = await (await account(chain)).getBalance(); return { chain, name: network.name, chainId: network.chainId, symbol: 'ETH', ...info, balanceWei: value.toString(), balance: ethDisplay(value), error: '' }; }
-      catch { return { chain, name: network.name, chainId: network.chainId, symbol: 'ETH', ...info, balanceWei: null, balance: null, error: `${network.name} balance could not be refreshed.` }; }
+      const common = { chain, name: network.name, chainId: network.chainId, ...info };
+
+      const native = (async () => {
+        try { await checked(chain); const value = await (await account(chain)).getBalance(); return { ...common, symbol: 'ETH', balanceWei: value.toString(), balance: ethDisplay(value), error: '' }; }
+        catch { return { ...common, symbol: 'ETH', balanceWei: null, balance: null, error: `${network.name} balance could not be refreshed.` }; }
+      })();
+
+      const tokens = (TOKENS[chain] ?? []).map(async token => {
+        try {
+          await checked(chain);
+          const value = await tokenBalance(chain, token, info.address);
+          // balanceWei holds base units for a token; the field keeps its name because the
+          // app's parser has always used it, and the app cross-checks it against `balance`
+          // using this token's decimals.
+          return { ...common, symbol: token.symbol, balanceWei: value.toString(), balance: tokenDisplay(value, token.decimals), error: '' };
+        } catch {
+          return { ...common, symbol: token.symbol, balanceWei: null, balance: null, error: `${token.symbol} balance could not be refreshed.` };
+        }
+      });
+
+      return [native, ...tokens];
     }));
-    return { version: 1, network: 'testnet', location: 'computer', fetchedAt: Date.now(), balances, tokenNotice: 'Native testnet ETH is connected. USDt requires an explicitly configured testnet token contract; gas is paid in ETH.' };
+    return { version: 1, network: 'testnet', location: 'computer', fetchedAt: Date.now(), balances, tokenNotice: 'Native testnet ETH and testnet USDt on Arbitrum. The USDt contract is a third-party testnet deployment, not Tether\u2019s; gas is paid in ETH.' };
   }
   async function quote(owner, body) {
     if (!body || typeof body !== 'object' || Object.keys(body).some(key => !['chain', 'recipient', 'amount'].includes(key)) || !Object.hasOwn(NETWORKS, body.chain) || !validAddress(body.recipient)) throw new Error('Choose a test network and enter a complete recipient address.');

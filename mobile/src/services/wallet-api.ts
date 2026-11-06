@@ -6,6 +6,9 @@
 // only an address. When EXPO_PUBLIC_WALLY_PROXY_URL is set, it is read from there and merged
 // with this device's own submissions. Everything else still goes to the loopback server.
 import { backendHeaders, backendOrigin } from './backend.ts';
+// Safe despite the apparent cycle: tokens.ts imports only the `Chain` *type* from this file,
+// which is erased at runtime, so nothing is half-initialised at load.
+import { tokensFor } from './tokens.ts';
 export type Chain = 'arbitrum' | 'ethereum';
 export const CHAINS = { arbitrum: { name: 'Arbitrum Sepolia', id: 421614, explorer: 'https://sepolia.arbiscan.io' }, ethereum: { name: 'Ethereum Sepolia', id: 11155111, explorer: 'https://sepolia.etherscan.io' } } as const;
 export type WalletBalance = { chain: Chain; name: string; chainId: number; symbol: 'ETH'; address: string; qr: string; balance: string | null; balanceWei: string | null; error: string };
@@ -17,7 +20,14 @@ export type LiveQuote = { id: string; chain: Chain; chainId: number; network: st
  * a failed transaction ran on the chain and cost a fee, and only `superseded` carries the
  * guarantee that nothing happened at all. See FEATURE-AUDIT §28.3.
  */
-export type LiveTransaction = { hash: string; chain: Chain; status: 'unknown' | 'pending' | 'confirmed' | 'failed' | 'superseded'; explorerUrl: string; from?: string; recipient?: string; amount?: string; fee?: string; submittedAt?: number; blockNumber?: number | null; checkedAt?: number };
+export type LiveTransaction = { hash: string; chain: Chain; status: 'unknown' | 'pending' | 'confirmed' | 'failed' | 'superseded'; explorerUrl: string; from?: string; recipient?: string; amount?: string; fee?: string;
+  /**
+   * What `amount` is denominated in. Absent means the chain's native coin, which is how every
+   * record read before USDt existed — so absence must keep meaning ETH rather than becoming an
+   * error. `fee` is always native, whatever this says.
+   */
+  symbol?: string;
+  submittedAt?: number; blockNumber?: number | null; checkedAt?: number };
 export type LiveHistory = { version: 1; fetchedAt: number; source: string; items: LiveTransaction[]; errors: string[] };
 export function isAddress(value: unknown): value is string { return typeof value === 'string' && /^0x[\da-f]{40}$/i.test(value) && !/^0x0{40}$/i.test(value); }
 /**
@@ -40,10 +50,47 @@ export function normaliseAmount(value: string): string {
   return value.replace(',', '.');
 }
 
-export function wei(value: string): bigint {
+/**
+ * Turn what someone typed into the integer the chain actually moves.
+ *
+ * **`decimals` is data, not a constant, and getting it wrong is the worst bug this app could
+ * have.** ETH has 18; USDt has 6. Feeding a USDt amount through the 18-decimal path would send
+ * a million million times too much, and it would do so silently, because both numbers are valid
+ * integers. So there is exactly one implementation and the caller must name the token's
+ * decimals; `wei()` below is the native-ETH convenience that passes 18.
+ *
+ * The fractional limit follows `decimals`: a token with 6 cannot express a seventh place, and
+ * silently truncating it would mean sending a different amount from the one on screen.
+ */
+export function toBaseUnits(value: string, decimals: number, unit = 'ETH'): bigint {
+  if (!Number.isInteger(decimals) || decimals < 0 || decimals > 36) {
+    throw new Error('A token must declare a whole number of decimals.');
+  }
   const text = normaliseAmount(value);
-  if (!/^(?:0|[1-9]\d{0,12})(?:\.\d{1,18})?$/.test(text)) throw new Error('Enter an ETH amount with up to 18 decimals.');
-  const [whole, part = ''] = text.split('.'); return BigInt(whole) * 10n ** 18n + BigInt(part.padEnd(18, '0'));
+  // Integer part capped at 13 digits as before: beyond that is not an amount a person typed.
+  //
+  // Built conditionally, not eagerly: at decimals 0 the interpolated form is `\d{1,0}`, which
+  // is an invalid quantifier and throws when the RegExp is constructed — even if the branch
+  // that uses it is never taken. A test for a zero-decimal token found that.
+  const shape = decimals === 0
+    ? /^(?:0|[1-9]\d{0,12})$/
+    : new RegExp(`^(?:0|[1-9]\\d{0,12})(?:\\.\\d{1,${decimals}})?$`);
+  if (!shape.test(text)) {
+    // Names the unit, because "up to 6 decimals" is confusing advice to someone who thinks
+    // they are entering ETH. Phrased to avoid an article, so no symbol needs a special case.
+    throw new Error(
+      decimals === 0
+        ? `Enter a whole number of ${unit}.`
+        : `Enter an amount in ${unit} with up to ${decimals} decimals.`,
+    );
+  }
+  const [whole, part = ''] = text.split('.');
+  return BigInt(whole) * 10n ** BigInt(decimals) + BigInt(part.padEnd(decimals, '0') || '0');
+}
+
+/** Native ETH: 18 decimals. A thin name over `toBaseUnits`, not a second implementation. */
+export function wei(value: string): bigint {
+  return toBaseUnits(value, 18, 'ETH');
 }
 
 /**
@@ -64,24 +111,68 @@ export function maxSendable(balanceWei: bigint, gasPriceWei: bigint, gasLimit = 
   return balanceWei > reserve ? balanceWei - reserve : 0n;
 }
 /** Wei as ETH for display, cut (never rounded up) to `decimals` places; dust shows as "<0.000001". */
-export function formatEth(value: bigint, decimals = 6): string {
-  const whole = value / 10n ** 18n, part = (value % 10n ** 18n).toString().padStart(18, '0').slice(0, decimals).replace(/0+$/, '');
-  if (whole === 0n && !part && value > 0n) return `<0.${'0'.repeat(decimals - 1)}1`;
+/**
+ * The inverse: an integer from the chain, as a person should read it.
+ *
+ * `decimals` is the token's; `show` is how many places to display, which is a presentation
+ * choice and not the same number. A non-zero amount that rounds to nothing displays as
+ * `<0.000001` rather than `0`, because telling someone they hold zero when they do not is worse
+ * than an awkward string.
+ */
+export function formatUnits(value: bigint, decimals: number, show = 6): string {
+  const scale = 10n ** BigInt(decimals);
+  const whole = value / scale;
+  const places = Math.min(show, decimals);
+  const part = decimals === 0
+    ? ''
+    : (value % scale).toString().padStart(decimals, '0').slice(0, places).replace(/0+$/, '');
+  if (whole === 0n && !part && value > 0n) {
+    return places > 0 ? `<0.${'0'.repeat(places - 1)}1` : '<1';
+  }
   return `${whole.toLocaleString('en-US')}${part ? `.${part}` : ''}`;
+}
+
+/** Native ETH. Same single implementation. */
+export function formatEth(value: bigint, decimals = 6): string {
+  return formatUnits(value, 18, decimals);
 }
 function object(value: unknown): Record<string, unknown> { if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid wallet API response.'); return value as Record<string, unknown>; }
 function chain(value: unknown): Chain { if (value !== 'arbitrum' && value !== 'ethereum') throw new Error('Unexpected wallet network.'); return value; }
 function time(value: unknown): value is number { return typeof value === 'number' && Number.isSafeInteger(value) && value > 0; }
+/**
+ * Validate a wallet snapshot, now that a chain can carry more than its native coin.
+ *
+ * Two things changed and both matter:
+ *
+ * **One entry per chain became one per chain *and asset*.** The count is no longer fixed at
+ * two — it is the two native coins plus however many tokens are pinned — so it is derived
+ * rather than asserted, and the duplicate check keys on both.
+ *
+ * **The amount cross-check now uses the asset's own decimals.** `balanceWei` is the raw
+ * integer and `balance` the displayed string, and requiring that one converts to the other is
+ * what catches a server and an app disagreeing about a token's decimals. Checked with 18 for a
+ * 6-decimal token it would pass for no value, or fail for the wrong reason. The field keeps its
+ * name for compatibility with the dev wallet server, but for a token it holds base units, not
+ * wei.
+ */
 export function parseWallet(value: unknown): WalletSnapshot {
   const data = object(value);
-  if (data.version !== 1 || data.network !== 'testnet' || data.location !== 'computer' || !time(data.fetchedAt) || typeof data.tokenNotice !== 'string' || !Array.isArray(data.balances) || data.balances.length !== 2) throw new Error('Invalid wallet snapshot.');
-  const seen = new Set<Chain>();
+  const chains = Object.keys(CHAINS) as Chain[];
+  const expected = chains.length + chains.reduce((total, key) => total + tokensFor(key).length, 0);
+  if (data.version !== 1 || data.network !== 'testnet' || data.location !== 'computer' || !time(data.fetchedAt) || typeof data.tokenNotice !== 'string' || !Array.isArray(data.balances) || data.balances.length !== expected) throw new Error('Invalid wallet snapshot.');
+  const seen = new Set<string>();
   for (const raw of data.balances) {
     const item = object(raw), key = chain(item.chain);
-    if (seen.has(key) || item.chainId !== CHAINS[key].id || item.name !== CHAINS[key].name || item.symbol !== 'ETH' || !isAddress(item.address) || typeof item.qr !== 'string' || !/^data:image\/svg\+xml;base64,[A-Za-z0-9+/=]+$/.test(item.qr) || item.qr.length > 40000 || typeof item.error !== 'string') throw new Error('Invalid wallet balance.');
+    // The native coin, or a token pinned for this chain. Anything else is refused rather than
+    // displayed: an unknown asset has unknown decimals, and there is no safe way to show it.
+    const symbol = typeof item.symbol === 'string' ? item.symbol : '';
+    const token = symbol === 'ETH' ? null : tokensFor(key).find(entry => entry.symbol === symbol) ?? null;
+    const decimals = symbol === 'ETH' ? 18 : token?.decimals;
+    const slot = `${key}:${symbol}`;
+    if (decimals === undefined || seen.has(slot) || item.chainId !== CHAINS[key].id || item.name !== CHAINS[key].name || !isAddress(item.address) || typeof item.qr !== 'string' || !/^data:image\/svg\+xml;base64,[A-Za-z0-9+/=]+$/.test(item.qr) || item.qr.length > 40000 || typeof item.error !== 'string') throw new Error('Invalid wallet balance.');
     if (item.balance === null || item.balanceWei === null) { if (item.balance !== null || item.balanceWei !== null || !item.error) throw new Error('Missing balance cannot be shown as zero.'); }
-    else if (typeof item.balance !== 'string' || typeof item.balanceWei !== 'string' || !/^\d+$/.test(item.balanceWei) || wei(item.balance) !== BigInt(item.balanceWei)) throw new Error('Invalid wallet amount.');
-    seen.add(key);
+    else if (typeof item.balance !== 'string' || typeof item.balanceWei !== 'string' || !/^\d+$/.test(item.balanceWei) || toBaseUnits(item.balance, decimals, symbol) !== BigInt(item.balanceWei)) throw new Error('Invalid wallet amount.');
+    seen.add(slot);
   }
   return data as unknown as WalletSnapshot;
 }
@@ -92,6 +183,9 @@ export function parseQuote(value: unknown): LiveQuote {
 }
 export function parseTransaction(value: unknown): LiveTransaction {
   const item = object(value), key = chain(item.chain);
+  // A short, conservative symbol or nothing. An arbitrary string here would reach the screen
+  // next to an amount, which is the one place a made-up label could mislead about money.
+  if (item.symbol !== undefined && (typeof item.symbol !== 'string' || !/^[A-Za-z0-9]{1,12}$/.test(item.symbol))) throw new Error('Invalid transaction receipt.');
   if (typeof item.hash !== 'string' || !/^0x[\da-f]{64}$/i.test(item.hash) || !['unknown', 'pending', 'confirmed', 'failed', 'superseded'].includes(String(item.status)) || item.explorerUrl !== `${CHAINS[key].explorer}/tx/${item.hash}` || item.amount !== undefined && (typeof item.amount !== 'string' || wei(item.amount) < 0n) || item.fee !== undefined && (typeof item.fee !== 'string' || wei(item.fee) < 0n)) throw new Error('Invalid transaction receipt.');
   return item as unknown as LiveTransaction;
 }
