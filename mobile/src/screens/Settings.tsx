@@ -45,6 +45,13 @@ export function SettingsScreen() { const wallet = useWallet();
       <SettingRow title="App lock" subtitle="Fingerprint, face or passcode" icon="43454.svg" onPress={() => router.push({ pathname: '/preferences', params: { panel: 'security' } })} />
       <SettingRow title="Recovery phrase" subtitle="Wallet setup guidance" icon="99b43.svg" onPress={() => router.push({ pathname: '/preferences', params: { panel: 'security' } })} />
     </View>
+    <Label size={12} weight="semibold" color={c.orange}>YOUR DATA</Label>
+    <View style={{ gap: 6 }}>
+      {/* FEATURE-AUDIT §11.5. Chats persisted here with no way to clear them, which left
+          uninstalling the app as the only route — and that takes the wallet with it. */}
+      <SettingRow title="Clear chat history" subtitle="Delete every message on this phone" icon="f2470.svg" onPress={() => router.push('/clear-chats')} />
+      <SettingRow title="Remove this wallet" subtitle="Delete the keys and your data from this phone" icon="43454.svg" onPress={() => router.push('/reset-wallet')} />
+    </View>
     <Label size={12} weight="semibold" color={c.orange}>ABOUT</Label>
     <View><SettingRow title="App version" subtitle={settingsBuildLine()} icon="8dca8.svg" onPress={() => router.push({ pathname: '/preferences', params: { panel: 'connection' } })} /><SettingRow title="Open source licences" subtitle="The software Wally is built on" icon="8dca8.svg" onPress={() => router.push('/licences')} /><SettingRow title="Assistant runtime" subtitle={ai.mode === 'qvac' ? 'QVAC · Qwen3 · Local development' : 'Scripted demo responses'} icon="f2470.svg" /></View>
     <Note>{wallet.enabled ? 'This testnet wallet has real signing keys stored privately on your computer. Keys are never sent to chat or the app.' : 'This preview has no real recovery phrase or signing keys.'}</Note>
