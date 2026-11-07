@@ -60,7 +60,11 @@ export function normaliseAmount(text) {
 }
 export function ethUnits(raw) {
   const text = normaliseAmount(raw);
-  if (typeof text !== 'string' || !/^(?:0|[1-9]\d{0,3})(?:\.\d{1,18})?$/.test(text)) throw new Error('Enter an ETH amount with up to 18 decimals.');
+  // Two separate refusals. One message for both said "up to 18 decimals" when the real problem
+  // was the number of whole digits, which told the user nothing they could act on — and the app
+  // used to let such an amount through, so this message was what they actually saw.
+  if (typeof text !== 'string' || !/^(?:0|[1-9]\d*)(?:\.\d{1,18})?$/.test(text)) throw new Error('Enter an ETH amount with up to 18 decimals.');
+  if (!/^(?:0|[1-9]\d{0,3})(?:\.\d{1,18})?$/.test(text)) throw new Error('That is more than this wallet will send at once. The most is 9,999 ETH.');
   const [whole, fraction = ''] = text.split('.');
   const value = BigInt(whole) * 10n ** 18n + BigInt(fraction.padEnd(18, '0'));
   if (value <= 0n) throw new Error('The amount must be positive.');

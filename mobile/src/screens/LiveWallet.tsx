@@ -6,7 +6,7 @@ import { Address, Button, Card, Detail, Label, Note, Pill, Screen, shared } from
 import { LiveActivityCard, LiveReceiveCard, NetworkChoice, WalletStatus } from '../components/WalletData';
 import { useWallet } from '../data/wallet';
 import { useDemo } from '../demo/store';
-import { CHAINS, isAddress, wei, type Chain, type LiveTransaction } from '../services/wallet-api';
+import { CHAINS, isAddress, type Chain, type LiveTransaction, parseSendAmount } from '../services/wallet-api';
 import { monotonicNow, quoteExpired, secondsLeft } from '../services/quote-clock';
 import { addressTrust, trustWarning } from '../services/address-safety.ts';
 import { usePreferences } from '../demo/preferences';
@@ -49,7 +49,10 @@ export function LiveSendScreen() {
     setError('');
     try {
       if (!isAddress(recipient.trim())) throw new Error('Enter a complete, non-zero EVM wallet address.');
-      if (wei(amount.trim()) <= 0n) throw new Error('Enter a positive amount.');
+      // parseSendAmount, not wei(): wei() is the permissive parser that also reads amounts off
+      // the chain, and using it here let an amount through that the wallet server then refused
+      // a round trip later, with a message about decimal places that was not the problem.
+      parseSendAmount(amount.trim());
       if (state.offline || wallet.offline) throw new Error('Reconnect before reviewing a transfer.');
       setBusy(true); await wallet.prepare({ chain, recipient: recipient.trim(), amount: amount.trim() }); router.push('/review');
     } catch (failure) { setError(failure instanceof Error ? failure.message : 'Could not prepare the transfer.'); }
