@@ -49,6 +49,9 @@ export function SettingsScreen() { const wallet = useWallet();
     <View style={{ gap: 6 }}>
       {/* FEATURE-AUDIT §11.5. Chats persisted here with no way to clear them, which left
           uninstalling the app as the only route — and that takes the wallet with it. */}
+      {/* FEATURE-AUDIT §11.2–11.3: people need transaction records for tax and the app
+          could produce none — every hit for "export" in the codebase was `export function`. */}
+      <SettingRow title="Export your history" subtitle="A spreadsheet file of every transfer" icon="8dca8.svg" onPress={() => router.push('/export-data')} />
       <SettingRow title="Clear chat history" subtitle="Delete every message on this phone" icon="f2470.svg" onPress={() => router.push('/clear-chats')} />
       <SettingRow title="Remove this wallet" subtitle="Delete the keys and your data from this phone" icon="43454.svg" onPress={() => router.push('/reset-wallet')} />
     </View>
