@@ -375,3 +375,59 @@ test('an unusable journal is still refused, so a corrupt file cannot be acted on
   // An empty journal is a fresh install, not a corrupt file.
   assert.equal(validJournal([]), true);
 });
+
+/**
+ * Every refusal this server can throw either reaches the user or is deliberately internal.
+ *
+ * The HTTP layer shows a message only when it matches SAFE_MESSAGE and replaces everything
+ * else with "could not complete this request. Check the connection and retry." That is the
+ * right default — an SDK error can carry a transaction payload — but it means whether a
+ * person sees a refusal depends on the first few words of its prose, which nothing connected
+ * to the prose itself.
+ *
+ * It had already gone wrong. `ethUnits` was split into two refusals so that too many whole
+ * digits stopped being reported as a decimals problem. The new message began "That is more
+ * than…", matched no prefix, and reached the user as advice to check their network — for an
+ * amount they had typed. The unit tests passed throughout, because they call `ethUnits`
+ * directly and never cross the layer that drops the message.
+ *
+ * So this reads the source. A new refusal must either match SAFE_MESSAGE or be listed below
+ * with a reason, and "I did not think about it" cannot be the reason.
+ */
+test('no user-facing refusal is silently replaced with a connection error', async () => {
+  const { SAFE_MESSAGE } = await import('../scripts/wallet-api-core.mjs');
+  const { readFileSync } = await import('node:fs');
+  const { fileURLToPath } = await import('node:url');
+  const source = readFileSync(fileURLToPath(new URL('../scripts/wallet-api-core.mjs', import.meta.url)), 'utf8');
+
+  // Thrown before the server is listening, so no HTTP response ever carries them. They are
+  // read by the developer who started the process, in the terminal.
+  const startup = [
+    'Install the isolated WDK runtime with npm install --prefix internal/wallet-api-runtime --save-exact @tetherto/wdk-wallet-evm@1.0.0-beta.14 qrcode@1.5.4',
+    'The testnet wallet seed is invalid. Restore its backup; a replacement was not generated.',
+    'The transaction journal is invalid. Restore it before submitting transfers.',
+  ];
+  // Genuinely infrastructure: the node or the SDK failed, not the person. "Check the
+  // connection and retry" is the correct advice for these, which is what the generic message
+  // says — so being replaced is the right outcome rather than a missed case.
+  const infrastructure = [
+    '${network.name} RPC is unavailable.',
+    'WDK returned an invalid address.',
+    '${token.symbol} balance could not be read.',
+  ];
+  const deliberate = new Set([...startup, ...infrastructure]);
+
+  const thrown = [...source.matchAll(/throw new Error\((['`])((?:[^'\\`]|\\.)*)\1\)/g)].map(match => match[2]);
+  assert.ok(thrown.length > 25, `expected to find the refusals; found ${thrown.length}`);
+
+  const swallowed = thrown.filter(message => !SAFE_MESSAGE.test(message) && !deliberate.has(message));
+  assert.deepEqual(swallowed, [],
+    'These would reach the user as "Check the connection and retry", which is wrong when the ' +
+    'user is the one who can fix it. Either start the message with a SAFE_MESSAGE prefix, or ' +
+    'add it to startup/infrastructure above with the reason it is not user-facing.');
+
+  // The list above must not rot into a place where real refusals go to be forgotten.
+  for (const message of deliberate) {
+    assert.ok(thrown.includes(message), `"${message}" is listed as deliberate but is no longer thrown; remove it.`);
+  }
+});
