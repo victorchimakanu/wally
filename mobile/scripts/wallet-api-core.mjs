@@ -79,6 +79,36 @@ export function validAddress(address) { return typeof address === 'string' && /^
 export const SETTLED = ['confirmed', 'failed', 'superseded'];
 
 /**
+ * Every status a journalled transfer can hold.
+ *
+ * **One list, derived from, rather than three kept in step by hand.** Adding `superseded` left
+ * the journal's load-time validator still listing four statuses, so the first restart after a
+ * stranded transfer was resolved threw "The transaction journal is invalid" and the dev server
+ * would not start at all. The fix for a wedged chain wedged the server instead.
+ *
+ * OUTSTANDING is computed as the complement of SETTLED rather than written out, because the
+ * two have to be complements and a hand-maintained pair is how they stop being.
+ */
+export const STATUSES = ['unknown', 'pending', 'confirmed', 'failed', 'superseded'];
+export const OUTSTANDING = STATUSES.filter(status => !SETTLED.includes(status));
+
+/**
+ * Is a journal file one we are willing to act on?
+ *
+ * Extracted so it can be tested. It used to be an expression inside `createWalletService`,
+ * which needs the isolated WDK runtime to construct — so the one code path that decides
+ * whether the server starts was unreachable from the test suite, which is why the missing
+ * status shipped.
+ */
+export function validJournal(journal, networks = NETWORKS) {
+  return Array.isArray(journal) && journal.every(item =>
+    item && typeof item === 'object' &&
+    Object.hasOwn(networks, item.chain) &&
+    typeof item.hash === 'string' && /^0x[\da-f]{64}$/i.test(item.hash) &&
+    STATUSES.includes(item.status));
+}
+
+/**
  * Can this transaction still land?
  *
  * The question is answered by asking the chain, not by reading the node's error text. If the
@@ -158,7 +188,7 @@ export async function createWalletService(directory, { transport = fetch } = {})
   try { chmodSync(seedFile, 0o600); } catch {}
   const journalFile = path.join(directory, 'transactions.json');
   let journal = [];
-  if (existsSync(journalFile)) { journal = JSON.parse(readFileSync(journalFile, 'utf8')); if (!Array.isArray(journal) || !journal.every(item => NETWORKS[item.chain] && /^0x[\da-f]{64}$/i.test(item.hash) && ['unknown', 'pending', 'confirmed', 'failed'].includes(item.status))) throw new Error('The transaction journal is invalid. Restore it before submitting transfers.'); }
+  if (existsSync(journalFile)) { journal = JSON.parse(readFileSync(journalFile, 'utf8')); if (!validJournal(journal)) throw new Error('The transaction journal is invalid. Restore it before submitting transfers.'); }
   const save = () => { writeFileSync(journalFile + '.tmp', JSON.stringify(journal, null, 2), { mode: 0o600 }); renameSync(journalFile + '.tmp', journalFile); };
   const book = new QuoteBook();
   const managers = new Map(), accounts = new Map(), accountInfo = new Map();
@@ -238,9 +268,11 @@ export async function createWalletService(directory, { transport = fetch } = {})
     if (!body || typeof body !== 'object' || Object.keys(body).some(key => !['chain', 'recipient', 'amount'].includes(key)) || !Object.hasOwn(NETWORKS, body.chain) || !validAddress(body.recipient)) throw new Error('Choose a test network and enter a complete recipient address.');
     const recipient = ethers.getAddress(body.recipient), value = ethUnits(body.amount), chain = body.chain;
     await checked(chain);
-    for (const pending of journal.filter(item => item.chain === chain && ['unknown', 'pending'].includes(item.status))) {
+    // OUTSTANDING, not a second copy of ['unknown', 'pending']: this list and SETTLED have to
+    // stay complements, and the way they stop being is somebody adding a status to one.
+    for (const pending of journal.filter(item => item.chain === chain && OUTSTANDING.includes(item.status))) {
       try { await receipt(chain, pending.hash); } catch {}
-      if (['unknown', 'pending'].includes(pending.status)) throw new Error('A transfer on this network still needs a receipt. Resolve it in Activity before creating another send.');
+      if (OUTSTANDING.includes(pending.status)) throw new Error('A transfer on this network still needs a receipt. Resolve it in Activity before creating another send.');
     }
     const info = accountInfo.get(chain), a = await account(chain);
     const balance = await a.getBalance(); if (balance < value) throw new Error('Not enough testnet ETH. Fund this address from a faucet before sending.');

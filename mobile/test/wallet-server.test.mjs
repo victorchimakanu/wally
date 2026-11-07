@@ -304,3 +304,74 @@ test('the dev server declares a quote duration the app will accept', async () =>
   // And the deadline the app derived is its own, not the server's stamp.
   assert.notEqual(parsed.deadline, parsed.expiresAt);
 });
+
+test('a journal holding a resolved transfer still loads — the regression this fixes', async () => {
+  // Adding `superseded` left the load-time validator listing four statuses. The first restart
+  // after a stranded transfer was resolved threw "The transaction journal is invalid" and the
+  // dev server would not start at all: the fix for a wedged chain wedged the server instead.
+  // Pinned by its symptom, so the next status added fails here rather than on somebody's
+  // machine.
+  const { validJournal, STATUSES } = await import('../scripts/wallet-api-core.mjs');
+  const record = status => ({ chain: 'arbitrum', hash: `0x${'a'.repeat(64)}`, status });
+
+  for (const status of STATUSES) {
+    assert.equal(validJournal([record(status)]), true, `a journal with status "${status}" must load`);
+  }
+  // The specific one that broke it.
+  assert.equal(validJournal([record('superseded')]), true);
+  // And the extra field the manual resolve writes must not upset it.
+  assert.equal(validJournal([{ ...record('superseded'), resolvedByUser: 1_700_000_000_000 }]), true);
+});
+
+test('the status sets are complements, computed rather than kept in step by hand', async () => {
+  const { STATUSES, SETTLED, OUTSTANDING } = await import('../scripts/wallet-api-core.mjs');
+
+  // Every status is in exactly one of the two. If this ever fails, either a transfer can block
+  // the chain forever or a live one is treated as finished.
+  assert.deepEqual([...SETTLED, ...OUTSTANDING].sort(), [...STATUSES].sort());
+  assert.deepEqual(SETTLED.filter(status => OUTSTANDING.includes(status)), [], 'no status may be both');
+  assert.deepEqual([...OUTSTANDING].sort(), ['pending', 'unknown']);
+});
+
+test('the server and the app agree on the list of statuses', async () => {
+  // The app's LiveTransaction union and the server's STATUSES must match. They cannot import
+  // each other, and a server status the app's parser does not know blanks the whole Activity
+  // list — parseHistory throws for the entire list if one item fails validation.
+  const { STATUSES } = await import('../scripts/wallet-api-core.mjs');
+  const { readFileSync } = await import('node:fs');
+  const appSource = readFileSync(new URL('../src/services/wallet-api.ts', import.meta.url), 'utf8');
+
+  for (const status of STATUSES) {
+    assert.ok(appSource.includes(`'${status}'`), `the app must know the status "${status}"`);
+  }
+  // And the app's own validation list must be exactly these, in the parser that guards Activity.
+  const list = /\[((?:'[a-z]+', ?)+'[a-z]+')\]\.includes\(String\(item\.status\)\)/.exec(appSource);
+  assert.ok(list, 'could not find the app\'s status validation list');
+  const appStatuses = list[1].split(',').map(part => part.trim().replace(/'/g, ''));
+  assert.deepEqual(appStatuses.sort(), [...STATUSES].sort());
+});
+
+test('an unusable journal is still refused, so a corrupt file cannot be acted on', async () => {
+  const { validJournal } = await import('../scripts/wallet-api-core.mjs');
+  const good = { chain: 'arbitrum', hash: `0x${'a'.repeat(64)}`, status: 'pending' };
+
+  assert.equal(validJournal([good]), true);
+  for (const bad of [
+    [{ ...good, status: 'invented' }],
+    [{ ...good, status: undefined }],
+    [{ ...good, chain: 'solana' }],
+    [{ ...good, chain: '__proto__' }],      // Object.hasOwn, not `in`
+    [{ ...good, hash: 'nope' }],
+    [{ ...good, hash: `0x${'a'.repeat(63)}` }],
+    [null],
+    ['a string'],
+    [42],
+    'not an array',
+    null,
+    undefined,
+  ]) {
+    assert.equal(validJournal(bad), false, `must refuse: ${JSON.stringify(bad)}`);
+  }
+  // An empty journal is a fresh install, not a corrupt file.
+  assert.equal(validJournal([]), true);
+});

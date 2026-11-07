@@ -26,6 +26,13 @@ Three details worth knowing:
   user action — "this never arrived" — which the server refuses for anything it *can* judge.
   That refusal is what stops the escape hatch becoming a way to send the same money twice.
 
+**One thing this missed, found 7 November.** Adding the `superseded` status left the journal's
+load-time validator still listing four statuses, so the first restart after a stranded transfer
+was resolved threw "The transaction journal is invalid" and the dev server would not start — the
+fix for a wedged chain wedged the server instead. The statuses are now one list with
+`OUTSTANDING` computed as the complement of `SETTLED`, the validator is an exported function so
+it can be tested at all, and a test walks every status through it.
+
 The history below is kept because the reasoning still matters.
 
 ## What happens
