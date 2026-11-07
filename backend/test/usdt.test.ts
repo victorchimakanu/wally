@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { readFileSync } from "node:fs";
-import { TOKENS, tokensFor } from "../src/config.js";
+import { CHAINS, TOKENS, tokensFor } from "../src/config.js";
 import { __test } from "../src/indexer.js";
 
 /**
@@ -122,6 +122,22 @@ describe("the token list", () => {
       expect(text, `${where}: Ethereum stays native-only`).toContain("ethereum: []");
       expect(text, `${where}: must not scale USDt by 18`).not.toContain("symbol: 'USDT', decimals: 18");
     }
+  });
+
+  it("agrees with the app on every chain's name, id and explorer", () => {
+    // CLAUDE.md says these must match the app character for character, because
+    // `parseTransaction` rejects any record whose explorerUrl is not exactly
+    // `${explorer}/tx/${hash}` — and a rejected record throws for the WHOLE list, blanking
+    // Activity. Until now that coupling was described in comments and checked by nothing.
+    const appCopy = readFileSync(new URL("../../mobile/src/services/wallet-api.ts", import.meta.url), "utf8");
+    for (const [chain, meta] of Object.entries(CHAINS)) {
+      expect(appCopy, `${chain} name`).toContain(`name: '${meta.name}'`);
+      expect(appCopy, `${chain} id`).toContain(`id: ${meta.id}`);
+      expect(appCopy, `${chain} explorer`).toContain(`explorer: '${(__test.EXPLORERS as Record<string, string>)[chain]}'`);
+    }
+    // And neither side may know a chain the other does not.
+    expect(Object.keys(__test.EXPLORERS).sort()).toEqual(Object.keys(CHAINS).sort());
+    for (const chain of Object.keys(CHAINS)) expect(appCopy).toContain(`${chain}: {`);
   });
 
   it("pins USDt as six decimals on Arbitrum only", () => {

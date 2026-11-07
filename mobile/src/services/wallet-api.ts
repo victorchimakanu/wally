@@ -98,6 +98,43 @@ export function toBaseUnits(value: string, decimals: number, unit = 'ETH'): bigi
   return BigInt(whole) * 10n ** BigInt(decimals) + BigInt(part.padEnd(decimals, '0') || '0');
 }
 
+/**
+ * The largest whole part a *send* may carry.
+ *
+ * `toBaseUnits` is deliberately permissive because it also reads amounts off the chain, where a
+ * spam transfer on a testnet can be enormous and the alternative to displaying it is blanking
+ * the whole Activity list. An amount a person is typing is a different question, and bounding
+ * both with one number means either refusing real history or accepting a send the wallet server
+ * will reject.
+ *
+ * Four digits, which is the bound `ethUnits()` in mobile/scripts/wallet-api-core.mjs applies.
+ * Before this existed the app validated a typed amount with the permissive parser, so `50000`
+ * passed here and was refused by the server a round trip later — with a message about decimal
+ * places, which was not the problem. A test compares the two parsers' verdicts across a corpus
+ * so they cannot drift apart again.
+ */
+export const MAX_SEND_WHOLE_DIGITS = 4;
+
+/**
+ * Parse an amount somebody typed into a send field.
+ *
+ * Refuses zero as well as the unparseable, because a send of nothing is not a send and the
+ * wallet server refuses it too — agreeing here means the message arrives under the user's
+ * finger rather than after a round trip.
+ */
+export function parseSendAmount(value: string, decimals = 18, unit = 'ETH'): bigint {
+  const units = toBaseUnits(value, decimals, unit);
+  if (units <= 0n) throw new Error('Enter an amount greater than zero.');
+  // No leading-zero stripping: toBaseUnits has already refused anything but a bare `0` or a
+  // leading 1-9, so the whole part here is already in its shortest form.
+  const whole = normaliseAmount(value).split('.')[0] ?? '';
+  if (whole.length > MAX_SEND_WHOLE_DIGITS) {
+    const limit = (10 ** MAX_SEND_WHOLE_DIGITS - 1).toLocaleString('en-US');
+    throw new Error(`That is more than this wallet will send at once. The most is ${limit} ${unit}.`);
+  }
+  return units;
+}
+
 /** Native ETH: 18 decimals. A thin name over `toBaseUnits`, not a second implementation. */
 export function wei(value: string): bigint {
   return toBaseUnits(value, 18, 'ETH');
