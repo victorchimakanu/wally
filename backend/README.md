@@ -25,7 +25,11 @@ Signing happens on the phone — see [`../docs/ADR-001-key-custody.md`](../docs/
 GET  /health                                  liveness; ?deep=1 also pings each chain
 GET  /v1/rpc/methods                          permitted JSON-RPC methods, and which are cached
 POST /v1/rpc/:chain                           JSON-RPC passthrough, allowlisted, read-cached
+POST /v1/bundler/:chain                   ERC-4337 bundler, Arbitrum only, method allowlist
+POST /v1/paymaster/:chain                 paymaster (sponsorship), Arbitrum only, never cached
+GET  /v1/gasless                          whether gasless is configured, and the allowlists
 GET  /v1/history?address=[&chain=]            address transactions, both chains by default
+                                          includes ERC-20 transfers for pinned tokens (USDt, Arbitrum)
 GET  /v1/market?currency=usd|ngn|eur          watchlist prices
 GET  /v1/market/chart?id=&days=&currency=     price history
 GET  /v1/models                               QVAC model list (passthrough)

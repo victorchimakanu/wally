@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { CHAINS, config, isChain, type Chain } from "../config.js";
 import { TtlCache, singleFlight } from "../cache.js";
-import { fetchHistory, type LiveTransaction } from "../indexer.js";
+import { fetchHistory, MAX_PAGE, PAGE_SIZE, type LiveTransaction } from "../indexer.js";
 import { getLogger } from "../logger.js";
 
 const log = getLogger("history");
@@ -44,6 +44,22 @@ export async function historyRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(400).send({ error: "Unknown chain. Supported: arbitrum, ethereum, or omit for both." });
     }
 
+    /**
+     * Pages are 1-based. Until 5 Nov 2026 there were none: the indexer asked for page 1 and the
+     * route sliced to 50, so a user's fifty-first transaction and everything older was
+     * unreachable for good.
+     *
+     * Honest about the limit: a page is fetched from each chain and the results merged, so a
+     * page boundary is not a clean cut across the combined history. Page 2 is "the next fifty
+     * from each chain", not "transactions 51-100 overall". Good enough to reach old activity,
+     * and better than a ceiling.
+     */
+    const rawPage = query["page"];
+    const page = rawPage === undefined ? 1 : Number(rawPage);
+    if (!Number.isInteger(page) || page < 1 || page > MAX_PAGE) {
+      return reply.code(400).send({ error: `page must be a whole number between 1 and ${MAX_PAGE}.` });
+    }
+
     const chains: Chain[] = requested === undefined ? (Object.keys(CHAINS) as Chain[]) : [requested as Chain];
 
     const fallback = query["address"];
@@ -62,12 +78,12 @@ export async function historyRoutes(app: FastifyInstance): Promise<void> {
     const settled = await Promise.all(
       chains.map(async (chain) => {
         const address = addresses.get(chain) as string;
-        const key = `${config.indexerProvider}:${chain}:${address.toLowerCase()}`;
+        const key = `${config.indexerProvider}:${chain}:${address.toLowerCase()}:p${page}`;
         const hit = cache.get(key);
         if (hit) return { chain, items: hit.value.items, error: null as string | null, cache: "hit" as const };
 
         try {
-          const result = await flight.run(key, () => fetchHistory(chain, address));
+          const result = await flight.run(key, () => fetchHistory(chain, address, page));
           cache.set(key, result);
           return { chain, items: result.items, error: null as string | null, cache: "miss" as const };
         } catch (error) {
@@ -111,7 +127,12 @@ export async function historyRoutes(app: FastifyInstance): Promise<void> {
         return true;
       })
       .sort((a, b) => (b.submittedAt ?? 0) - (a.submittedAt ?? 0))
-      .slice(0, 50);
+      .slice(0, PAGE_SIZE);
+
+    // A chain that filled its page probably has more behind it. Imperfect — exactly PAGE_SIZE
+    // results could be the end — but offering a "load more" that returns nothing is a smaller
+    // failure than hiding history that exists.
+    const hasMore = page < MAX_PAGE && settled.some((entry) => entry.items.length >= PAGE_SIZE);
 
     // Every chain failed and nothing was cached: that is a failure, not an empty history.
     // Returning [] would be rendered as "no transactions", which is a different claim.
@@ -131,6 +152,8 @@ export async function historyRoutes(app: FastifyInstance): Promise<void> {
 
     return reply.header("x-wally-cache", cacheState).send({
       version: 1,
+      page,
+      hasMore,
       // Echoed per chain so a wrong-address bug is visible in the response, not guessed at.
       addresses: Object.fromEntries(addresses),
       fetchedAt: Date.now(),

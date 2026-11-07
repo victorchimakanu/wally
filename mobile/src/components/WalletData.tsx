@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
+import { createClipboardSafety, copyNotice } from '../services/clipboard-safety.ts';
 import { Pressable, Share, View } from 'react-native';
 import { Button, Card, Label, Note, QrTile, ReceiveAddress, shared } from './ui';
 import { useWallet } from '../data/wallet';
@@ -24,35 +25,64 @@ function NetworkMark({ chain }: { chain: Chain }) {
 export function LiveWalletOverview({ onActivity = () => router.push('/history') }: { onActivity?: () => void } = {}) {
   const wallet = useWallet();
   const balances = wallet.snapshot?.balances ?? [];
-  const known = balances.filter(item => item.balanceWei !== null);
-  const total = known.length ? formatEth(known.reduce((sum, item) => sum + BigInt(item.balanceWei!), 0n)) : null;
+  // ETH only, and the filter is the whole point: `balanceWei` holds base units at the asset's
+  // own scale, so summing across assets would add 10.5 USDt (10,500,000 base units) into a wei
+  // total and then label the result ETH. Apples into oranges, presented as apples.
+  const nativeKnown = balances.filter(item => item.symbol === 'ETH' && item.balanceWei !== null);
+  const total = nativeKnown.length ? formatEth(nativeKnown.reduce((sum, item) => sum + BigInt(item.balanceWei!), 0n)) : null;
+  // Tokens are listed in their own units, never folded into a single number.
+  const tokenBalances = balances.filter(item => item.symbol !== 'ETH');
   const synced = wallet.snapshot ? `${wallet.stale ? 'Saved' : 'Updated'} ${new Date(wallet.snapshot.fetchedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Connecting to the local wallet…';
   return <View style={{ gap: 12 }}>
     <Card style={{ backgroundColor: c.tint, borderColor: c.tint, alignItems: 'center', gap: 4, paddingVertical: 24 }}>
       <Label size={16} weight="medium">Personal wallet</Label>
       <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 6 }}><Label size={40} weight="semibold" style={{ lineHeight: 48 }}>{total ?? '—'}</Label><Label size={16} weight="semibold">ETH</Label></View>
-      <Label size={13} color={c.muted}>{wallet.loading ? 'Refreshing balances…' : `${balances.length || Object.keys(CHAINS).length} test networks · ${synced}`}</Label>
-      {known.length < balances.length && <Label size={12} color={c.error}>Total excludes a network that could not refresh</Label>}
+      <Label size={13} color={c.muted}>{wallet.loading ? 'Refreshing balances…' : `${Object.keys(CHAINS).length} test networks · ${synced}`}</Label>
+      {nativeKnown.length < balances.filter(item => item.symbol === 'ETH').length && <Label size={12} color={c.error}>Total excludes a network that could not refresh</Label>}
     </Card>
     <Card style={{ gap: 0, paddingVertical: 12 }}>
       <Label size={16} weight="bold" style={{ paddingBottom: 4 }}>By network</Label>
-      {balances.map(item => <View key={item.chain} style={{ paddingVertical: 12, gap: 6, borderTopWidth: 1, borderColor: c.line }}>
+      {balances.filter(item => item.symbol === 'ETH').map(item => <View key={`${item.chain}:${item.symbol}`} style={{ paddingVertical: 12, gap: 6, borderTopWidth: 1, borderColor: c.line }}>
         <View style={shared.row}><NetworkMark chain={item.chain} /><View style={shared.flex}><Label size={16} weight="medium">{item.chain === 'arbitrum' ? 'Arbitrum' : 'Ethereum'}</Label><Label size={12} color={c.muted}>Sepolia · Testnet</Label></View><View style={{ alignItems: 'flex-end', flexShrink: 1 }}><Label size={16} weight="semibold">{item.balance === null ? 'Unavailable' : `${item.balance} ETH`}</Label><Label size={12} color={item.error ? c.error : c.muted}>{item.error ? 'Could not refresh' : 'Available balance'}</Label></View></View>
         {!!item.error && <Note error>{item.error}</Note>}
       </View>)}
       {!wallet.snapshot && <Note>Balances appear after the wallet API responds.</Note>}
     </Card>
+    {/* Tokens get their own card and their own units. Each row prints the asset's own symbol
+        rather than a hardcoded one, and nothing here is added into the ETH total above — the
+        two are different things and a single number would be meaningless. */}
+    {tokenBalances.length > 0 && <Card style={{ gap: 0, paddingVertical: 12 }}>
+      <Label size={16} weight="bold" style={{ paddingBottom: 4 }}>Tokens</Label>
+      {tokenBalances.map(item => <View key={`${item.chain}:${item.symbol}`} style={{ paddingVertical: 12, gap: 6, borderTopWidth: 1, borderColor: c.line }}>
+        <View style={shared.row}><NetworkMark chain={item.chain} /><View style={shared.flex}><Label size={16} weight="medium">{item.symbol}</Label><Label size={12} color={c.muted}>{item.chain === 'arbitrum' ? 'Arbitrum' : 'Ethereum'} Sepolia · Testnet</Label></View><View style={{ alignItems: 'flex-end', flexShrink: 1 }}><Label size={16} weight="semibold">{item.balance === null ? 'Unavailable' : `${item.balance} ${item.symbol}`}</Label><Label size={12} color={item.error ? c.error : c.muted}>{item.error ? 'Could not refresh' : 'Available balance'}</Label></View></View>
+        {!!item.error && <Note error>{item.error}</Note>}
+      </View>)}
+    </Card>}
     {!!wallet.error && <Note error>{wallet.error}</Note>}
-    <Note>Testnet ETH only, held by the WDK wallet on your computer. It has no monetary value; USDt isn’t connected.</Note>
+    <Note>Testnet funds held by the WDK wallet on your computer, with no monetary value. The USDt contract is a third-party testnet deployment, not Tether’s — sending it is not built yet.</Note>
     <View style={shared.row}><Button secondary label="Refresh" disabled={wallet.loading || wallet.offline} style={shared.flex} onPress={() => { void wallet.refresh(); }} /><Button secondary label="Activity" style={shared.flex} onPress={onActivity} /></View>
   </View>;
 }
 export function LiveReceiveCard() {
   const wallet = useWallet();
   const [chain, setChain] = useState<Chain>('arbitrum'), [notice, setNotice] = useState(''), [copied, setCopied] = useState(false);
-  const balance = wallet.snapshot?.balances.find(item => item.chain === chain);
+  // `symbol` is named explicitly: a chain now has more than one balance, and finding by chain
+  // alone returned whichever the server happened to list first.
+  const balance = wallet.snapshot?.balances.find(item => item.chain === chain && item.symbol === 'ETH');
   useEffect(() => { if (!copied) return; const timer = setTimeout(() => setCopied(false), 2000); return () => clearTimeout(timer); }, [copied]);
-  async function copy() { if (!balance) return; try { const ok = await Clipboard.setStringAsync(balance.address); setCopied(ok); setNotice(ok ? '' : 'Copy is unavailable on this device. Share the address instead.'); } catch { setNotice('Copy is unavailable on this device. Share the address instead.'); } }
+  // An address left in the clipboard is readable by every app on the device for as long as it
+  // sits there, and clipboard-swapping malware is ordinary in this space. This clears it after
+  // a minute, and only if it is still the address we put there.
+  const clipboard = useMemo(() => createClipboardSafety(Clipboard), []);
+  useEffect(() => () => clipboard.cancel(), [clipboard]);
+  async function copy() {
+    if (!balance) return;
+    try {
+      const result = await clipboard.copy(balance.address);
+      setCopied(result.copied);
+      setNotice(result.copied ? '' : copyNotice(result));
+    } catch { setNotice('Copy is unavailable on this device. Share the address instead.'); }
+  }
   return <Card style={{ gap: 16 }}>
     <View style={{ gap: 4 }}><Label size={18} weight="bold" style={{ lineHeight: 22 }}>Receive testnet ETH</Label><Note>{CHAINS[chain].name} · Testnet</Note></View>
     <NetworkChoice value={chain} onChange={next => { setChain(next); setNotice(''); setCopied(false); }} />
@@ -68,7 +98,7 @@ export function LiveActivityCard({ compact = false, search = '', filter = 'All' 
   const matches = wallet.history?.items.filter(item => {
     const sent = !!item.from && addresses.includes(item.from.toLowerCase());
     const received = !!item.recipient && addresses.includes(item.recipient.toLowerCase());
-    return (filter === 'All' || filter === 'Sent' && sent || filter === 'Received' && received) && `${item.hash} ${item.recipient} ${item.from} ${item.amount} ${item.status} ${CHAINS[item.chain].name}`.toLowerCase().includes(search.toLowerCase());
+    return (filter === 'All' || filter === 'Sent' && sent || filter === 'Received' && received) && `${item.hash} ${item.recipient} ${item.from} ${item.amount} ${item.symbol ?? 'ETH'} ${item.status} ${CHAINS[item.chain].name}`.toLowerCase().includes(search.toLowerCase());
   }) ?? [];
-  return <Card><Label size={18} weight="semibold">On-chain activity</Label>{wallet.historyLoading && <Note>Checking the explorers and network receipts…</Note>}{!!wallet.historyError && <Note error>{wallet.historyError}</Note>}{wallet.history?.errors.map(error => <Note key={error} error>{error}</Note>)}{matches.slice(0, compact ? 3 : 50).map(item => { const sent = !!item.from && addresses.includes(item.from.toLowerCase()); const address = sent ? item.recipient : item.from; return <Pressable key={`${item.chain}:${item.hash}`} accessibilityRole="button" onPress={() => router.push({ pathname: '/transaction', params: { chain: item.chain, hash: item.hash } })} style={{ gap: 4, paddingVertical: 12, borderBottomWidth: 1, borderColor: c.line }}><View style={shared.between}><Label>{sent ? 'Sent' : 'Received'} {item.amount ?? '—'} ETH</Label><Label size={12} color={item.status === 'failed' ? c.error : c.muted}>{item.status}</Label></View><Note>{CHAINS[item.chain].name} · {address ? `${address.slice(0, 8)}…${address.slice(-6)}` : item.hash.slice(0, 12)}</Note></Pressable>; })}{!matches.length && !wallet.historyLoading && <Note>{wallet.history ? 'No matching transactions were returned. Explorer errors above mean history may be incomplete.' : 'Activity has not been fetched yet.'}</Note>}{wallet.history && <Note>{wallet.offline || wallet.historyError ? 'Saved' : 'Fetched'} activity · {new Date(wallet.history.fetchedAt).toLocaleTimeString()} · Blockscout and local receipts. Token transfers and internal contract activity are not included.</Note>}<Button secondary label="Refresh activity" disabled={wallet.historyLoading || wallet.offline} onPress={() => { void wallet.refreshHistory(); }} />{compact && <Button secondary label="View all activity" onPress={() => router.push('/history')} />}</Card>;
+  return <Card><Label size={18} weight="semibold">On-chain activity</Label>{wallet.historyLoading && <Note>Checking the explorers and network receipts…</Note>}{!!wallet.historyError && <Note error>{wallet.historyError}</Note>}{wallet.history?.errors.map(error => <Note key={error} error>{error}</Note>)}{matches.slice(0, compact ? 3 : 50).map(item => { const sent = !!item.from && addresses.includes(item.from.toLowerCase()); const address = sent ? item.recipient : item.from; return <Pressable key={`${item.chain}:${item.hash}`} accessibilityRole="button" onPress={() => router.push({ pathname: '/transaction', params: { chain: item.chain, hash: item.hash } })} style={{ gap: 4, paddingVertical: 12, borderBottomWidth: 1, borderColor: c.line }}><View style={shared.between}><Label>{sent ? 'Sent' : 'Received'} {item.amount ?? '—'} ${item.symbol ?? 'ETH'}</Label><Label size={12} color={item.status === 'failed' || item.status === 'superseded' ? c.error : c.muted}>{item.status === 'superseded' ? 'never arrived' : item.status}</Label></View><Note>{CHAINS[item.chain].name} · {address ? `${address.slice(0, 8)}…${address.slice(-6)}` : item.hash.slice(0, 12)}</Note></Pressable>; })}{!matches.length && !wallet.historyLoading && <Note>{wallet.history ? 'No matching transactions were returned. Explorer errors above mean history may be incomplete.' : 'Activity has not been fetched yet.'}</Note>}{wallet.history && <Note>{wallet.offline || wallet.historyError ? 'Saved' : 'Fetched'} activity · {new Date(wallet.history.fetchedAt).toLocaleTimeString()} · Blockscout and local receipts. Token transfers and internal contract activity are not included.</Note>}<Button secondary label="Refresh activity" disabled={wallet.historyLoading || wallet.offline} onPress={() => { void wallet.refreshHistory(); }} />{compact && <Button secondary label="View all activity" onPress={() => router.push('/history')} />}</Card>;
 }
