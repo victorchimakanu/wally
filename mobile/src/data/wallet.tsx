@@ -4,6 +4,7 @@ import { AppState, Platform } from 'react-native';
 import { createWalletClient, parseWallet, type Chain, type LiveHistory, type LiveQuote, type LiveTransaction, type WalletSnapshot } from '../services/wallet-api';
 // Extensionless: Metro picks the native biometric path on a phone, the no-op on web.
 import { requireUnlock } from '../services/unlock';
+import { quoteExpired } from '../services/quote-clock';
 
 const endpoint = process.env.EXPO_PUBLIC_WALLY_API_URL ?? '';
 export const liveWalletEnabled = !!endpoint;
@@ -101,7 +102,9 @@ export function WalletProvider({ children }: React.PropsWithChildren) {
     },
     async confirm() {
       const q = activeQuote.current;
-      if (!client || offlineNow.current || !q || q.expiresAt <= Date.now()) throw new Error('Request a fresh review before confirming.');
+      // q.deadline, not q.expiresAt: the latter is the server's clock and comparing it with
+      // this phone's made a quote look expired on any handset running fast. quote-clock.ts.
+      if (!client || offlineNow.current || !q || quoteExpired(q.deadline)) throw new Error('Request a fresh review before confirming.');
       if (submitting.current) throw new Error('Submission is already in progress.');
 
       // The last gate before anything irreversible, and the only one in the app: every live

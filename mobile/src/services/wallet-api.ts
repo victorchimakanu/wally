@@ -9,11 +9,21 @@ import { backendHeaders, backendOrigin } from './backend.ts';
 // Safe despite the apparent cycle: tokens.ts imports only the `Chain` *type* from this file,
 // which is erased at runtime, so nothing is half-initialised at load.
 import { tokensFor } from './tokens.ts';
+import { plausibleQuoteSpan, quoteDeadline } from './quote-clock.ts';
 export type Chain = 'arbitrum' | 'ethereum';
 export const CHAINS = { arbitrum: { name: 'Arbitrum Sepolia', id: 421614, explorer: 'https://sepolia.arbiscan.io' }, ethereum: { name: 'Ethereum Sepolia', id: 11155111, explorer: 'https://sepolia.etherscan.io' } } as const;
 export type WalletBalance = { chain: Chain; name: string; chainId: number; symbol: 'ETH'; address: string; qr: string; balance: string | null; balanceWei: string | null; error: string };
 export type WalletSnapshot = { version: 1; network: 'testnet'; location: 'computer'; fetchedAt: number; balances: WalletBalance[]; tokenNotice: string };
-export type LiveQuote = { id: string; chain: Chain; chainId: number; network: string; symbol: 'ETH'; from: string; recipient: string; amount: string; fee: string; total: string; expiresAt: number };
+export type LiveQuote = { id: string; chain: Chain; chainId: number; network: string; symbol: 'ETH'; from: string; recipient: string; amount: string; fee: string; total: string;
+  /** The server's own clock. Kept for the record; never compared against this phone's. */
+  expiresAt: number;
+  /** How long the server says the quote is good for. */
+  expiresInMs: number;
+  /**
+   * The local deadline, on this phone's monotonic clock, fixed when the quote arrived. This is
+   * the only value the app compares against — see quote-clock.ts for why.
+   */
+  deadline: number };
 /**
  * `superseded` means the transfer can never land: the account's nonce was spent by a different
  * transaction, so this one is dead and the money never moved. It is deliberately not `failed` —
@@ -178,8 +188,15 @@ export function parseWallet(value: unknown): WalletSnapshot {
 }
 export function parseQuote(value: unknown): LiveQuote {
   const q = object(value), key = chain(q.chain);
+  // How long the quote is good for, as the server declares it. Required: comparing the
+  // server's `expiresAt` against this phone's clock is exactly the bug quote-clock.ts exists
+  // to remove, so a response without a usable duration is refused rather than silently falling
+  // back to that comparison.
+  if (!plausibleQuoteSpan(q.expiresInMs)) throw new Error('The review did not say how long it is valid for.');
   if (typeof q.id !== 'string' || !/^[\da-f-]{36}$/i.test(q.id) || q.chainId !== CHAINS[key].id || q.network !== CHAINS[key].name || q.symbol !== 'ETH' || !isAddress(q.from) || !isAddress(q.recipient) || !time(q.expiresAt) || typeof q.amount !== 'string' || typeof q.fee !== 'string' || typeof q.total !== 'string' || wei(q.amount) <= 0n || wei(q.fee) <= 0n || wei(q.fee) > 10n ** 16n || wei(q.total) !== wei(q.amount) + wei(q.fee)) throw new Error('Invalid transfer review. Nothing was submitted.');
-  return q as unknown as LiveQuote;
+  // The local deadline is fixed here, at the moment the quote arrived. Deriving it later would
+  // silently extend the quote by however long the delay was.
+  return { ...q, deadline: quoteDeadline(q.expiresInMs as number) } as unknown as LiveQuote;
 }
 export function parseTransaction(value: unknown): LiveTransaction {
   const item = object(value), key = chain(item.chain);

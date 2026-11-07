@@ -4,6 +4,16 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 
+/**
+ * How long a fee quote is good for.
+ *
+ * Sent to the app as a duration as well as a timestamp. The timestamp is this machine's clock
+ * and the app cannot safely compare it with its own — a phone running a few minutes fast saw
+ * every quote as already expired and could not send at all. See
+ * mobile/src/services/quote-clock.ts.
+ */
+export const QUOTE_MS = 60000;
+
 export const NETWORKS = {
   arbitrum: { name: 'Arbitrum Sepolia', chainId: 421614, rpc: 'https://sepolia-rollup.arbitrum.io/rpc', explorer: 'https://sepolia.arbiscan.io', indexer: 'https://arbitrum-sepolia.blockscout.com' },
   ethereum: { name: 'Ethereum Sepolia', chainId: 11155111, rpc: 'https://ethereum-sepolia-rpc.publicnode.com', explorer: 'https://sepolia.etherscan.io', indexer: 'https://eth-sepolia.blockscout.com' },
@@ -122,7 +132,7 @@ export class QuoteBook {
   create(owner, payload) {
     for (const [id, quote] of this.items) if (quote.expiresAt <= this.now()) this.items.delete(id);
     if (this.items.size >= 128) throw new Error('Too many pending reviews. Try again later.');
-    const quote = { ...payload, id: randomUUID(), owner, expiresAt: this.now() + 60000, claimed: false };
+    const quote = { ...payload, id: randomUUID(), owner, expiresAt: this.now() + QUOTE_MS, claimed: false };
     this.items.set(quote.id, quote); return quote;
   }
   claim(owner, id, approved) {
@@ -242,7 +252,11 @@ export async function createWalletService(directory, { transport = fetch } = {})
     const tx = { to: recipient, value, data: '0x', chainId: NETWORKS[chain].chainId, nonce: Number(BigInt(nonceHex)), gasLimit, gasPrice, type: 0 };
     const wdkQuote = await a.quoteSendTransaction(tx); if (wdkQuote.fee > 10n ** 16n) throw new Error('WDK rejected the network fee limit.');
     const entry = book.create(owner, { chain, recipient, amount: ethers.formatEther(value), fee: ethers.formatEther(fee), feeWei: fee.toString(), total: ethers.formatEther(value + fee), from: info.address, tx });
-    return { id: entry.id, chain, network: NETWORKS[chain].name, recipient, amount: entry.amount, fee: entry.fee, total: entry.total, from: entry.from, expiresAt: entry.expiresAt, symbol: 'ETH', chainId: NETWORKS[chain].chainId };
+    return { id: entry.id, chain, network: NETWORKS[chain].name, recipient, amount: entry.amount, fee: entry.fee, total: entry.total, from: entry.from, expiresAt: entry.expiresAt,
+      // The duration, which is what the app actually uses. expiresAt stays for the explorer
+      // view and for anything reading the journal, but comparing it against a phone's clock is
+      // the bug this fixes.
+      expiresInMs: QUOTE_MS, symbol: 'ETH', chainId: NETWORKS[chain].chainId };
   }
   async function confirm(owner, body) {
     if (!body || typeof body !== 'object' || Object.keys(body).some(key => !['quoteId', 'approved'].includes(key)) || typeof body.quoteId !== 'string' || body.approved !== true) throw new Error('Confirm the exact reviewed quote before submitting.');
