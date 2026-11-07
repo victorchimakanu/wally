@@ -8,7 +8,7 @@ const defaults: Preferences = { name: 'Daniel', currency: 'USD', saved: ['BTC', 
   { id: 'daniel', name: 'Daniel', address: '0x' + '4'.repeat(40), network: 'Arbitrum' },
 ] };
 const key = 'wally.frontend-preferences.v1';
-const Context = createContext<{ preferences: Preferences; updatePreferences: (patch: Partial<Preferences>) => void; error: string } | null>(null);
+const Context = createContext<{ preferences: Preferences; updatePreferences: (patch: Partial<Preferences>) => void; resetPreferences: () => void; error: string } | null>(null);
 export function PreferencesProvider({ children }: React.PropsWithChildren) {
   const [preferences, setPreferences] = useState(defaults);
   const [ready, setReady] = useState(false);
@@ -28,6 +28,20 @@ export function PreferencesProvider({ children }: React.PropsWithChildren) {
     if (!ready) return;
     writes.current = writes.current.then(() => AsyncStorage.setItem(key, JSON.stringify(preferences))).catch(() => setError('Preferences could not be saved on this device.'));
   }, [preferences, ready]);
-  return <Context value={{ preferences, updatePreferences: patch => setPreferences(previous => ({ ...previous, ...patch })), error }}>{children}</Context>;
+  return <Context value={{
+    preferences,
+    updatePreferences: patch => setPreferences(previous => ({ ...previous, ...patch })),
+    /**
+     * Forget the saved recipients, name and currency.
+     *
+     * Deleting the stored key is not enough on its own and this is the reason why: these
+     * values live in React state as well, and the effect above rewrites them on the next
+     * change. Clear storage without clearing memory and the address book is back the moment
+     * the user touches anything — a deletion that undoes itself. Called by the reset flow
+     * before it touches storage, so that whatever lands last is the defaults.
+     */
+    resetPreferences: () => setPreferences(defaults),
+    error,
+  }}>{children}</Context>;
 }
 export function usePreferences() { const value = useContext(Context); if (!value) throw new Error('Missing preferences provider'); return value; }

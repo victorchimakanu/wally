@@ -50,6 +50,9 @@ export function ChatsScreen() {
   return <Screen title="Your chats" subtitle="Saved on this device" tab="chats">
     <Button label="Start a new chat" onPress={() => router.push({ pathname: '/chat', params: { id: newChat() } })} />
     <Label size={11} color={c.muted} weight="medium" style={{ marginTop: 16 }}>CONVERSATIONS</Label>
+    {/* Reachable since chat history became clearable (FEATURE-AUDIT §11.5): without this the
+        screen rendered a CONVERSATIONS heading above nothing at all. */}
+    {!state.chats.length && <Card><Label size={16} weight="semibold">No conversations</Label><Note>Your chat history is empty. Start a new chat and it will be saved here on this device.</Note></Card>}
     {state.chats.map(chat => <Item key={chat.id} icon={chat.id === 'sample-balance' ? 'wallet' : 'send'} title={chat.title} subtitle={chat.messages.length ? `${chat.messages.length} messages · Saved locally` : 'A fresh start'} onPress={() => router.push({ pathname: '/chat', params: { id: chat.id } })} />)}
     <Card style={{ backgroundColor: c.tint, marginTop: 30, minHeight: 151 }}><View style={shared.row}><Icon name="shield" /><Label size={13} weight="medium" style={shared.flex}>Your conversations stay here.</Label></View><Note>Chat records are stored on this device. They are not a complete record of your on-chain activity.</Note></Card>
     <Label size={11} color={c.muted} style={[shared.center, { marginTop: 32 }]}>Open a chat to continue where you left off.</Label>
