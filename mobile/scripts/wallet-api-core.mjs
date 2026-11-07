@@ -12,6 +12,26 @@ import { pathToFileURL } from 'node:url';
  * every quote as already expired and could not send at all. See
  * mobile/src/services/quote-clock.ts.
  */
+/**
+ * Which error messages the HTTP layer is allowed to show a person.
+ *
+ * The server returns anything matching this and replaces everything else with a generic
+ * "could not complete this request" — deliberately, because an SDK error can carry a
+ * transaction payload and must never be echoed to a browser.
+ *
+ * It lives here, next to the messages, because it stopped being obvious. `ethUnits` was split
+ * into two refusals so that too many whole digits stopped being reported as a decimals
+ * problem; the new message began "That is more than…", matched nothing here, and was replaced
+ * with advice to check the network connection — for an amount the user had typed. The fix for
+ * the message was one word. The fix for the class of bug is that `wallet-server.test.mjs`
+ * now reads every literal throw in this file and fails when one would be hidden without
+ * being listed as deliberate.
+ *
+ * Adding a refusal means either matching a prefix here or saying in that test why it is
+ * internal. Both are a decision; neither is a default.
+ */
+export const SAFE_MESSAGE = /^(Enter |The amount|Choose a |Only |Unsupported |Not enough |This |Explicit |Confirm |Too many |A transfer|The balance|The wallet nonce|The recipient|The fee|The signed|The review|WDK rejected|RPC network mismatch|Invalid transaction)/;
+
 export const QUOTE_MS = 60000;
 
 export const NETWORKS = {
@@ -64,7 +84,7 @@ export function ethUnits(raw) {
   // was the number of whole digits, which told the user nothing they could act on — and the app
   // used to let such an amount through, so this message was what they actually saw.
   if (typeof text !== 'string' || !/^(?:0|[1-9]\d*)(?:\.\d{1,18})?$/.test(text)) throw new Error('Enter an ETH amount with up to 18 decimals.');
-  if (!/^(?:0|[1-9]\d{0,3})(?:\.\d{1,18})?$/.test(text)) throw new Error('That is more than this wallet will send at once. The most is 9,999 ETH.');
+  if (!/^(?:0|[1-9]\d{0,3})(?:\.\d{1,18})?$/.test(text)) throw new Error('The amount is more than this wallet will send at once. The most is 9,999 ETH.');
   const [whole, fraction = ''] = text.split('.');
   const value = BigInt(whole) * 10n ** 18n + BigInt(fraction.padEnd(18, '0'));
   if (value <= 0n) throw new Error('The amount must be positive.');
@@ -403,10 +423,10 @@ export async function createWalletService(directory, { transport = fetch } = {})
    */
   async function resolve(owner, body) {
     if (!body || typeof body !== 'object' || Object.keys(body).some(key => !['chain', 'hash'].includes(key)) || !Object.hasOwn(NETWORKS, body.chain) || !/^0x[\da-f]{64}$/i.test(String(body.hash))) {
-      throw new Error('Name the exact transfer to resolve.');
+      throw new Error('Choose a transfer to resolve.');
     }
     const record = journal.find(item => item.owner === owner && item.chain === body.chain && item.hash.toLowerCase() === String(body.hash).toLowerCase());
-    if (!record) throw new Error('That transfer is not one this wallet submitted.');
+    if (!record) throw new Error('This wallet did not submit that transfer.');
     const verdict = manualResolve(record);
     if (!verdict.allowed) {
       if (verdict.reason === 'settled') return visibleRecord(record);
