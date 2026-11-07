@@ -38,7 +38,12 @@ export type LiveTransaction = { hash: string; chain: Chain; status: 'unknown' | 
    */
   symbol?: string;
   submittedAt?: number; blockNumber?: number | null; checkedAt?: number };
-export type LiveHistory = { version: 1; fetchedAt: number; source: string; items: LiveTransaction[]; errors: string[] };
+/**
+ * `page` and `hasMore` are optional because the loopback dev server does not send them — it
+ * serves one list and has no pages. Activity ignores them; the export needs them, because
+ * stopping at the first page would make a tax record that is quietly missing transfers.
+ */
+export type LiveHistory = { version: 1; fetchedAt: number; source: string; items: LiveTransaction[]; errors: string[]; page?: number; hasMore?: boolean };
 export function isAddress(value: unknown): value is string { return typeof value === 'string' && /^0x[\da-f]{40}$/i.test(value) && !/^0x0{40}$/i.test(value); }
 /**
  * Accept a comma as a decimal separator, which most of the world and much of Nigeria uses.
@@ -246,7 +251,14 @@ export function parseTransaction(value: unknown): LiveTransaction {
 export function parseHistory(value: unknown): LiveHistory {
   const data = object(value);
   if (data.version !== 1 || !time(data.fetchedAt) || typeof data.source !== 'string' || !Array.isArray(data.items) || data.items.length > 50 || !Array.isArray(data.errors) || !data.errors.every(item => typeof item === 'string')) throw new Error('Invalid activity response.');
-  return { version: 1, fetchedAt: data.fetchedAt, source: data.source, items: data.items.map(parseTransaction), errors: data.errors as string[] };
+  if (data.page !== undefined && (typeof data.page !== 'number' || !Number.isInteger(data.page) || data.page < 1)) throw new Error('Invalid activity response.');
+  if (data.hasMore !== undefined && typeof data.hasMore !== 'boolean') throw new Error('Invalid activity response.');
+  return {
+    version: 1, fetchedAt: data.fetchedAt, source: data.source,
+    items: data.items.map(parseTransaction), errors: data.errors as string[],
+    ...(data.page === undefined ? {} : { page: data.page as number }),
+    ...(data.hasMore === undefined ? {} : { hasMore: data.hasMore as boolean }),
+  };
 }
 /**
  * Where Activity is actually read from.
@@ -269,9 +281,26 @@ export function historySource(): { mode: 'proxy' | 'local'; label: string; url: 
  * so it differs from the Ethereum EOA. The loopback dev server happens to use an EOA on both,
  * which hides this — hence the explicit per-chain parameters.
  */
+export type HistoryPageOptions = {
+  /**
+   * Ask for one chain rather than both.
+   *
+   * This is not a filter for convenience — it is the only way to page without losing records.
+   * The route fetches a page from each requested chain, merges them, sorts by time and slices
+   * the result back down to fifty. With both chains asked for, up to fifty of the hundred
+   * fetched are dropped, and page 2 fetches *the provider's* page 2 from each chain — so the
+   * ones dropped from page 1 are not in page 2 either. They are unreachable. Asking for one
+   * chain makes the merge a no-op and the slice harmless, so its pages are lossless.
+   */
+  chain?: Chain;
+  /** 1-based. The backend refuses anything past its own maximum. */
+  page?: number;
+};
+
 export async function fetchProxyHistory(
   addresses: Partial<Record<Chain, string>>,
   transport: typeof fetch = fetch,
+  options: HistoryPageOptions = {},
 ): Promise<LiveHistory> {
   const origin = backendOrigin();
   if (!origin) throw new Error('No Wally backend is configured.');
@@ -282,6 +311,8 @@ export async function fetchProxyHistory(
     if (isAddress(address)) query.set(`address.${chain}`, address);
   }
   if (![...query.keys()].length) throw new Error('No wallet address is known yet.');
+  if (options.chain) query.set('chain', options.chain);
+  if (options.page !== undefined) query.set('page', String(options.page));
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 20000);
