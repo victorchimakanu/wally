@@ -278,3 +278,29 @@ test('tokenDisplay scales by the token decimals, not by eighteen', () => {
   // The same integer under the two scales must differ, or the bug is present.
   assert.notEqual(tokenDisplay('1000000', 6), tokenDisplay('1000000', 18));
 });
+
+test('the dev server declares a quote duration the app will accept', async () => {
+  // Another loop neither side closes alone. The server now sends how long a quote is good for,
+  // and the app refuses a quote without it — on purpose, because falling back to comparing the
+  // server's timestamp against the phone's clock is the bug that change removes. If the two
+  // ever disagree about the field, live sending stops working entirely.
+  const { QUOTE_MS } = await import('../scripts/wallet-api-core.mjs');
+  const { plausibleQuoteSpan } = await import('../src/services/quote-clock.ts');
+  const { parseQuote } = await import('../src/services/wallet-api.ts');
+
+  assert.equal(plausibleQuoteSpan(QUOTE_MS), true, `the app must accept the server's ${QUOTE_MS}ms`);
+
+  const address = '0x1111111111111111111111111111111111111111';
+  const parsed = parseQuote({
+    id: '12345678-1234-1234-1234-123456789012',
+    chain: 'arbitrum', chainId: 421614, network: 'Arbitrum Sepolia', symbol: 'ETH',
+    from: address, recipient: address, amount: '0.001', fee: '0.000021', total: '0.001021',
+    // Exactly what the server puts in a visible quote.
+    expiresAt: 1_700_000_000_000 + QUOTE_MS,
+    expiresInMs: QUOTE_MS,
+  });
+
+  assert.equal(parsed.expiresInMs, QUOTE_MS);
+  // And the deadline the app derived is its own, not the server's stamp.
+  assert.notEqual(parsed.deadline, parsed.expiresAt);
+});

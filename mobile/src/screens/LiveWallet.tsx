@@ -7,6 +7,7 @@ import { LiveActivityCard, LiveReceiveCard, NetworkChoice, WalletStatus } from '
 import { useWallet } from '../data/wallet';
 import { useDemo } from '../demo/store';
 import { CHAINS, isAddress, wei, type Chain, type LiveTransaction } from '../services/wallet-api';
+import { monotonicNow, quoteExpired, secondsLeft } from '../services/quote-clock';
 import { addressTrust, trustWarning } from '../services/address-safety.ts';
 import { usePreferences } from '../demo/preferences';
 import { colors as c } from '../theme';
@@ -58,9 +59,11 @@ export function LiveSendScreen() {
 }
 export function LiveReviewScreen() {
   const wallet = useWallet(), { state } = useDemo();
-  const [now, setNow] = useState(Date.now), [busy, setBusy] = useState(false), [error, setError] = useState('');
+  const [now, setNow] = useState(monotonicNow), [busy, setBusy] = useState(false), [error, setError] = useState('');
   const q = wallet.quote;
-  useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 500); return () => clearInterval(timer); }, []);
+  // The monotonic clock, so a timezone change or an NTP correction mid-review cannot expire a
+  // live quote or revive a dead one.
+  useEffect(() => { const timer = setInterval(() => setNow(monotonicNow()), 500); return () => clearInterval(timer); }, []);
   async function confirm() {
     if (busy || state.offline || wallet.offline) return;
     setBusy(true); setError('');
@@ -68,8 +71,8 @@ export function LiveReviewScreen() {
     catch (failure) { setError(failure instanceof Error ? failure.message : 'Submission could not be verified. Check Activity.'); }
     finally { setBusy(false); }
   }
-  const expired = !q || q.expiresAt <= now;
-  return <Screen title="Review testnet transfer" footer={<><Button label={busy ? 'Submitting to the testnet…' : 'Confirm and send ETH'} disabled={busy || expired || state.offline || wallet.offline} onPress={() => { void confirm(); }} /><Button secondary label="Cancel" disabled={busy} onPress={() => { wallet.clearQuote(); router.replace('/send'); }} /></>}>{q ? <><Pill>Only {CHAINS[q.chain].name} · Chain {q.chainId}</Pill><Label size={30} weight="semibold">{q.amount} ETH</Label><Card><Note>From</Note><Address value={q.from} /><Note>To</Note><Address value={q.recipient} /><Detail label="Network" value={q.network} /><Detail label="Maximum network fee" value={`${q.fee} ETH`} /><Detail label="Amount + fee" value={`${q.total} ETH`} /><Note>{expired ? 'This review expired. Open Send for a fresh network fee.' : `Review expires in ${Math.max(0, Math.ceil((q.expiresAt - now) / 1000))} seconds.`}</Note></Card><Note>Your approval signs and broadcasts this exact testnet transaction through WDK. Wallet keys stay on your computer in this development setup.</Note></> : <Card><Label weight="semibold">A fresh review is required</Label><Note>{busy ? 'Submission is in progress.' : 'The review expired, was cancelled, or was already submitted. Check Activity before creating another transfer.'}</Note>{!busy && <Button secondary label="Check Activity" onPress={() => router.push('/history')} />}</Card>}{!!error && <Note error>{error}</Note>}{expired && !busy && <Button secondary label="Open Send" onPress={() => router.replace('/send')} />}</Screen>;
+  const expired = !q || quoteExpired(q.deadline, now);
+  return <Screen title="Review testnet transfer" footer={<><Button label={busy ? 'Submitting to the testnet…' : 'Confirm and send ETH'} disabled={busy || expired || state.offline || wallet.offline} onPress={() => { void confirm(); }} /><Button secondary label="Cancel" disabled={busy} onPress={() => { wallet.clearQuote(); router.replace('/send'); }} /></>}>{q ? <><Pill>Only {CHAINS[q.chain].name} · Chain {q.chainId}</Pill><Label size={30} weight="semibold">{q.amount} ETH</Label><Card><Note>From</Note><Address value={q.from} /><Note>To</Note><Address value={q.recipient} /><Detail label="Network" value={q.network} /><Detail label="Maximum network fee" value={`${q.fee} ETH`} /><Detail label="Amount + fee" value={`${q.total} ETH`} /><Note>{expired ? 'This review expired. Open Send for a fresh network fee.' : `Review expires in ${secondsLeft(q.deadline, now)} seconds.`}</Note></Card><Note>Your approval signs and broadcasts this exact testnet transaction through WDK. Wallet keys stay on your computer in this development setup.</Note></> : <Card><Label weight="semibold">A fresh review is required</Label><Note>{busy ? 'Submission is in progress.' : 'The review expired, was cancelled, or was already submitted. Check Activity before creating another transfer.'}</Note>{!busy && <Button secondary label="Check Activity" onPress={() => router.push('/history')} />}</Card>}{!!error && <Note error>{error}</Note>}{expired && !busy && <Button secondary label="Open Send" onPress={() => router.replace('/send')} />}</Screen>;
 }
 export function LiveReceiveScreen() { return <Screen title="Receive" subtitle="Your real testnet wallet"><LiveReceiveCard /><WalletStatus /></Screen>; }
 export function LiveHistoryScreen() {
