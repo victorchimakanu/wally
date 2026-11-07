@@ -124,3 +124,24 @@ jobs:
       # are the only place those are checked, so they keep running.
       # test/integration/** stays excluded: it needs a live QVAC server and a seed.
       - run: npm test
+
+  # Repository configuration that no package's test suite would ever look at. Separate and
+  # dependency-free, so it stays green in seconds and says plainly which thing is wrong.
+  repo:
+    name: repo — the config nothing else checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: '22'
+      # No npm ci: this check reads files and shells out to git, nothing more. Installing the
+      # reference app's dependencies to validate a YAML file would be a minute for no reason.
+      #
+      # What it is for: `ignore` in dependabot.yml silences security updates as well as version
+      # updates unless each entry is scoped with update-types. The file therefore looks
+      # repetitive, and tidying it would switch off security updates for the wallet's runtime
+      # without anything saying so — the advisory still appears on the alerts page, looking
+      # handled. It also fails when a committed package.json has no entry watching it.
+      - run: node scripts/check-dependabot.mjs
