@@ -3,7 +3,8 @@ import { router, useLocalSearchParams } from 'expo-router';
 import * as Linking from 'expo-linking';
 import { Pressable, TextInput, View } from 'react-native';
 import { Address, Button, Card, Detail, Label, Note, Pill, Screen, shared } from '../components/ui';
-import { LiveActivityCard, LiveReceiveCard, NetworkChoice, WalletStatus } from '../components/WalletData';
+import { tokensFor } from '../services/tokens';
+import { AssetChoice, LiveActivityCard, LiveReceiveCard, NetworkChoice, WalletStatus } from '../components/WalletData';
 import { useWallet } from '../data/wallet';
 import { useDemo } from '../demo/store';
 import { CHAINS, isAddress, type Chain, type LiveTransaction, parseSendAmount } from '../services/wallet-api';
@@ -28,7 +29,15 @@ export function LiveSendScreen() {
 
   // Native ETH explicitly: sending is ETH-only for now, and finding by chain alone would
   // return whichever asset the server listed first for this chain.
-  const balance = wallet.snapshot?.balances.find(item => item.chain === chain && item.symbol === 'ETH');
+  // What can be sent on this chain: the native coin, then any pinned token. Read from the
+  // snapshot rather than hardcoded, so a chain with no token simply offers one option and the
+  // chooser renders nothing.
+  const assets = ['ETH', ...tokensFor(chain).map(token => token.symbol)];
+  const [asset, setAsset] = useState('ETH');
+  const sending = assets.includes(asset) ? asset : 'ETH';
+  const token = sending === 'ETH' ? null : tokensFor(chain).find(entry => entry.symbol === sending) ?? null;
+  const decimals = token ? token.decimals : 18;
+  const balance = wallet.snapshot?.balances.find(item => item.chain === chain && item.symbol === sending);
   const { preferences } = usePreferences();
 
   /**
@@ -52,13 +61,17 @@ export function LiveSendScreen() {
       // parseSendAmount, not wei(): wei() is the permissive parser that also reads amounts off
       // the chain, and using it here let an amount through that the wallet server then refused
       // a round trip later, with a message about decimal places that was not the problem.
-      parseSendAmount(amount.trim());
+      // At the asset's own scale. USDt is 6 decimals and ETH is 18, so validating a token
+      // amount against the ETH scale would accept figures the server then refuses.
+      parseSendAmount(amount.trim(), decimals, sending);
       if (state.offline || wallet.offline) throw new Error('Reconnect before reviewing a transfer.');
-      setBusy(true); await wallet.prepare({ chain, recipient: recipient.trim(), amount: amount.trim() }); router.push('/review');
+      setBusy(true);
+      await wallet.prepare({ chain, recipient: recipient.trim(), amount: amount.trim(), ...(token ? { token: sending } : {}) });
+      router.push('/review');
     } catch (failure) { setError(failure instanceof Error ? failure.message : 'Could not prepare the transfer.'); }
     finally { setBusy(false); }
   }
-  return <Screen title="Send testnet ETH" subtitle="A real testnet transfer" footer={<Button label={busy ? 'Checking network fee…' : 'Review transfer'} disabled={busy || wallet.offline || state.offline || !balance || balance.balance === null} onPress={() => { void review(); }} />}><Pill>TESTNET ONLY</Pill><NetworkChoice value={chain} onChange={next => { wallet.clearQuote(); setChain(next); setError(''); }} /><Note>Available on {CHAINS[chain].name}: {balance?.balance ?? 'Unavailable'} ETH</Note><View style={shared.row}><View style={shared.flex}><Label weight="medium">Recipient address</Label></View><Button secondary label="Scan a code" onPress={() => router.push('/scan')} /></View>{!!scannedChain && <Note>Switched to {CHAINS[scannedChain].name}, which the scanned code asked for.</Note>}{params.scannedAmountIgnored === '1' && <Note>That code also contained an amount. Wally does not fill it in — type the amount you mean to send.</Note>}<TextInput accessibilityLabel="Recipient address" value={recipient} editable={!busy} autoCapitalize="none" autoCorrect={false} placeholder="0x…" placeholderTextColor={c.muted} onChangeText={value => { wallet.clearQuote(); setRecipient(value); }} style={shared.input} /><Button secondary label="Choose saved recipient" disabled={busy} onPress={() => router.push('/address-book')} /><Label weight="medium">Amount in ETH</Label><TextInput accessibilityLabel="Amount in ETH" value={amount} editable={!busy} keyboardType="decimal-pad" placeholder="0.001" placeholderTextColor={c.muted} onChangeText={value => { wallet.clearQuote(); setAmount(value); }} style={shared.input} /><Note>Only native testnet ETH to ordinary wallet addresses is supported. Fees are estimated from the selected network. Nothing is sent until you approve the next screen.</Note>{balance?.balance === '0' && <Card style={{ backgroundColor: c.warningTint }}><Label weight="semibold">Fund your testnet wallet first</Label><Note>Request ETH from a {CHAINS[chain].name} faucet for your Receive address. Testnet tokens have no monetary value.</Note><Button secondary label="Open receive address" onPress={() => router.push('/receive')} /></Card>}{!!lookalike && <Card style={{ backgroundColor: c.warningTint }}><Label weight="semibold">Check this address carefully</Label><Note>{lookalike}</Note></Card>}{!!error && <Note error>{error}</Note>}<WalletStatus /></Screen>;
+  return <Screen title={`Send testnet ${sending}`} subtitle="A real testnet transfer" footer={<Button label={busy ? 'Checking network fee…' : 'Review transfer'} disabled={busy || wallet.offline || state.offline || !balance || balance.balance === null} onPress={() => { void review(); }} />}><Pill>TESTNET ONLY</Pill><NetworkChoice value={chain} onChange={next => { wallet.clearQuote(); setChain(next); setAsset('ETH'); setError(''); }} /><AssetChoice value={sending} options={assets} onChange={next => { wallet.clearQuote(); setAsset(next); setAmount(''); setError(''); }} /><Note>Available on {CHAINS[chain].name}: {balance?.balance ?? 'Unavailable'} {sending}</Note>{!!token && <Note>The network fee is paid in ETH, not {sending}. You need a little ETH on this network as well.</Note>}<View style={shared.row}><View style={shared.flex}><Label weight="medium">Recipient address</Label></View><Button secondary label="Scan a code" onPress={() => router.push('/scan')} /></View>{!!scannedChain && <Note>Switched to {CHAINS[scannedChain].name}, which the scanned code asked for.</Note>}{params.scannedAmountIgnored === '1' && <Note>That code also contained an amount. Wally does not fill it in — type the amount you mean to send.</Note>}<TextInput accessibilityLabel="Recipient address" value={recipient} editable={!busy} autoCapitalize="none" autoCorrect={false} placeholder="0x…" placeholderTextColor={c.muted} onChangeText={value => { wallet.clearQuote(); setRecipient(value); }} style={shared.input} /><Button secondary label="Choose saved recipient" disabled={busy} onPress={() => router.push('/address-book')} /><Label weight="medium">Amount in {sending}</Label><TextInput accessibilityLabel={`Amount in ${sending}`} value={amount} editable={!busy} keyboardType="decimal-pad" placeholder={token ? "25" : "0.001"} placeholderTextColor={c.muted} onChangeText={value => { wallet.clearQuote(); setAmount(value); }} style={shared.input} /><Note>Only ordinary wallet addresses can receive this transfer. Fees are estimated from the selected network and always paid in ETH. Nothing is sent until you approve the next screen.</Note>{balance?.balance === '0' && <Card style={{ backgroundColor: c.warningTint }}><Label weight="semibold">Fund your testnet wallet first</Label><Note>Request ETH from a {CHAINS[chain].name} faucet for your Receive address. Testnet tokens have no monetary value.</Note><Button secondary label="Open receive address" onPress={() => router.push('/receive')} /></Card>}{!!lookalike && <Card style={{ backgroundColor: c.warningTint }}><Label weight="semibold">Check this address carefully</Label><Note>{lookalike}</Note></Card>}{!!error && <Note error>{error}</Note>}<WalletStatus /></Screen>;
 }
 export function LiveReviewScreen() {
   const wallet = useWallet(), { state } = useDemo();

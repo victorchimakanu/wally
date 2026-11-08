@@ -14,7 +14,7 @@ export type Chain = 'arbitrum' | 'ethereum';
 export const CHAINS = { arbitrum: { name: 'Arbitrum Sepolia', id: 421614, explorer: 'https://sepolia.arbiscan.io' }, ethereum: { name: 'Ethereum Sepolia', id: 11155111, explorer: 'https://sepolia.etherscan.io' } } as const;
 export type WalletBalance = { chain: Chain; name: string; chainId: number; symbol: 'ETH'; address: string; qr: string; balance: string | null; balanceWei: string | null; error: string };
 export type WalletSnapshot = { version: 1; network: 'testnet'; location: 'computer'; fetchedAt: number; balances: WalletBalance[]; tokenNotice: string };
-export type LiveQuote = { id: string; chain: Chain; chainId: number; network: string; symbol: 'ETH'; from: string; recipient: string; amount: string; fee: string; total: string;
+export type LiveQuote = { id: string; chain: Chain; chainId: number; network: string; symbol: string; decimals: number; from: string; recipient: string; amount: string; fee: string; total: string;
   /** The server's own clock. Kept for the record; never compared against this phone's. */
   expiresAt: number;
   /** How long the server says the quote is good for. */
@@ -235,10 +235,23 @@ export function parseQuote(value: unknown): LiveQuote {
   // to remove, so a response without a usable duration is refused rather than silently falling
   // back to that comparison.
   if (!plausibleQuoteSpan(q.expiresInMs)) throw new Error('The review did not say how long it is valid for.');
-  if (typeof q.id !== 'string' || !/^[\da-f-]{36}$/i.test(q.id) || q.chainId !== CHAINS[key].id || q.network !== CHAINS[key].name || q.symbol !== 'ETH' || !isAddress(q.from) || !isAddress(q.recipient) || !time(q.expiresAt) || typeof q.amount !== 'string' || typeof q.fee !== 'string' || typeof q.total !== 'string' || wei(q.amount) <= 0n || wei(q.fee) <= 0n || wei(q.fee) > 10n ** 16n || wei(q.total) !== wei(q.amount) + wei(q.fee)) throw new Error('Invalid transfer review. Nothing was submitted.');
+  // The asset decides how the amount is read. ETH is the chain's own; anything else must be a
+  // token pinned for this chain, because an unknown symbol has unknown decimals and an amount
+  // read at the wrong scale is wrong by a factor of a million million while looking ordinary.
+  const token = q.symbol === 'ETH' ? null : tokensFor(key).find(entry => entry.symbol === q.symbol) ?? null;
+  if (q.symbol !== 'ETH' && !token) throw new Error('That review is for an asset this app cannot display. Nothing was submitted.');
+  const decimals = token ? token.decimals : 18;
+  const amount = () => toBaseUnits(q.amount as string, decimals, String(q.symbol));
+
+  if (typeof q.id !== 'string' || !/^[\da-f-]{36}$/i.test(q.id) || q.chainId !== CHAINS[key].id || q.network !== CHAINS[key].name || typeof q.symbol !== 'string' || !isAddress(q.from) || !isAddress(q.recipient) || !time(q.expiresAt) || typeof q.amount !== 'string' || typeof q.fee !== 'string' || typeof q.total !== 'string' || amount() <= 0n || wei(q.fee) <= 0n || wei(q.fee) > 10n ** 16n) throw new Error('Invalid transfer review. Nothing was submitted.');
+
+  // The total only adds up when both sides are the same asset. For a token the amount is in the
+  // token and the fee is in ETH, so there is no sum to check, and inventing one in either unit
+  // would be the exact mistake this file exists to prevent.
+  if (!token && wei(q.total) !== wei(q.amount) + wei(q.fee)) throw new Error('Invalid transfer review. Nothing was submitted.');
   // The local deadline is fixed here, at the moment the quote arrived. Deriving it later would
   // silently extend the quote by however long the delay was.
-  return { ...q, deadline: quoteDeadline(q.expiresInMs as number) } as unknown as LiveQuote;
+  return { ...q, decimals, deadline: quoteDeadline(q.expiresInMs as number) } as unknown as LiveQuote;
 }
 export function parseTransaction(value: unknown): LiveTransaction {
   const item = object(value), key = chain(item.chain);
@@ -432,8 +445,18 @@ export function createWalletClient(rawEndpoint: string, transport: typeof fetch 
         return { ...local, errors: [...local.errors, reason] };
       }
     },
-    async quote(input: { chain: Chain; recipient: string; amount: string }) { await connect(); const q = parseQuote(await request('/api/wallet/quote', input)); if (q.chain !== input.chain || q.recipient.toLowerCase() !== input.recipient.toLowerCase() || wei(q.amount) !== wei(input.amount)) throw new Error('The review did not match your transfer.'); return q; },
-    async confirm(q: LiveQuote) { await connect(); const tx = parseTransaction(await request('/api/wallet/confirm', { quoteId: q.id, approved: true })); if (tx.chain !== q.chain || tx.recipient?.toLowerCase() !== q.recipient.toLowerCase() || tx.from?.toLowerCase() !== q.from.toLowerCase() || tx.amount === undefined || wei(tx.amount) !== wei(q.amount) || tx.fee === undefined || wei(tx.fee) !== wei(q.fee)) throw new Error('Unexpected submission response. Check Activity before sending again.'); return tx; },
+    async quote(input: { chain: Chain; recipient: string; amount: string; token?: string }) {
+      await connect();
+      const q = parseQuote(await request('/api/wallet/quote', input));
+      // Compared at the quote's own scale. Running a 6-decimal token through wei() would still
+      // compare equal to itself, which is why it would survive review and still be wrong.
+      const asked = toBaseUnits(input.amount, q.decimals, q.symbol);
+      if (q.chain !== input.chain || q.recipient.toLowerCase() !== input.recipient.toLowerCase()
+        || toBaseUnits(q.amount, q.decimals, q.symbol) !== asked
+        || q.symbol !== (input.token ?? 'ETH')) throw new Error('The review did not match your transfer.');
+      return q;
+    },
+    async confirm(q: LiveQuote) { await connect(); const tx = parseTransaction(await request('/api/wallet/confirm', { quoteId: q.id, approved: true })); if (tx.chain !== q.chain || tx.recipient?.toLowerCase() !== q.recipient.toLowerCase() || tx.from?.toLowerCase() !== q.from.toLowerCase() || tx.amount === undefined || toBaseUnits(tx.amount, q.decimals, q.symbol) !== toBaseUnits(q.amount, q.decimals, q.symbol) || tx.fee === undefined || wei(tx.fee) !== wei(q.fee)) throw new Error('Unexpected submission response. Check Activity before sending again.'); return tx; },
     /**
      * Mark a stranded transfer as never arrived, for the records the chain cannot settle.
      *

@@ -176,3 +176,32 @@ test('a snapshot whose token amount does not match its raw integer is refused', 
     entry('ethereum', 'ETH', '0', '0'),
   ])), /Invalid wallet balance/);
 });
+
+/**
+ * A token review, parsed by the app.
+ *
+ * `parseQuote` used to require `symbol === 'ETH'` and check that the total equalled amount plus
+ * fee. Neither holds for a token: the asset is USDt and the fee is ETH, so there is no sum to
+ * add up — and inventing one in either unit is exactly the million-million mistake.
+ */
+test('a USDt review parses at six decimals, not eighteen', async () => {
+  process.env.EXPO_PUBLIC_WALLY_PROXY_URL = 'http://127.0.0.1:65500';
+  const { parseQuote } = await import(`../src/services/wallet-api.ts?usdtquote=${Date.now()}`);
+  const base = {
+    id: '00000000-0000-4000-8000-000000000000', chain: 'arbitrum', chainId: 421614,
+    network: 'Arbitrum Sepolia', from: '0x' + '1'.repeat(40), recipient: '0x' + '2'.repeat(40),
+    amount: '25', fee: '0.00021', expiresAt: Date.now() + 60_000, expiresInMs: 60_000,
+  };
+
+  const usdt = parseQuote({ ...base, symbol: 'USDT', total: '25 USDT + 0.00021 ETH' });
+  assert.equal(usdt.symbol, 'USDT');
+  assert.equal(usdt.decimals, 6, 'the token scale travels with the quote');
+
+  // The same shape for ETH still requires the total to add up.
+  const eth = parseQuote({ ...base, symbol: 'ETH', amount: '0.001', total: '0.00121' });
+  assert.equal(eth.decimals, 18);
+  assert.throws(() => parseQuote({ ...base, symbol: 'ETH', amount: '0.001', total: '9.99' }), /Invalid transfer review/);
+
+  // An asset this app has no decimals for is refused rather than guessed at.
+  assert.throws(() => parseQuote({ ...base, symbol: 'DOGE', total: '25 DOGE' }), /cannot display/);
+});
