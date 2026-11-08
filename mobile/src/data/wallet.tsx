@@ -2,12 +2,21 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { AppState, Platform } from 'react-native';
 import { createWalletClient, parseWallet, type Chain, type LiveHistory, type LiveQuote, type LiveTransaction, type WalletSnapshot } from '../services/wallet-api';
+// Extensionless: Metro picks the native biometric path on a phone, the no-op on web.
+import { requireUnlock } from '../services/unlock';
+import { quoteExpired } from '../services/quote-clock';
+import Constants from 'expo-constants';
+import { checkSendGate } from '../services/send-gate';
+import { backendOrigin, backendHeaders } from '../services/backend';
+// Extensionless: Metro picks the native vault reader on a phone, the no-keystore stub on web.
+import { currentCustody } from '../services/wallet-worklet';
+import { custodyNotice, moneySource, type Custody } from '../services/custody';
 
 const endpoint = process.env.EXPO_PUBLIC_WALLY_API_URL ?? '';
 export const liveWalletEnabled = !!endpoint;
 const client = endpoint ? createWalletClient(endpoint) : null;
 const cacheKey = `wally.testnet.wallet.v1.${endpoint}`;
-type WalletContext = { enabled: boolean; snapshot: WalletSnapshot | null; history: LiveHistory | null; loading: boolean; historyLoading: boolean; error: string; historyError: string; stale: boolean; offline: boolean; quote: LiveQuote | null; refresh: () => Promise<void>; refreshHistory: () => Promise<void>; prepare: (input: { chain: Chain; recipient: string; amount: string }) => Promise<void>; clearQuote: () => void; confirm: () => Promise<LiveTransaction>; receipt: (chain: Chain, hash: string) => Promise<LiveTransaction> };
+type WalletContext = { enabled: boolean; custody: Custody | null; blocked: string | null; snapshot: WalletSnapshot | null; history: LiveHistory | null; loading: boolean; historyLoading: boolean; error: string; historyError: string; stale: boolean; offline: boolean; quote: LiveQuote | null; refresh: () => Promise<void>; refreshHistory: () => Promise<void>; prepare: (input: { chain: Chain; recipient: string; amount: string; token?: string }) => Promise<void>; clearQuote: () => void; confirm: () => Promise<LiveTransaction>; receipt: (chain: Chain, hash: string) => Promise<LiveTransaction>; resolve: (chain: Chain, hash: string) => Promise<LiveTransaction> };
 const Context = createContext<WalletContext | null>(null);
 export function WalletProvider({ children }: React.PropsWithChildren) {
   const [snapshot, setSnapshot] = useState<WalletSnapshot | null>(null), [history, setHistory] = useState<LiveHistory | null>(null);
@@ -16,6 +25,16 @@ export function WalletProvider({ children }: React.PropsWithChildren) {
   const [quote, setQuote] = useState<LiveQuote | null>(null), activeQuote = useRef<LiveQuote | null>(null);
   const [offline, setOffline] = useState(() => Platform.OS === 'web' && typeof navigator !== 'undefined' && !navigator.onLine);
   const [saved, setSaved] = useState(true);
+  /**
+   * Which wallet this build is allowed to show, decided before anything is fetched.
+   *
+   * Null until the vault has been read. `blocked` is the refusal: a wallet exists on this phone
+   * and something else is configured to supply the money. Rather than quietly showing the other
+   * wallet's balances and receive address — the address a user would fund, with a phrase that
+   * cannot recover it — nothing is fetched and the screens say why.
+   */
+  const [custody, setCustody] = useState<Custody | null>(null);
+  const allowed = useRef(false);
   const fetching = useRef(false), fetchingHistory = useRef(false), submitting = useRef(false), quoteGeneration = useRef(0);
   // The addresses the next history fetch should use. Set on every request; the in-flight
   // fetch re-reads it when it finishes, so a request made while one is running is honoured
@@ -24,7 +43,7 @@ export function WalletProvider({ children }: React.PropsWithChildren) {
   const alive = useRef(true), current = useRef<WalletSnapshot | null>(null), offlineNow = useRef(offline);
   const clearQuote = useCallback(() => { quoteGeneration.current++; activeQuote.current = null; setQuote(null); }, []);
   const refresh = useCallback(async () => {
-    if (!client || fetching.current || offlineNow.current) return;
+    if (!client || !allowed.current || fetching.current || offlineNow.current) return;
     fetching.current = true; setLoading(true); setError('');
     try {
       const data = await client.wallet(); if (!alive.current) return;
@@ -35,7 +54,7 @@ export function WalletProvider({ children }: React.PropsWithChildren) {
     finally { fetching.current = false; if (alive.current) setLoading(false); }
   }, [clearQuote]);
   const refreshHistory = useCallback(async () => {
-    if (!client || offlineNow.current) return;
+    if (!client || !allowed.current || offlineNow.current) return;
     // Per chain, not one address for both: Arbitrum's smart-account address need not match
     // the Ethereum EOA.
     //
@@ -79,7 +98,22 @@ export function WalletProvider({ children }: React.PropsWithChildren) {
 
   useEffect(() => {
     alive.current = true;
-    void (async () => { try { const raw = await AsyncStorage.getItem(cacheKey); if (raw && alive.current && !current.current) { const data = parseWallet(JSON.parse(raw)); current.current = data; setSnapshot(data); } } catch {} if (alive.current) await refresh(); })();
+    void (async () => {
+      // Decide whose money this is BEFORE reading the cache or the network. The cached
+      // snapshot is the dev server's addresses, so restoring it in a refused split would put
+      // another wallet's receive address on screen from the first frame.
+      let decided: Custody;
+      try { decided = await currentCustody(); }
+      // A vault that will not answer is not a reason to show the other wallet. Treat it as a
+      // wallet being present, which is the safe direction: refuse, and say so.
+      catch { decided = { kind: 'split', permitted: false }; }
+      if (!alive.current) return;
+      allowed.current = moneySource(decided) !== 'blocked';
+      setCustody(decided);
+      if (!allowed.current) return;
+      try { const raw = await AsyncStorage.getItem(cacheKey); if (raw && alive.current && !current.current) { const data = parseWallet(JSON.parse(raw)); current.current = data; setSnapshot(data); } } catch {}
+      if (alive.current) await refresh();
+    })();
     const timer = setInterval(() => { void refresh(); }, 60000);
     const subscription = AppState.addEventListener('change', next => { if (next === 'active') void refresh(); });
     const changed = () => { offlineNow.current = !navigator.onLine; setOffline(offlineNow.current); clearQuote(); if (!offlineNow.current) void refresh(); };
@@ -87,8 +121,14 @@ export function WalletProvider({ children }: React.PropsWithChildren) {
     return () => { alive.current = false; clearInterval(timer); subscription.remove(); if (Platform.OS === 'web') { window.removeEventListener('online', changed); window.removeEventListener('offline', changed); } };
   }, [refresh, clearQuote]);
   const value: WalletContext = {
-    enabled: liveWalletEnabled, snapshot, history, loading, historyLoading, error, historyError, stale: saved || offline || !!snapshot?.balances.some(item => item.error), offline, quote, refresh, refreshHistory, clearQuote,
+    // `enabled` now means "configured AND permitted". A refused split reports false, so every
+    // screen that branches on it falls back to demo rather than showing the other wallet.
+    enabled: liveWalletEnabled && !!custody && moneySource(custody) !== 'blocked',
+    custody,
+    blocked: custody && moneySource(custody) === 'blocked' ? custodyNotice(custody) : null,
+    snapshot, history, loading, historyLoading, error, historyError, stale: saved || offline || !!snapshot?.balances.some(item => item.error), offline, quote, refresh, refreshHistory, clearQuote,
     async prepare(input) {
+      if (!allowed.current) throw new Error('This build cannot open the wallet stored on this phone. Nothing can be sent until it can.');
       if (!client || offlineNow.current) throw new Error('Reconnect to the local wallet API for a fresh review.');
       clearQuote(); const generation = quoteGeneration.current;
       const next = await client.quote(input);
@@ -99,14 +139,58 @@ export function WalletProvider({ children }: React.PropsWithChildren) {
     },
     async confirm() {
       const q = activeQuote.current;
-      if (!client || offlineNow.current || !q || q.expiresAt <= Date.now()) throw new Error('Request a fresh review before confirming.');
+      // q.deadline, not q.expiresAt: the latter is the server's clock and comparing it with
+      // this phone's made a quote look expired on any handset running fast. quote-clock.ts.
+      if (!client || offlineNow.current || !q || quoteExpired(q.deadline)) throw new Error('Request a fresh review before confirming.');
       if (submitting.current) throw new Error('Submission is already in progress.');
+
+      // The last gate before anything irreversible, and the only one in the app: every live
+      // spend comes through here. Asked on every send regardless of how recently the phone was
+      // unlocked — a previous unlock is not consent for a later transfer.
+      //
+      // Deliberately before `submitting` is set and before the quote is cleared, so a
+      // cancelled prompt leaves the review exactly as it was and the user can simply confirm
+      // again. Clearing first would make a mis-tap cost them a fresh quote.
+      //
+      // Where the phone has no screen lock, or on web, this passes straight through: there is
+      // no protection to perform, and refusing would leave such a user unable to send at all.
+      const unlocked = await requireUnlock('send', `${q.amount} ${q.symbol}`);
+      if (!unlocked.ok) throw new Error(unlocked.message);
+
+      // The remote stop, asked here and not earlier. `send-gate.ts` and the backend's
+      // `/v1/status` have both existed since 5 November with nothing between them: the
+      // repository looked like it had a kill switch and the app had no way to be stopped.
+      //
+      // After the unlock rather than before, so a paused service costs a user one biometric
+      // prompt instead of silently refusing before they have confirmed they meant it — and
+      // immediately before the irreversible call, so the answer is as fresh as it can be.
+      //
+      // It fails OPEN by construction (see checkSendGate): a backend that is down, slow or
+      // unreachable must never stop someone spending their own money. This stops Wally when
+      // Wally is broken; it is not a permission to transact.
+      const gate = await checkSendGate({
+        origin: backendOrigin(),
+        appVersion: Constants.expoConfig?.version ?? '0.0.0',
+        headers: backendHeaders(),
+      });
+      if (!gate.allowed) throw new Error(gate.reason);
+
       submitting.current = true; clearQuote();
       try { const tx = await client.confirm(q); void refresh(); void refreshHistory(); return tx; }
       catch (failure) { void refreshHistory(); throw failure; }
       finally { submitting.current = false; }
     },
     async receipt(chain, hash) { if (!client || offlineNow.current) throw new Error('Reconnect to check the actual network receipt.'); return client.receipt(chain, hash); },
+    /**
+     * Mark a stranded transfer as never arrived. The server refuses this for anything it can
+     * still judge against the chain, so this cannot declare a slow transfer dead.
+     */
+    async resolve(chain, hash) {
+      if (!client || offlineNow.current) throw new Error('Reconnect before resolving a transfer.');
+      const tx = await client.resolve(chain, hash);
+      void refreshHistory();
+      return tx;
+    },
   };
   return <Context value={value}>{children}</Context>;
 }

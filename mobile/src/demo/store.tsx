@@ -30,7 +30,7 @@ type DemoContextValue = {
   discardDraft: (chatId: string, messageId: string) => void;
   updateChatDraft: (origin: DraftOrigin, draft: Draft) => string | null;
   prepare: (draft: Draft, origin?: DraftOrigin) => string | null; cancel: () => void;
-  confirm: () => { id?: string; error?: string }; reset: () => void;
+  confirm: () => { id?: string; error?: string }; reset: () => void; clearHistory: () => Promise<void>;
 };
 const Context = createContext<DemoContextValue | null>(null);
 
@@ -231,6 +231,39 @@ export function DemoProvider({ children }: React.PropsWithChildren) {
       return { id: q.id };
     },
     reset() { cancelAi(); activeQuote.current = null; setQuote(null); setDraft({ amount: '', recipient: '' }); setStorageError(''); commit(initialState()); },
+    /**
+     * Forget what the user wrote, keeping the demo wallet itself.
+     *
+     * Distinct from `reset()`, which restores the two sample conversations this app ships
+     * with — exactly what the demo controls want and exactly wrong for someone who asked for
+     * their messages gone. After this the chat list is empty, which is the honest result.
+     *
+     * It empties the simulated transfers as well, because they share one storage key with the
+     * chats and there is no deleting half a file. The screen says so rather than letting a
+     * user discover it; real transfers are on the chain and unaffected by anything here.
+     *
+     * Three steps, and the third is the one that was missing. Memory is cleared first, because
+     * the effect below rewrites state on the next change and clearing storage while the
+     * messages were still in memory would bring them straight back. The stored copy is then
+     * deleted. Then the cleared state is written again — because an *absent* key is not an
+     * empty one: the loader falls back to `initialState()`, which carries the two samples, so
+     * deleting alone meant the conversations returned at the next launch. Running the app
+     * showed that; no test would have.
+     *
+     * All of it goes through the same write queue as the effect, so it cannot race with it,
+     * and it is awaited so the screen can report a refusal instead of claiming success.
+     */
+    async clearHistory() {
+      cancelAi(); activeQuote.current = null; setQuote(null); setStorageError('');
+      const cleared = { ...current.current, chats: [], transactions: [] };
+      commit(cleared);
+      const write = writes.current.then(async () => {
+        await AsyncStorage.removeItem(STORAGE_KEY);
+        await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(cleared));
+      });
+      writes.current = write.catch(() => setStorageError('Your chats could not be cleared on this device.'));
+      await write;
+    },
   };
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }

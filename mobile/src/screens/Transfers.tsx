@@ -1,3 +1,4 @@
+import { CustodyGuard } from '../components/WalletData';
 import React, { useEffect, useState } from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
@@ -10,7 +11,13 @@ import { colors as c, fonts } from '../theme';
 import { useWallet } from '../data/wallet';
 import { LiveReceiveScreen, LiveReviewScreen, LiveSendScreen, LiveTransactionScreen } from './LiveWallet';
 
-export function SendScreen() { return useWallet().enabled ? <LiveSendScreen /> : <DemoSendScreen />; }
+export function SendScreen() {
+  const wallet = useWallet();
+  // Refuse before choosing. Falling through to the demo screen would be safe but silent, and
+  // a user who cannot send deserves to know it is custody and not a bug.
+  if (wallet.blocked) return <Screen title="Send" subtitle="Unavailable in this build"><CustodyGuard /></Screen>;
+  return wallet.enabled ? <LiveSendScreen /> : <DemoSendScreen />;
+}
 function DemoSendScreen() {
   const { state, draft, setDraft, prepare } = useDemo();
   const [error, setError] = useState('');
@@ -104,7 +111,13 @@ function DemoTransactionScreen() {
   </Screen>;
 }
 
-export function ReceiveScreen() { return useWallet().enabled ? <LiveReceiveScreen /> : <DemoReceiveScreen />; }
+export function ReceiveScreen() {
+  const wallet = useWallet();
+  // The most important refusal in the app. An address on screen is an invitation to send funds
+  // to it, and in a split it belongs to a wallet the user's phrase cannot recover.
+  if (wallet.blocked) return <Screen title="Receive" subtitle="No address can be shown"><CustodyGuard /></Screen>;
+  return wallet.enabled ? <LiveReceiveScreen /> : <DemoReceiveScreen />;
+}
 function DemoReceiveScreen() {
   const [message, setMessage] = useState('');
   const [copied, setCopied] = useState(false);

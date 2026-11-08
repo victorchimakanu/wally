@@ -4,9 +4,17 @@ import { chartPoints, formatChange, parseChart, parseMarket, parseSavedChart, pa
 import { CHAINS, createWalletClient, formatEth, parseQuote, parseWallet, wei, sameSiteEndpoint } from '../src/services/wallet-api.ts';
 import { quickLiveReply, liveIntentReply } from '../src/services/live-wallet-chat.ts';
 const address = '0x1111111111111111111111111111111111111111';
-const balance = (chain: 'arbitrum' | 'ethereum') => ({ chain, name: CHAINS[chain].name, chainId: CHAINS[chain].id, symbol: 'ETH', address, qr: 'data:image/svg+xml;base64,PHN2Zy8+', balance: '0', balanceWei: '0', error: '' });
-const snapshot = () => ({ version: 1, network: 'testnet', location: 'computer', fetchedAt: 1000, balances: [balance('arbitrum'), balance('ethereum')], tokenNotice: 'testnet' });
-const quote = () => ({ id: '12345678-1234-1234-1234-123456789012', chain: 'arbitrum', chainId: 421614, network: 'Arbitrum Sepolia', symbol: 'ETH', from: address, recipient: address, amount: '0.001', fee: '0.000021', total: '0.001021', expiresAt: 61000 });
+const balance = (chain: 'arbitrum' | 'ethereum', symbol = 'ETH') => ({ chain, name: CHAINS[chain].name, chainId: CHAINS[chain].id, symbol, address, qr: 'data:image/svg+xml;base64,PHN2Zy8+', balance: '0', balanceWei: '0', error: '' });
+/**
+ * Two native coins plus the pinned USDt on Arbitrum. The count is derived in parseWallet from
+ * the token registry rather than fixed, so pinning another token changes this fixture too —
+ * which is the point: a snapshot missing an asset the app expects is a snapshot to refuse.
+ */
+const snapshot = () => ({ version: 1, network: 'testnet', location: 'computer', fetchedAt: 1000, balances: [balance('arbitrum'), balance('arbitrum', 'USDT'), balance('ethereum')], tokenNotice: 'testnet' });
+const quote = () => ({ id: '12345678-1234-1234-1234-123456789012', chain: 'arbitrum', chainId: 421614, network: 'Arbitrum Sepolia', symbol: 'ETH', from: address, recipient: address, amount: '0.001', fee: '0.000021', total: '0.001021', expiresAt: 61000,
+  // Required since 7 Nov: the app derives its own deadline from this duration rather than
+  // comparing the server's expiresAt against the phone's clock. See quote-clock.ts.
+  expiresInMs: 60000 });
 test('market parses only allowed assets, preserves losses and unavailable fields', () => {
   const data = parseMarket([{ id: 'bitcoin', current_price: 80000, price_change_percentage_24h: -2.5 }, { id: 'tether', current_price: 1, price_change_percentage_24h: 0.02 }, { id: 'unlisted', current_price: 100 }], 'NGN', 1000);
   assert.equal(data.assets.length, 2); assert.equal(data.currency, 'NGN'); assert.equal(data.assets[0].cap, null); assert.equal(formatChange(data.assets[0].change), '-2.50%'); assert.equal(formatChange(data.assets[1].change), '+0.02%');

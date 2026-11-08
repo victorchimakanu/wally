@@ -1,6 +1,10 @@
 # Quickstart
 
-Get Wally running in five steps.
+> **This is the reference app, not the product.** For the mobile app — the thing being shipped —
+> use [RUNNING-LOCALLY.md](RUNNING-LOCALLY.md). This page is kept because the reference app still
+> holds the agent invariants the phone inherits, and CI keeps it building.
+
+Get the reference app running in five steps.
 
 ## Prerequisites
 

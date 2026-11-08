@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { request } from 'node:http';
 import { createWalletApi } from '../scripts/wallet-api-server.mjs';
-import { createWalletService, ethDisplay, ethUnits, QuoteBook, visibleRecord } from '../scripts/wallet-api-core.mjs';
+import { createWalletService, ethDisplay, ethUnits, QuoteBook, visibleRecord, superseded, SETTLED, manualResolve, tokenDisplay } from '../scripts/wallet-api-core.mjs';
 
 /**
  * The signing tests need the isolated WDK runtime, which is a separate install. Until
@@ -69,6 +69,9 @@ test('WDK signs only the reviewed transaction; uncertain broadcast survives rest
       case 'eth_getBlockByNumber': result = { hash: '0x' + '1'.repeat(64), parentHash: '0x' + '0'.repeat(64), number: '0x1', timestamp: '0x1', nonce: '0x0000000000000000', difficulty: '0x0', gasLimit: '0x1c9c380', gasUsed: '0x0', miner: '0x1111111111111111111111111111111111111111', extraData: '0x', transactions: [], baseFeePerGas: '0x1' }; break;
       case 'eth_sendRawTransaction': broadcasts++; assert.match(request.params[0], /^0x/); throw new Error('Response lost after submission');
       case 'eth_getTransactionReceipt': result = accepted ? { status: '0x1', blockNumber: '0x2' } : null; break;
+      // A receipt alone is not finality: receipt() requires the block to be buried before it
+      // will say confirmed, so the mock has to report a head deep enough past block 0x2.
+      case 'eth_blockNumber': result = '0x9'; break;
       default: throw new Error(`Unexpected mock RPC: ${request.method}`);
     }
     return Response.json({ jsonrpc: '2.0', id: request.id, result });
@@ -112,6 +115,7 @@ test('a broadcast the node refuses is explained, not silently swallowed', needsW
       // The node answers, and refuses. This transaction will never be accepted.
       case 'eth_sendRawTransaction': return Response.json({ jsonrpc: '2.0', id: request.id, error: { code: -32000, message: 'nonce too low' } });
       case 'eth_getTransactionReceipt': result = null; break;
+      case 'eth_blockNumber': result = '0x9'; break;
       default: throw new Error(`Unexpected mock RPC: ${request.method}`);
     }
     return Response.json({ jsonrpc: '2.0', id: request.id, result });
@@ -130,5 +134,300 @@ test('a broadcast the node refuses is explained, not silently swallowed', needsW
   } finally {
     service?.dispose();
     rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('a receipt that is not buried yet is pending, not confirmed', needsWdk, async () => {
+  // Until 5 Nov 2026 a receipt alone meant "confirmed". A chain reorganisation can remove a
+  // block that already had one, so Wally could tell someone their money had arrived and never
+  // correct itself when it had not.
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../internal');
+  const directory = mkdtempSync(path.join(root, 'depth-'));
+  let head = '0x2';                       // the receipt's own block: depth 1
+  const transport = async (url, options) => {
+    if (url.includes('blockscout')) return Response.json({ items: [] });
+    const request = JSON.parse(options.body), chainId = url.includes('arbitrum') ? '0x66eee' : '0xaa36a7';
+    let result;
+    switch (request.method) {
+      case 'eth_chainId': result = chainId; break;
+      case 'eth_getBalance': result = '0xde0b6b3a7640000'; break;
+      case 'eth_getCode': result = '0x'; break;
+      case 'eth_estimateGas': result = '0x5208'; break;
+      case 'eth_gasPrice': case 'eth_maxPriorityFeePerGas': result = '0x3b9aca00'; break;
+      case 'eth_getTransactionCount': result = '0x0'; break;
+      case 'eth_blockNumber': result = head; break;
+      case 'eth_getBlockByNumber': result = { hash: '0x' + '1'.repeat(64), parentHash: '0x' + '0'.repeat(64), number: '0x1', timestamp: '0x1', nonce: '0x0000000000000000', difficulty: '0x0', gasLimit: '0x1c9c380', gasUsed: '0x0', miner: '0x1111111111111111111111111111111111111111', extraData: '0x', transactions: [], baseFeePerGas: '0x1' }; break;
+      case 'eth_sendRawTransaction': result = null; break;
+      case 'eth_getTransactionReceipt': result = { status: '0x1', blockNumber: '0x2' }; break;
+      default: throw new Error(`Unexpected mock RPC: ${request.method}`);
+    }
+    return Response.json({ jsonrpc: '2.0', id: request.id, result });
+  };
+  let service;
+  try {
+    service = await createWalletService(directory, { transport });
+    const hash = '0x' + 'a'.repeat(64);
+
+    // Depth 1: on chain, but not yet safe to say so.
+    assert.equal((await service.receipt('arbitrum', hash)).status, 'pending', 'depth 1 must not be confirmed');
+
+    // Bury it and the same receipt becomes confirmed.
+    head = '0x9';
+    assert.equal((await service.receipt('arbitrum', hash)).status, 'confirmed');
+  } finally {
+    service?.dispose();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('superseded: a nonce the chain has moved past can never land, and everything else stays pending', () => {
+  // The rule that unwedges a chain, so the cases are the ones where being wrong costs money.
+  // It must never say "dead" about a transfer that could still arrive — that is how someone
+  // sends the same money twice.
+  assert.equal(superseded({ hasReceipt: false, recordNonce: 7, confirmedNonce: 8 }), true, 'the nonce was spent by something else');
+  assert.equal(superseded({ hasReceipt: false, recordNonce: 7, confirmedNonce: 99 }), true);
+
+  assert.equal(superseded({ hasReceipt: false, recordNonce: 7, confirmedNonce: 7 }), false, 'still the next nonce: in flight');
+  assert.equal(superseded({ hasReceipt: false, recordNonce: 7, confirmedNonce: 6 }), false, 'the chain is behind this transfer');
+  assert.equal(superseded({ hasReceipt: true, recordNonce: 7, confirmedNonce: 99 }), false, 'a receipt settles it, whatever the nonce says');
+
+  // A record written before nonces were journalled cannot be judged. It must not be guessed
+  // at — those go through the explicit user action instead.
+  for (const missing of [undefined, null, NaN, '7', 7.5, Infinity]) {
+    assert.equal(superseded({ hasReceipt: false, recordNonce: missing, confirmedNonce: 99 }), false, `recordNonce ${String(missing)}`);
+    assert.equal(superseded({ hasReceipt: false, recordNonce: 7, confirmedNonce: missing }), false, `confirmedNonce ${String(missing)}`);
+  }
+
+  // Nonce 0 is a real nonce — the first transfer a wallet ever makes.
+  assert.equal(superseded({ hasReceipt: false, recordNonce: 0, confirmedNonce: 1 }), true);
+  assert.equal(superseded({ hasReceipt: false, recordNonce: 0, confirmedNonce: 0 }), false);
+});
+
+test('SETTLED is exactly the statuses that stop blocking the chain', () => {
+  // quote() refuses while anything on a chain is unsettled, so this list is the difference
+  // between a usable wallet and a permanently wedged one.
+  assert.deepEqual([...SETTLED].sort(), ['confirmed', 'failed', 'superseded']);
+  for (const blocking of ['unknown', 'pending']) {
+    assert.equal(SETTLED.includes(blocking), false, `${blocking} must keep blocking`);
+  }
+});
+
+test('marking a transfer as never arrived is refused whenever the chain can answer instead', () => {
+  // The refusal is the point. Letting a person override a judgement Wally can make itself is
+  // the one way this mechanism could cause a double-send: a slow transfer declared dead, the
+  // chain unblocked, the same money sent twice.
+  assert.deepEqual(manualResolve({ status: 'unknown', nonce: 4 }).allowed, false, 'a nonce means the chain can be asked');
+  assert.match(manualResolve({ status: 'unknown', nonce: 4 }).reason, /may arrive/);
+  assert.deepEqual(manualResolve({ status: 'pending', nonce: 0 }).allowed, false, 'nonce 0 is a real nonce');
+
+  // Only the records Wally genuinely cannot judge.
+  assert.deepEqual(manualResolve({ status: 'unknown' }), { allowed: true });
+  assert.deepEqual(manualResolve({ status: 'pending', nonce: undefined }), { allowed: true });
+
+  // Already settled: nothing to do, and not an error either.
+  for (const status of SETTLED) {
+    assert.equal(manualResolve({ status }).allowed, false, status);
+    assert.equal(manualResolve({ status }).reason, 'settled', status);
+  }
+
+  assert.equal(manualResolve(undefined).allowed, false);
+  assert.equal(manualResolve(null).allowed, false);
+});
+
+test('the dev server builds a snapshot the app will actually accept', async () => {
+  // The loop neither side closes on its own: the dev server formats balances and the app
+  // validates them, with three separate copies of the token list between them. A disagreement
+  // about USDt's decimals does not raise an error anywhere — it shows a different amount. So
+  // the server's output is built here exactly as `wallet()` builds it and run through the
+  // app's real parser.
+  const { TOKENS, tokenDisplay, NETWORKS } = await import('../scripts/wallet-api-core.mjs');
+  const { parseWallet } = await import('../src/services/wallet-api.ts');
+
+  const address = '0x1111111111111111111111111111111111111111';
+  const qr = 'data:image/svg+xml;base64,PHN2Zy8+';
+  const balances = Object.entries(NETWORKS).flatMap(([chain, network]) => {
+    const common = { chain, name: network.name, chainId: network.chainId, address, qr, error: '' };
+    return [
+      { ...common, symbol: 'ETH', balanceWei: '1000000000000000', balance: '0.001' },
+      ...(TOKENS[chain] ?? []).map(token => ({
+        ...common,
+        symbol: token.symbol,
+        balanceWei: '10500000',
+        balance: tokenDisplay('10500000', token.decimals),
+      })),
+    ];
+  });
+
+  const snapshot = { version: 1, network: 'testnet', location: 'computer', fetchedAt: Date.now(), balances, tokenNotice: 'x' };
+  const parsed = parseWallet(snapshot);
+
+  const usdt = parsed.balances.find(item => item.symbol === 'USDT');
+  assert.ok(usdt, 'the snapshot must carry USDt');
+  // 10_500_000 base units at six decimals is 10.5 — the number a person reads. If either side
+  // used eighteen, parseWallet would have thrown above.
+  assert.equal(usdt.balance, '10.5');
+  assert.equal(parsed.balances.filter(item => item.symbol === 'ETH').length, 2);
+});
+
+test('tokenDisplay scales by the token decimals, not by eighteen', () => {
+  assert.equal(tokenDisplay('1000000', 6), '1');
+  assert.equal(tokenDisplay('10500000', 6), '10.5');
+  assert.equal(tokenDisplay('1', 6), '0.000001');
+  assert.equal(tokenDisplay('0', 6), '0');
+  assert.equal(tokenDisplay('5', 0), '5');
+  // The same integer under the two scales must differ, or the bug is present.
+  assert.notEqual(tokenDisplay('1000000', 6), tokenDisplay('1000000', 18));
+});
+
+test('the dev server declares a quote duration the app will accept', async () => {
+  // Another loop neither side closes alone. The server now sends how long a quote is good for,
+  // and the app refuses a quote without it — on purpose, because falling back to comparing the
+  // server's timestamp against the phone's clock is the bug that change removes. If the two
+  // ever disagree about the field, live sending stops working entirely.
+  const { QUOTE_MS } = await import('../scripts/wallet-api-core.mjs');
+  const { plausibleQuoteSpan } = await import('../src/services/quote-clock.ts');
+  const { parseQuote } = await import('../src/services/wallet-api.ts');
+
+  assert.equal(plausibleQuoteSpan(QUOTE_MS), true, `the app must accept the server's ${QUOTE_MS}ms`);
+
+  const address = '0x1111111111111111111111111111111111111111';
+  const parsed = parseQuote({
+    id: '12345678-1234-1234-1234-123456789012',
+    chain: 'arbitrum', chainId: 421614, network: 'Arbitrum Sepolia', symbol: 'ETH',
+    from: address, recipient: address, amount: '0.001', fee: '0.000021', total: '0.001021',
+    // Exactly what the server puts in a visible quote.
+    expiresAt: 1_700_000_000_000 + QUOTE_MS,
+    expiresInMs: QUOTE_MS,
+  });
+
+  assert.equal(parsed.expiresInMs, QUOTE_MS);
+  // And the deadline the app derived is its own, not the server's stamp.
+  assert.notEqual(parsed.deadline, parsed.expiresAt);
+});
+
+test('a journal holding a resolved transfer still loads — the regression this fixes', async () => {
+  // Adding `superseded` left the load-time validator listing four statuses. The first restart
+  // after a stranded transfer was resolved threw "The transaction journal is invalid" and the
+  // dev server would not start at all: the fix for a wedged chain wedged the server instead.
+  // Pinned by its symptom, so the next status added fails here rather than on somebody's
+  // machine.
+  const { validJournal, STATUSES } = await import('../scripts/wallet-api-core.mjs');
+  const record = status => ({ chain: 'arbitrum', hash: `0x${'a'.repeat(64)}`, status });
+
+  for (const status of STATUSES) {
+    assert.equal(validJournal([record(status)]), true, `a journal with status "${status}" must load`);
+  }
+  // The specific one that broke it.
+  assert.equal(validJournal([record('superseded')]), true);
+  // And the extra field the manual resolve writes must not upset it.
+  assert.equal(validJournal([{ ...record('superseded'), resolvedByUser: 1_700_000_000_000 }]), true);
+});
+
+test('the status sets are complements, computed rather than kept in step by hand', async () => {
+  const { STATUSES, SETTLED, OUTSTANDING } = await import('../scripts/wallet-api-core.mjs');
+
+  // Every status is in exactly one of the two. If this ever fails, either a transfer can block
+  // the chain forever or a live one is treated as finished.
+  assert.deepEqual([...SETTLED, ...OUTSTANDING].sort(), [...STATUSES].sort());
+  assert.deepEqual(SETTLED.filter(status => OUTSTANDING.includes(status)), [], 'no status may be both');
+  assert.deepEqual([...OUTSTANDING].sort(), ['pending', 'unknown']);
+});
+
+test('the server and the app agree on the list of statuses', async () => {
+  // The app's LiveTransaction union and the server's STATUSES must match. They cannot import
+  // each other, and a server status the app's parser does not know blanks the whole Activity
+  // list — parseHistory throws for the entire list if one item fails validation.
+  const { STATUSES } = await import('../scripts/wallet-api-core.mjs');
+  const { readFileSync } = await import('node:fs');
+  const appSource = readFileSync(new URL('../src/services/wallet-api.ts', import.meta.url), 'utf8');
+
+  for (const status of STATUSES) {
+    assert.ok(appSource.includes(`'${status}'`), `the app must know the status "${status}"`);
+  }
+  // And the app's own validation list must be exactly these, in the parser that guards Activity.
+  const list = /\[((?:'[a-z]+', ?)+'[a-z]+')\]\.includes\(String\(item\.status\)\)/.exec(appSource);
+  assert.ok(list, 'could not find the app\'s status validation list');
+  const appStatuses = list[1].split(',').map(part => part.trim().replace(/'/g, ''));
+  assert.deepEqual(appStatuses.sort(), [...STATUSES].sort());
+});
+
+test('an unusable journal is still refused, so a corrupt file cannot be acted on', async () => {
+  const { validJournal } = await import('../scripts/wallet-api-core.mjs');
+  const good = { chain: 'arbitrum', hash: `0x${'a'.repeat(64)}`, status: 'pending' };
+
+  assert.equal(validJournal([good]), true);
+  for (const bad of [
+    [{ ...good, status: 'invented' }],
+    [{ ...good, status: undefined }],
+    [{ ...good, chain: 'solana' }],
+    [{ ...good, chain: '__proto__' }],      // Object.hasOwn, not `in`
+    [{ ...good, hash: 'nope' }],
+    [{ ...good, hash: `0x${'a'.repeat(63)}` }],
+    [null],
+    ['a string'],
+    [42],
+    'not an array',
+    null,
+    undefined,
+  ]) {
+    assert.equal(validJournal(bad), false, `must refuse: ${JSON.stringify(bad)}`);
+  }
+  // An empty journal is a fresh install, not a corrupt file.
+  assert.equal(validJournal([]), true);
+});
+
+/**
+ * Every refusal this server can throw either reaches the user or is deliberately internal.
+ *
+ * The HTTP layer shows a message only when it matches SAFE_MESSAGE and replaces everything
+ * else with "could not complete this request. Check the connection and retry." That is the
+ * right default — an SDK error can carry a transaction payload — but it means whether a
+ * person sees a refusal depends on the first few words of its prose, which nothing connected
+ * to the prose itself.
+ *
+ * It had already gone wrong. `ethUnits` was split into two refusals so that too many whole
+ * digits stopped being reported as a decimals problem. The new message began "That is more
+ * than…", matched no prefix, and reached the user as advice to check their network — for an
+ * amount they had typed. The unit tests passed throughout, because they call `ethUnits`
+ * directly and never cross the layer that drops the message.
+ *
+ * So this reads the source. A new refusal must either match SAFE_MESSAGE or be listed below
+ * with a reason, and "I did not think about it" cannot be the reason.
+ */
+test('no user-facing refusal is silently replaced with a connection error', async () => {
+  const { SAFE_MESSAGE } = await import('../scripts/wallet-api-core.mjs');
+  const { readFileSync } = await import('node:fs');
+  const { fileURLToPath } = await import('node:url');
+  const source = readFileSync(fileURLToPath(new URL('../scripts/wallet-api-core.mjs', import.meta.url)), 'utf8');
+
+  // Thrown before the server is listening, so no HTTP response ever carries them. They are
+  // read by the developer who started the process, in the terminal.
+  const startup = [
+    'Install the isolated WDK runtime with npm install --prefix internal/wallet-api-runtime --save-exact @tetherto/wdk-wallet-evm@1.0.0-beta.14 qrcode@1.5.4',
+    'The testnet wallet seed is invalid. Restore its backup; a replacement was not generated.',
+    'The transaction journal is invalid. Restore it before submitting transfers.',
+  ];
+  // Genuinely infrastructure: the node or the SDK failed, not the person. "Check the
+  // connection and retry" is the correct advice for these, which is what the generic message
+  // says — so being replaced is the right outcome rather than a missed case.
+  const infrastructure = [
+    '${network.name} RPC is unavailable.',
+    'WDK returned an invalid address.',
+    '${token.symbol} balance could not be read.',
+  ];
+  const deliberate = new Set([...startup, ...infrastructure]);
+
+  const thrown = [...source.matchAll(/throw new Error\((['`])((?:[^'\\`]|\\.)*)\1\)/g)].map(match => match[2]);
+  assert.ok(thrown.length > 25, `expected to find the refusals; found ${thrown.length}`);
+
+  const swallowed = thrown.filter(message => !SAFE_MESSAGE.test(message) && !deliberate.has(message));
+  assert.deepEqual(swallowed, [],
+    'These would reach the user as "Check the connection and retry", which is wrong when the ' +
+    'user is the one who can fix it. Either start the message with a SAFE_MESSAGE prefix, or ' +
+    'add it to startup/infrastructure above with the reason it is not user-facing.');
+
+  // The list above must not rot into a place where real refusals go to be forgotten.
+  for (const message of deliberate) {
+    assert.ok(thrown.includes(message), `"${message}" is listed as deliberate but is no longer thrown; remove it.`);
   }
 });

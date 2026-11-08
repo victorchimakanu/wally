@@ -21,7 +21,7 @@
  * shown to be tested.
  */
 import { spawnSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -29,6 +29,36 @@ const BACKEND = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 
 /** [id, file relative to backend/, find, replace, what the bug would mean] */
 const MUTATIONS = [
+  // USDt: the arithmetic that is wrong by a factor of a million million when it is wrong
+  ["token-decimals-from-record", "src/indexer.ts",
+   "    const amount = appSafeAmount(value, token.decimals);",
+   "    const amount = appSafeAmount(value, declared !== null ? Number(declared) : token.decimals);",
+   "a remote contract decides how an amount is scaled on screen"],
+  ["token-contract-unchecked", "src/indexer.ts",
+   "  if (typeof contract !== \"string\" || contract.toLowerCase() !== token.address.toLowerCase()) {",
+   "  if (false) {",
+   "a transfer of some other token is rendered as USDt"],
+  ["token-amount-uncapped", "src/indexer.ts",
+   "function appSafeAmount(value: bigint, decimals: number): string | null {\n  const text = formatUnits(value, decimals);\n  return APP_AMOUNT.test(text) ? text : null;\n}",
+   "function appSafeAmount(value: bigint, decimals: number): string | null {\n  return formatUnits(value, decimals);\n}",
+   "one spam token transfer blanks the whole Activity list"],
+  // gasless: the one route that spends money when it is used
+  ["gasless-method-allowlist-gone", "src/routes/gasless.ts",
+   "    if (!allowed.includes(body.method)) {", "    if (false) {",
+   "any bundler or paymaster method is forwarded"],
+  ["gasless-serves-without-config", "src/routes/gasless.ts",
+   "    if (!target) {", "    if (false) {",
+   "an unconfigured service forwards to undefined instead of refusing"],
+  ["gasless-submit-always-allowed", "src/config.ts",
+   "  return config.rpcAllowBroadcast ? [...BUNDLER_READ_METHODS, \"eth_sendUserOperation\"] : BUNDLER_READ_METHODS;",
+   "  return [...BUNDLER_READ_METHODS, \"eth_sendUserOperation\"];",
+   "a user operation is submitted while broadcasting is switched off"],
+  ["gasless-batches-accepted", "src/routes/gasless.ts",
+   "    if (Array.isArray(body)) {", "    if (false) {",
+   "a batch fans out past the rate limit that protects the budget"],
+  ["gasless-returns-upstream-id", "src/routes/gasless.ts",
+   "      return reply.send({ ...result, id });", "      return reply.send(result);",
+   "a coalesced response carries another caller's JSON-RPC id"],
   // access control
   ["auth-always-match", "src/server.ts",
    "  return timingSafeEqual(a, b);", "  return true;", "any key is accepted"],
@@ -81,7 +111,13 @@ const MUTATIONS = [
    "        if (seen.has(id)) return false;", "        if (false) return false;",
    "the same transaction appears twice"],
   ["history-cap-raised", "src/routes/history.ts",
-   "      .slice(0, 50);", "      .slice(0, 500);", "more items than parseHistory accepts"],
+   "      .slice(0, PAGE_SIZE);", "      .slice(0, 500);", "more items than parseHistory accepts"],
+  ["history-page-ignored", "src/routes/history.ts",
+   "fetchHistory(chain, address, page)", "fetchHistory(chain, address, 1)",
+   "every page returns page 1, so old history stays unreachable"],
+  ["history-page-unvalidated", "src/routes/history.ts",
+   "    if (!Number.isInteger(page) || page < 1 || page > MAX_PAGE) {", "    if (false) {",
+   "a nonsense page reaches the provider and spends quota"],
   ["history-weak-address", "src/routes/history.ts",
    "const ADDRESS = /^0x[0-9a-fA-F]{40}$/;", "const ADDRESS = /^0x/;",
    "a malformed address reaches the indexer"],
@@ -100,6 +136,14 @@ const MUTATIONS = [
    "    `${host}/api/v2/addresses/${address}/transactions`,",
    "    `${host}/api/v2/addresses/${address}/transactions?filter=to%20%7C%20from`,",
    "the 422 regression returns"],
+
+  // the stop button
+  ["stop-button-ignored", "src/routes/status.ts",
+   "      sendingEnabled: disabled.length === 0,", "      sendingEnabled: true,",
+   "the kill switch reports enabled even when an operator disabled sending"],
+  ["stop-button-cached", "src/server.ts",
+   '    reply.header("Cache-Control", "no-store");', "    ;",
+   "responses become cacheable, including the stop button after it is pressed"],
 
   // concurrency
   ["no-coalescing-rpc", "src/routes/rpc.ts",
@@ -123,13 +167,72 @@ const MUTATIONS = [
   ["cache-never-expires", "src/cache.ts",
    "    if (Date.now() - entry.storedAt >= this.ttlMs) return null;", "    if (false) return null;",
    "stale data is served as fresh forever"],
+
+  // the receipt watcher
+  ["missing-receipt-reads-as-failed", "src/watcher.ts",
+   '  if (!receipt || typeof receipt !== "object") return { state: "pending" };',
+   '  if (!receipt || typeof receipt !== "object") return { state: "failed" };',
+   "a transfer not yet in a block is reported to the user as failed"],
+  ["unknown-status-reads-as-confirmed", "src/watcher.ts",
+   '  return { state: "pending" };\n}',
+   '  return { state: "confirmed" };\n}',
+   "a status the EVM does not define is announced as success"],
+  ["watch-list-unbounded", "src/watcher.ts",
+   "      if (watches.size >= maxWatches) {", "      if (false) {",
+   "anyone can grow the watch list until the process dies"],
+  ["watch-never-expires", "src/watcher.ts",
+   "    for (const [key, watch] of watches) if (at - watch.since > ttlMs) watches.delete(key);",
+   "    for (const [key, watch] of watches) if (false) watches.delete(key);",
+   "a hash nobody asked about is kept for the life of the process"],
+  ["unwatched-reads-as-settled", "src/routes/watch.ts",
+   '    if (!watch) return reply.code(404).send({ error: "That transfer is not being watched.", watching: false });',
+   "    if (!watch) return reply.send({ state: 'confirmed' });",
+   "a transfer nobody is watching is reported as confirmed"],
 ];
 
 const suitePasses = () =>
   spawnSync("npx", ["vitest", "run"], { cwd: BACKEND, encoding: "utf8" }).status === 0;
 
-/** Restore the bytes we read, so uncommitted work survives a run. */
-const restore = (file, original) => writeFileSync(file, original);
+/**
+ * Where a pristine copy lives while its file is mutated.
+ *
+ * `finally` is not enough. On 5 Nov 2026 this process was killed mid-run and left
+ * `broadcast-always-on` applied to src/config.ts — the mutation that makes
+ * eth_sendRawTransaction allowed regardless of RPC_ALLOW_BROADCAST. A security guard was
+ * disabled in the working tree, silently, by the tool meant to prove guards work.
+ *
+ * So the copy goes to disk before the mutation, and `recover()` puts it back on the next run.
+ * A SIGKILL cannot run a finally block, but it also cannot stop the next invocation reading
+ * what is sitting here.
+ */
+const SAFE = path.join(BACKEND, ".mutation-backup");
+
+/** Restore anything a previous run left behind. Runs before anything else. */
+function recover() {
+  if (!existsSync(SAFE)) return;
+  const left = readdirSync(SAFE);
+  for (const name of left) {
+    const rel = Buffer.from(name, "base64url").toString("utf8");
+    const target = path.join(BACKEND, rel);
+    writeFileSync(target, readFileSync(path.join(SAFE, name)));
+    console.error(`  recovered ${rel} — a previous run was interrupted while it was mutated`);
+  }
+  rmSync(SAFE, { recursive: true, force: true });
+  if (left.length) console.error("");
+}
+
+const stash = (rel, original) => {
+  mkdirSync(SAFE, { recursive: true });
+  writeFileSync(path.join(SAFE, Buffer.from(rel).toString("base64url")), original);
+};
+
+/** Restore the bytes we read, and drop the on-disk copy once the file is safe again. */
+const restore = (file, original, rel) => {
+  writeFileSync(file, original);
+  rmSync(path.join(SAFE, Buffer.from(rel).toString("base64url")), { force: true });
+};
+
+recover();
 
 if (!suitePasses()) {
   console.error("The suite is already failing. Fix that before mutation testing means anything.");
@@ -148,12 +251,13 @@ for (const [id, rel, find, replace, meaning] of MUTATIONS) {
     survived.push([id, rel, "anchor missing; this mutation no longer tests anything"]);
     continue;
   }
+  stash(rel, original);
   writeFileSync(file, original.replace(find, replace));
   let caught;
   try {
     caught = !suitePasses();
   } finally {
-    restore(file, original);
+    restore(file, original, rel);
   }
   if (caught) killed++;
   else survived.push([id, rel, meaning]);

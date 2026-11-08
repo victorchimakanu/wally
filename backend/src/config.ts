@@ -33,6 +33,38 @@ export const CHAINS = {
   ethereum: { id: 11155111, name: "Ethereum Sepolia" },
 } as const;
 export type Chain = keyof typeof CHAINS;
+/**
+ * ERC-20 tokens the proxy will report history for.
+ *
+ * **This must agree with `TOKENS` in `mobile/src/services/tokens.ts`** — address and decimals
+ * both. The app formats and validates amounts with its own copy, so a disagreement here does
+ * not produce an error, it produces a wrong number next to someone's money. The two cannot
+ * import each other (separate packages), which is the same coupling `CHAINS` already has, and
+ * `backend/test/usdt.test.ts` pins the values so a one-sided edit fails a test rather than
+ * shipping.
+ *
+ * There is no official Tether testnet USDT; this address is a third-party deployment, verified
+ * by `eth_call` on 6 November 2026 to report symbol "USDT" and 6 decimals. The long version is
+ * in the app's copy. Do not carry it to mainnet by habit.
+ *
+ * Only pinned tokens are indexed. An unpinned token has unknown decimals, and the proxy would
+ * have to guess — which is how an amount lands on screen wrong by a factor of a million
+ * million. Spam tokens are also excluded for free by the same rule.
+ */
+export const TOKENS = {
+  arbitrum: [
+    { address: "0xE5b6C29411b3ad31C3613BbA0145293fC9957256", symbol: "USDT", decimals: 6 },
+  ],
+  // Native ETH only, deliberately: Arbitrum is the home chain.
+  ethereum: [],
+} as const satisfies Record<keyof typeof CHAINS, readonly { address: string; symbol: string; decimals: number }[]>;
+
+export type TokenSpec = { address: string; symbol: string; decimals: number };
+
+export function tokensFor(chain: Chain): readonly TokenSpec[] {
+  return TOKENS[chain];
+}
+
 export function isChain(value: unknown): value is Chain {
   // Object.hasOwn, not `in`: `"__proto__" in CHAINS` is true and would pass validation,
   // letting an attacker-chosen key reach the lookup. Caught by test/proxy.test.ts.
@@ -111,6 +143,36 @@ const Schema = z.object({
    */
   appKey: z.string().optional(),
 
+  /**
+   * ERC-4337 bundler and paymaster, for Arbitrum only.
+   *
+   * Arbitrum is the only chain running a smart account — Ethereum uses
+   * `@tetherto/wdk-wallet-evm`, a plain EOA, where there is no user operation to bundle and
+   * nothing a paymaster could sponsor. Separate variables rather than one, because Pimlico
+   * happens to serve both from a single URL and another provider may not.
+   *
+   * Both are optional and absent by default. Gasless is off until an operator configures it,
+   * and the routes say so rather than failing obscurely.
+   */
+  bundlerArbitrum: z.string().url().optional(),
+  paymasterArbitrum: z.string().url().optional(),
+
+  /**
+   * Set this to a sentence and /v1/status tells every app to stop sending, showing this text
+   * as the reason. Empty means sending is enabled, so the safe state is also the default and
+   * nobody can disable the wallet by forgetting a variable.
+   *
+   * The sentence is shown to users verbatim, so write it as a person: what is wrong, that
+   * their funds are untouched, and when to try again.
+   */
+  sendingDisabledReason: z.string().default(""),
+
+  /**
+   * Builds below this refuse to send. Empty disables the check, which is the default — a
+   * version gate nobody maintains is a way to brick working installs.
+   */
+  minimumAppVersion: z.string().default(""),
+
   /** Requests per minute per client IP, across all routes. */
   rateLimitPerMinute: z.coerce.number().int().positive().default(120),
 
@@ -177,6 +239,10 @@ function build() {
     coingeckoApiKey: process.env["COINGECKO_API_KEY"] || undefined,
     rpcAllowBroadcast: process.env["RPC_ALLOW_BROADCAST"],
     appKey: process.env["WALLY_APP_KEY"] || undefined,
+    bundlerArbitrum: process.env["BUNDLER_URL_ARBITRUM"] || undefined,
+    paymasterArbitrum: process.env["PAYMASTER_URL_ARBITRUM"] || undefined,
+    sendingDisabledReason: process.env["SENDING_DISABLED_REASON"],
+    minimumAppVersion: process.env["MINIMUM_APP_VERSION"],
     rateLimitPerMinute: process.env["RATE_LIMIT_PER_MINUTE"],
     trustedProxy: process.env["TRUSTED_PROXY"],
     allowedOrigins: process.env["ALLOWED_ORIGINS"],
@@ -216,6 +282,9 @@ function build() {
         "  Get a free key at https://etherscan.io/apis (one key covers both chains).",
     );
   }
+  if (cfg.sendingDisabledReason.trim()) {
+    console.error(`SENDING IS DISABLED for every app: "${cfg.sendingDisabledReason.trim()}"\n  Unset SENDING_DISABLED_REASON and restart to re-enable.`);
+  }
   if (loopback && !cfg.appKey) {
     console.error("Note: no WALLY_APP_KEY set. Fine on loopback; required before exposing this service.");
   }
@@ -228,6 +297,13 @@ export const config = build();
 export function rpcUrl(chain: Chain): string {
   return chain === "arbitrum" ? config.rpcArbitrum : config.rpcEthereum;
 }
+/**
+ * Which indexer host serves this chain.
+ *
+ * Used only by the Blockscout fallback — Etherscan V2 reaches both chains through one host and
+ * a `chainid` parameter, so it needs no per-chain URL. This function had no callers for weeks
+ * while `indexer.ts` wrote the same ternary inline; they are one decision again.
+ */
 export function indexerUrl(chain: Chain): string {
   return chain === "arbitrum" ? config.indexerArbitrum : config.indexerEthereum;
 }
@@ -259,3 +335,53 @@ export function onLoopback(): boolean {
 export function allowedRpcMethods(): readonly string[] {
   return config.rpcAllowBroadcast ? [...RPC_READ_METHODS, "eth_sendRawTransaction"] : RPC_READ_METHODS;
 }
+
+/**
+ * Bundler and paymaster urls, or undefined when gasless is not configured.
+ *
+ * Arbitrum only, deliberately: see the schema above.
+ */
+export function bundlerUrl(chain: Chain): string | undefined {
+  return chain === "arbitrum" ? config.bundlerArbitrum : undefined;
+}
+export function paymasterUrl(chain: Chain): string | undefined {
+  return chain === "arbitrum" ? config.paymasterArbitrum : undefined;
+}
+
+/**
+ * The methods a bundler is asked for, taken from `abstractionkit` — the library the installed
+ * `@tetherto/wdk-wallet-evm-erc-4337` actually calls — rather than from a provider's docs.
+ *
+ * `eth_sendUserOperation` is behind the same flag as `eth_sendRawTransaction`, because it is
+ * the same decision: whether this service is willing to put a user's transaction on chain.
+ * Allowing a user operation while refusing a raw transaction would be an accident, not a
+ * policy.
+ */
+const BUNDLER_READ_METHODS = [
+  "eth_estimateUserOperationGas",
+  "eth_getUserOperationByHash",
+  "eth_getUserOperationReceipt",
+  "eth_supportedEntryPoints",
+  "eth_chainId",
+  "pimlico_getUserOperationGasPrice",
+] as const;
+
+export function allowedBundlerMethods(): readonly string[] {
+  return config.rpcAllowBroadcast ? [...BUNDLER_READ_METHODS, "eth_sendUserOperation"] : BUNDLER_READ_METHODS;
+}
+
+/**
+ * Paymaster methods, from the same source.
+ *
+ * `pimlico_getTokenQuotes` belongs to the ERC-20 fee mode, which Wally does not use on testnet
+ * — no USDT paymaster exists on Arbitrum Sepolia (verified against Pimlico's supported-token
+ * list, 5 Nov 2026). It is allowed anyway so the mainnet token mode needs no code change here,
+ * and because a quote is a read that spends nothing.
+ */
+export const PAYMASTER_METHODS = [
+  "pm_getPaymasterData",
+  "pm_getPaymasterStubData",
+  "pm_supportedEntryPoints",
+  "pm_chainId",
+  "pimlico_getTokenQuotes",
+] as const;

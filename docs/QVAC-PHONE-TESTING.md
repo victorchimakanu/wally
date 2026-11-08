@@ -1,5 +1,16 @@
 # Wally: phone-local QVAC and performance comparison
 
+> **Historical record — read with the date in mind.**
+>
+> Phone testing notes for QVAC. It is kept because it says what was true and checked at the time, and rewriting it
+> would destroy that. **It is not a description of Wally today.**
+>
+> Much of what it lists as missing now ships. As of 8 November 2026 the mobile app has wallet
+> creation and recovery, app lock, QR recipient scanning, a USDt balance and history, indexed
+> activity, CSV export of transaction history, chat-history clearing, licence notices, CI on
+> every pull request, and dependency automation. For the current state see the repository
+> [README](../README.md) and `FEATURE-AUDIT.md` at the workspace base.
+
 ## Current status, 7 October 2026
 
 The phone-local adapter, model comparison screen, lifecycle controls and Android native build configuration are implemented. QVAC SDK 0.21.0's text-only ARM64 mobile worker was generated and verified by the SDK plugin. This is **not a completed physical-device inference test or a compiled APK**.

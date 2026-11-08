@@ -1,3 +1,4 @@
+import { CustodyGuard } from '../components/WalletData';
 import React, { useState } from 'react';
 import { Redirect, router } from 'expo-router';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
@@ -35,6 +36,10 @@ export function WalletScreen() {
     { title: 'Trends', detail: '24h movers', icon: '0aca9.svg', color: c.amber, action: () => router.push({ pathname: '/market', params: { filter: 'Trends' } }) },
   ] as const;
   return <Screen tab="wallet" contentStyle={{ gap: 24 }}>
+    {/* Above the overview, not below it. In a refused split this screen falls back to the demo
+        wallet, which is safe but silent — the real balances simply vanish with no explanation.
+        The card says which wallet is missing and why. */}
+    <CustodyGuard />
     <WalletOverview />
     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>
       {tools.map(tool => <Pressable key={tool.title} accessibilityRole="button" accessibilityLabel={tool.title} onPress={tool.action} style={({ pressed }) => ({ width: '47.8%', flexGrow: 1, backgroundColor: tool.color, borderRadius: 24, paddingHorizontal: 16, paddingVertical: 14, gap: 6, opacity: pressed ? .75 : 1 })}>
@@ -50,13 +55,20 @@ export function ChatsScreen() {
   return <Screen title="Your chats" subtitle="Saved on this device" tab="chats">
     <Button label="Start a new chat" onPress={() => router.push({ pathname: '/chat', params: { id: newChat() } })} />
     <Label size={11} color={c.muted} weight="medium" style={{ marginTop: 16 }}>CONVERSATIONS</Label>
+    {/* Reachable since chat history became clearable (FEATURE-AUDIT §11.5): without this the
+        screen rendered a CONVERSATIONS heading above nothing at all. */}
+    {!state.chats.length && <Card><Label size={16} weight="semibold">No conversations</Label><Note>Your chat history is empty. Start a new chat and it will be saved here on this device.</Note></Card>}
     {state.chats.map(chat => <Item key={chat.id} icon={chat.id === 'sample-balance' ? 'wallet' : 'send'} title={chat.title} subtitle={chat.messages.length ? `${chat.messages.length} messages · Saved locally` : 'A fresh start'} onPress={() => router.push({ pathname: '/chat', params: { id: chat.id } })} />)}
     <Card style={{ backgroundColor: c.tint, marginTop: 30, minHeight: 151 }}><View style={shared.row}><Icon name="shield" /><Label size={13} weight="medium" style={shared.flex}>Your conversations stay here.</Label></View><Note>Chat records are stored on this device. They are not a complete record of your on-chain activity.</Note></Card>
     <Label size={11} color={c.muted} style={[shared.center, { marginTop: 32 }]}>Open a chat to continue where you left off.</Label>
   </Screen>;
 }
 
-export function HistoryScreen() { return useWallet().enabled ? <LiveHistoryScreen /> : <DemoHistoryScreen />; }
+export function HistoryScreen() {
+  const wallet = useWallet();
+  if (wallet.blocked) return <Screen title="Activity" subtitle="Unavailable in this build"><CustodyGuard /></Screen>;
+  return wallet.enabled ? <LiveHistoryScreen /> : <DemoHistoryScreen />;
+}
 function DemoHistoryScreen() {
   const { state } = useDemo();
   const [search, setSearch] = useState('');

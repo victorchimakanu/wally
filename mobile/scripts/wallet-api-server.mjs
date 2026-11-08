@@ -14,7 +14,7 @@
 import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { createWalletService, newSession } from './wallet-api-core.mjs';
+import { createWalletService, newSession, SAFE_MESSAGE } from './wallet-api-core.mjs';
 
 export function createWalletApi(service, { port = 3003, origins = ['http://127.0.0.1:8082', 'http://localhost:8082'] } = {}) {
   const sessions = new Map(), requests = new Map();
@@ -46,18 +46,22 @@ export function createWalletApi(service, { port = 3003, origins = ['http://127.0
       if (req.method === 'GET' && url.pathname === '/api/wallet') return send(200, await service.wallet());
       if (req.method === 'GET' && url.pathname === '/api/wallet/history') return send(200, await service.history());
       if (req.method === 'GET' && url.pathname === '/api/wallet/receipt') return send(200, await service.receipt(url.searchParams.get('chain'), url.searchParams.get('hash')));
-      if (req.method === 'POST' && ['/api/wallet/quote', '/api/wallet/confirm'].includes(url.pathname)) {
+      if (req.method === 'POST' && ['/api/wallet/quote', '/api/wallet/confirm', '/api/wallet/resolve'].includes(url.pathname)) {
         if (!String(req.headers['content-type'] ?? '').startsWith('application/json')) return send(415, { error: 'JSON is required.' });
         let body = ''; for await (const chunk of req) { body += chunk; if (Buffer.byteLength(body) > 4096) return send(413, { error: 'Request too large.' }); }
         let parsed; try { parsed = JSON.parse(body); } catch { return send(400, { error: 'Invalid JSON.' }); }
-        const result = url.pathname.endsWith('/quote') ? await service.quote(session, parsed) : await service.confirm(session, parsed);
+        const result = url.pathname.endsWith('/quote') ? await service.quote(session, parsed)
+          : url.pathname.endsWith('/resolve') ? await service.resolve(session, parsed)
+          : await service.confirm(session, parsed);
         return send(200, result);
       }
       return send(404, { error: 'Unknown API route.' });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Wallet request failed.';
-      // Only deliberate validation messages are exposed, never SDK errors which may include payloads.
-      const safe = /^(Enter |The amount|Choose a |Only |Unsupported |Not enough |This |Explicit |Confirm |Too many |A transfer|The balance|The wallet nonce|The recipient|The fee|The signed|The review|WDK rejected|RPC network mismatch|Invalid transaction)/.test(message);
+      // Only deliberate validation messages are exposed, never SDK errors which may include
+      // payloads. The pattern lives beside the messages in wallet-api-core.mjs, and a test
+      // fails when a refusal is added that it would silently hide.
+      const safe = SAFE_MESSAGE.test(message);
       return send(safe ? 400 : 503, { error: safe ? message : 'The wallet service could not complete this request. Check the connection and retry.' });
     }
   });

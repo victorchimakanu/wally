@@ -1,6 +1,13 @@
 # Wally — Architecture
 
-Wally is a production chat interface that lets users send crypto by typing natural language. This document explains how the two core libraries connect and why each design decision was made the way it was.
+> **Scope, 8 November 2026.** This describes the **reference app** — the two-library pattern
+> worked out in `src/`. It is accurate for that, and the invariants it explains are the ones the
+> phone inherits. It is **not** the product's architecture: the transports do not port. QVAC over
+> HTTP to a separate process and WDK as an MCP subprocess neither exist on a device, so that
+> layer is a rewrite. The product is `mobile/`, with `backend/` as a provider proxy that holds no
+> keys.
+
+Wally lets users send crypto by typing natural language. This document explains how the two core libraries connect and why each design decision was made the way it was.
 
 ## The two-library model
 

@@ -40,8 +40,18 @@ function row(hash: string, seconds: number): Record<string, unknown> {
   };
 }
 
-/** Routes every stubbed call by the `chainid` Etherscan V2 selects the chain with. */
-function stubByChain(handler: (chainId: string, url: string) => { status: number; body: unknown }) {
+/**
+ * Routes every stubbed call by the `chainid` Etherscan V2 selects the chain with.
+ *
+ * Token queries answer empty unless a case opts in with `tokens: true`. Etherscan keeps
+ * `txlist` and `tokentx` apart — a native query never returns an ERC-20 transfer — so a stub
+ * that answered both from one handler would be modelling a provider that does not exist, and
+ * every native-history expectation would silently gain a duplicate row.
+ */
+function stubByChain(
+  handler: (chainId: string, url: string) => { status: number; body: unknown },
+  { tokens = false }: { tokens?: boolean } = {},
+) {
   const calls: string[] = [];
   vi.stubGlobal(
     "fetch",
@@ -49,6 +59,12 @@ function stubByChain(handler: (chainId: string, url: string) => { status: number
       const url = String(input);
       calls.push(url);
       const chainId = new URL(url).searchParams.get("chainid") ?? "";
+      if (!tokens && new URL(url).searchParams.get("action") === "tokentx") {
+        return new Response(JSON.stringify(etherscanOk([])), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
       const { status, body } = handler(chainId, url);
       return new Response(JSON.stringify(body), {
         status,
@@ -70,8 +86,15 @@ describe("/v1/history serves both chains in one call", () => {
     expect(response.statusCode).toBe(200);
 
     const body = response.json();
-    // Both chains were queried, not just a default one.
-    expect(calls).toHaveLength(2);
+    // Both chains were queried, not just a default one — and Arbitrum is asked for its pinned
+    // token as well, which Etherscan keeps in a separate list. Asserting the shape rather than
+    // a count, so adding a token to another chain fails here with a readable diff instead of
+    // an off-by-one.
+    const actions = calls.map((url) => {
+      const params = new URL(url).searchParams;
+      return `${params.get("action")}:${params.get("chainid")}`;
+    }).sort();
+    expect(actions).toEqual(["tokentx:421614", "txlist:11155111", "txlist:421614"]);
     expect(body.items.map((item: { chain: string }) => item.chain)).toEqual(["arbitrum", "ethereum"]);
     expect(body.errors).toEqual([]);
     // The shape parseHistory() in mobile/src/services/wallet-api.ts requires.
@@ -372,7 +395,16 @@ describe("regressions found by auditing against the app, 22 Oct 2026", () => {
     // A custom header makes the browser preflight, and a preflight that does not list
     // x-wally-key makes it refuse the request. The service requires that header off
     // loopback, so omitting it here breaks every browser request once a key is set.
-    const response = await app.inject({
+    // The allowlist is empty by default, so this builds a server that actually allows the
+    // origin it then sends. It used to use the shared `app` and a bare 127.0.0.1 origin,
+    // which passed only on a machine whose gitignored .env.local happened to list it — and
+    // so asserted nothing on a clean checkout. CI found that on its first run.
+    vi.resetModules();
+    vi.stubEnv("ALLOWED_ORIGINS", "http://127.0.0.1:8082");
+    const { buildServer: build } = await import("../src/server.js");
+    const cors = build();
+
+    const response = await cors.inject({
       method: "OPTIONS",
       url: "/v1/market?currency=usd",
       headers: {
@@ -381,6 +413,9 @@ describe("regressions found by auditing against the app, 22 Oct 2026", () => {
         "access-control-request-headers": "x-wally-key",
       },
     });
+    vi.unstubAllEnvs();
+    vi.resetModules();
+
     expect(response.statusCode).toBe(204);
     expect(response.headers["access-control-allow-headers"]).toContain("x-wally-key");
   });
@@ -419,5 +454,96 @@ describe("regressions found by auditing against the app, 22 Oct 2026", () => {
     } else {
       expect(models.statusCode, "must not be published from a deployed instance").toBe(404);
     }
+  });
+});
+
+describe("history pagination", () => {
+  /** Returns `count` distinct Etherscan rows, so a full page can be simulated. */
+  function rows(count: number, seed: string) {
+    return Array.from({ length: count }, (_, i) => ({
+      hash: "0x" + `${seed}${i}`.padStart(64, "0"),
+      from: ADDR("1"), to: ADDR("2"), value: "1000000000000000000",
+      gasUsed: "21000", gasPrice: "1000000000",
+      timeStamp: String(1_700_000_000 - i), blockNumber: String(900 - i), isError: "0",
+    }));
+  }
+
+  it("asks the indexer for the page the caller requested", async () => {
+    const calls = stubByChain(() => ({ status: 200, body: etherscanOk(rows(2, "a")) }));
+    const response = await app.inject({ method: "GET", url: `/v1/history?chain=ethereum&address=${ADDR("3")}&page=4` });
+
+    expect(response.statusCode).toBe(200);
+    expect(calls[0]).toContain("page=4");
+    expect(response.json().page).toBe(4);
+  });
+
+  it("defaults to page 1 and reports when there is more", async () => {
+    // A full page from one chain means there is probably more behind it.
+    stubByChain(() => ({ status: 200, body: etherscanOk(rows(50, "b")) }));
+    const full = await app.inject({ method: "GET", url: `/v1/history?chain=ethereum&address=${ADDR("4")}` });
+    expect(full.json().page).toBe(1);
+    expect(full.json().hasMore, "a full page implies more history exists").toBe(true);
+
+    stubByChain(() => ({ status: 200, body: etherscanOk(rows(3, "c")) }));
+    const partial = await app.inject({ method: "GET", url: `/v1/history?chain=ethereum&address=${ADDR("5")}` });
+    expect(partial.json().hasMore, "a short page is the end").toBe(false);
+  });
+
+  it("refuses a page that is not a sensible number", async () => {
+    for (const bad of ["0", "-1", "1.5", "abc", "999999"]) {
+      const response = await app.inject({ method: "GET", url: `/v1/history?chain=ethereum&address=${ADDR("6")}&page=${bad}` });
+      expect(response.statusCode, `page=${bad} must be refused`).toBe(400);
+    }
+  });
+
+  it("caches each page separately, so page 2 is not served page 1", async () => {
+    const calls = stubByChain(() => ({ status: 200, body: etherscanOk(rows(2, "d")) }));
+    // A distinct address: the history cache is module-level and shared across this file, and
+    // an earlier case already warmed ADDR("7") at page 1, which made this look like a cache
+    // bug when it was a colliding fixture.
+    const address = "0x" + "9a".repeat(20);
+    await app.inject({ method: "GET", url: `/v1/history?chain=ethereum&address=${address}&page=1` });
+    await app.inject({ method: "GET", url: `/v1/history?chain=ethereum&address=${address}&page=2` });
+    // Two different questions, so two upstream calls despite the same address.
+    expect(calls).toHaveLength(2);
+    expect(calls[1]).toContain("page=2");
+  });
+
+  it("still never returns more than parseHistory accepts", async () => {
+    stubByChain(() => ({ status: 200, body: etherscanOk(rows(50, "e")) }));
+    const response = await app.inject({ method: "GET", url: `/v1/history?address=${ADDR("8")}` });
+    // Both chains return 50 each; the merged response must still cap at 50.
+    expect(response.json().items.length).toBeLessThanOrEqual(50);
+  });
+});
+
+describe("the stop button", () => {
+  it("reports sending enabled by default, so a forgotten variable cannot disable the wallet", async () => {
+    const response = await app.inject({ method: "GET", url: "/v1/status" });
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body.sendingEnabled, "the safe state must also be the default").toBe(true);
+    expect(body.reason).toBe("");
+    expect(body.version).toBe(1);
+  });
+
+  it("is never cached, because a stop button nobody can refresh is not one", async () => {
+    const response = await app.inject({ method: "GET", url: "/v1/status" });
+    expect(response.headers["cache-control"]).toContain("no-store");
+  });
+
+  it("turns sending off for every app when a reason is set", async () => {
+    vi.resetModules();
+    vi.stubEnv("SENDING_DISABLED_REASON", "A send bug is being fixed. Your funds are untouched.");
+    const { buildServer: build } = await import("../src/server.js");
+    const disabled = build();
+
+    const body = (await disabled.inject({ method: "GET", url: "/v1/status" })).json();
+    expect(body.sendingEnabled).toBe(false);
+    // The text is shown to users verbatim, so it has to survive intact.
+    expect(body.reason).toBe("A send bug is being fixed. Your funds are untouched.");
+
+    vi.unstubAllEnvs();
+    vi.resetModules();
   });
 });

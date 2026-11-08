@@ -1,5 +1,16 @@
 # QVAC speed and delivery — verified 7 October 2026
 
+> **Historical record — read with the date in mind.**
+>
+> QVAC performance measurements on one developer machine. It is kept because it says what was true and checked at the time, and rewriting it
+> would destroy that. **It is not a description of Wally today.**
+>
+> Much of what it lists as missing now ships. As of 8 November 2026 the mobile app has wallet
+> creation and recovery, app lock, QR recipient scanning, a USDt balance and history, indexed
+> activity, CSV export of transaction history, chat-history clearing, licence notices, CI on
+> every pull request, and dependency automation. For the current state see the repository
+> [README](../README.md) and `FEATURE-AUDIT.md` at the workspace base.
+
 Wally's Android simulator now uses a warm Qwen3 1.7B Q4_0 model on this computer's GTX 1650 through Vulkan. The server remains local at 127.0.0.1:11434. CPU mode remains available. No CUDA runtime or cloud AI was added.
 
 ## Measured results

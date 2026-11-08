@@ -1,14 +1,14 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
-type Recipient = { id: string; name: string; address: string; network: 'Arbitrum' | 'Ethereum' };
-type Preferences = { name: string; currency: string; saved: string[]; recipients: Recipient[] };
+import { parsePreferences, droppedNotice, toStored, type Preferences, type Recipient } from '../services/preferences-store';
+export type { Preferences, Recipient };
 const defaults: Preferences = { name: 'Daniel', currency: 'USD', saved: ['BTC', 'ETH'], recipients: [
   { id: 'victor', name: 'Victor', address: '0x' + '1'.repeat(40), network: 'Arbitrum' },
   { id: 'emmy', name: 'Emmy', address: '0x' + '6'.repeat(40), network: 'Ethereum' },
   { id: 'daniel', name: 'Daniel', address: '0x' + '4'.repeat(40), network: 'Arbitrum' },
 ] };
 const key = 'wally.frontend-preferences.v1';
-const Context = createContext<{ preferences: Preferences; updatePreferences: (patch: Partial<Preferences>) => void; error: string } | null>(null);
+const Context = createContext<{ preferences: Preferences; updatePreferences: (patch: Partial<Preferences>) => void; resetPreferences: () => void; error: string } | null>(null);
 export function PreferencesProvider({ children }: React.PropsWithChildren) {
   const [preferences, setPreferences] = useState(defaults);
   const [ready, setReady] = useState(false);
@@ -18,16 +18,34 @@ export function PreferencesProvider({ children }: React.PropsWithChildren) {
     let alive = true;
     AsyncStorage.getItem(key).then(raw => {
       if (!alive || !raw) return;
-      const parsed = JSON.parse(raw) as Preferences;
-      if (typeof parsed.name !== 'string' || parsed.name.length > 40 || !['USD', 'NGN', 'EUR'].includes(parsed.currency) || !Array.isArray(parsed.saved) || !parsed.saved.every(symbol => ['BTC', 'ETH', 'SOL', 'USDT'].includes(symbol)) || !Array.isArray(parsed.recipients) || !parsed.recipients.every(recipient => typeof recipient.id === 'string' && typeof recipient.name === 'string' && /^0x[\da-fA-F]{40}$/.test(recipient.address) && ['Arbitrum', 'Ethereum'].includes(recipient.network))) throw new Error('Invalid preferences');
-      setPreferences(parsed);
-    }).catch(() => { if (alive) setError('Saved preferences could not be loaded.'); }).finally(() => { if (alive) setReady(true); });
+      // Per field, not all-or-nothing. The old version validated the whole record in one
+      // expression and threw, and this catch replaced every saved recipient with the samples.
+      // One malformed address cost a user their entire address book.
+      const { preferences: loaded, dropped } = parsePreferences(JSON.parse(raw), defaults);
+      setPreferences(loaded);
+      const notice = droppedNotice(dropped);
+      if (notice) setError(notice);
+    }).catch(() => { if (alive) setError('Saved preferences could not be read on this device. Nothing was changed.'); }).finally(() => { if (alive) setReady(true); });
     return () => { alive = false; };
   }, []);
   useEffect(() => {
     if (!ready) return;
-    writes.current = writes.current.then(() => AsyncStorage.setItem(key, JSON.stringify(preferences))).catch(() => setError('Preferences could not be saved on this device.'));
+    writes.current = writes.current.then(() => AsyncStorage.setItem(key, JSON.stringify(toStored(preferences)))).catch(() => setError('Preferences could not be saved on this device.'));
   }, [preferences, ready]);
-  return <Context value={{ preferences, updatePreferences: patch => setPreferences(previous => ({ ...previous, ...patch })), error }}>{children}</Context>;
+  return <Context value={{
+    preferences,
+    updatePreferences: patch => setPreferences(previous => ({ ...previous, ...patch })),
+    /**
+     * Forget the saved recipients, name and currency.
+     *
+     * Deleting the stored key is not enough on its own and this is the reason why: these
+     * values live in React state as well, and the effect above rewrites them on the next
+     * change. Clear storage without clearing memory and the address book is back the moment
+     * the user touches anything — a deletion that undoes itself. Called by the reset flow
+     * before it touches storage, so that whatever lands last is the defaults.
+     */
+    resetPreferences: () => setPreferences(defaults),
+    error,
+  }}>{children}</Context>;
 }
 export function usePreferences() { const value = useContext(Context); if (!value) throw new Error('Missing preferences provider'); return value; }

@@ -1,0 +1,147 @@
+# Continuous integration.
+#
+# Nineteen pull requests were merged into this repository with no automated check of any kind.
+# 135 mobile tests, 67 backend tests and a mutation harness that caught seven untested
+# access-control bugs all existed, and all of them ran only when somebody remembered. On a
+# money app that is the cheapest safety net there is and it was not deployed.
+#
+# Three independent jobs, one per thing that can break on its own. They run in parallel and
+# none depends on another, so a failure says which part of the repository is broken rather than
+# stopping the first time anything goes wrong.
+#
+# Actions are pinned to commit SHAs, not tags. A tag can be moved; a tag pointing at new code
+# in a workflow with repository access is a supply-chain path into a wallet. The readable
+# version is in the comment beside each pin, and bumping one means resolving the new SHA
+# deliberately.
+name: CI
+
+on:
+  pull_request:
+  # Integration branches too, not just main. Two pull requests can each be green and still
+  # break once merged — which is precisely what happened on 5 November: `correctness` went red
+  # on a merge and the only thing that noticed was an unrelated pull request's run.
+  push:
+    branches: [main, correctness]
+
+# A new push supersedes the run in progress for the same ref. Without this, a branch pushed
+# three times in a minute queues three full runs and the mutation harness is 94 seconds each.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: backend — provider proxy
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          # The floor declared in package.json engines. CI tests the version the package claims
+          # to support, which is the only version the claim is worth anything about.
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+      # The harness that matters most here. A green suite proved almost nothing once: with 52
+      # tests passing, seven mutations survived — every API key accepted, the origin allowlist
+      # gone, the rate limiter never refusing. It takes ~94s, which is worth paying on every
+      # pull request that touches the service fronting the chain nodes.
+      - run: npm run test:mutation
+
+      # A mutation that is not cleaned up leaves a security guard disabled in the working tree.
+      # That has happened. If the harness ever exits without restoring, say so loudly here
+      # rather than letting a later step run against mutated source.
+      - name: the mutation harness must leave the tree clean
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "::error::the mutation harness did not restore the working tree"
+            git status --porcelain
+            exit 1
+          fi
+
+  mobile:
+    name: mobile — the app
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - run: npm ci
+
+      # The WDK worklet bundle is generated, 6MB, and gitignored — so a fresh checkout has no
+      # .wdk/ at all, and `wallet-worklet.native.ts` imports it. That typechecked on the
+      # machine that wrote it and nowhere else, which is exactly what CI caught on its first
+      # merge. Generating it takes 2 seconds and has a second benefit: it validates
+      # wdk.config.cjs, a file that was silently broken for weeks because nothing ran it.
+      - run: npm run wdk:generate
+
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+
+      # The licence notices are generated from the production dependency tree. Adding a
+      # dependency without regenerating them means the app ships a notice list that does not
+      # match what it actually contains, which is the compliance problem the generator exists
+      # to avoid. This is the check that makes the generated file trustworthy.
+      - run: npm run notices:check
+
+  reference:
+    name: reference app — kept, so keep it building
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: package-lock.json
+      # postinstall runs scripts/dedupe-wdk.mjs, which is a correctness requirement rather than
+      # an optimisation: duplicate wallet classes fail the Aave package's instanceof check.
+      - run: npm ci
+      - run: npm run typecheck
+
+      # The reference app is not the product, but it holds the agent invariants the phone will
+      # inherit — amountAppearsInText(), the confirmation protocol, the classifier. Its tests
+      # are the only place those are checked, so they keep running.
+      # test/integration/** stays excluded: it needs a live QVAC server and a seed.
+      - run: npm test
+
+  # Repository configuration that no package's test suite would ever look at. Separate and
+  # dependency-free, so it stays green in seconds and says plainly which thing is wrong.
+  repo:
+    name: repo — the config nothing else checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: '22'
+      # No npm ci: this check reads files and shells out to git, nothing more. Installing the
+      # reference app's dependencies to validate a YAML file would be a minute for no reason.
+      #
+      # What it is for: `ignore` in dependabot.yml silences security updates as well as version
+      # updates unless each entry is scoped with update-types. The file therefore looks
+      # repetitive, and tidying it would switch off security updates for the wallet's runtime
+      # without anything saying so — the advisory still appears on the alerts page, looking
+      # handled. It also fails when a committed package.json has no entry watching it.
+      - run: node scripts/check-dependabot.mjs

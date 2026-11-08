@@ -1,19 +1,60 @@
-# Wally mobile frontend
+# Wally mobile
 
-**Phone-local test setup, 7 October 2026:** native QVAC model selection, lifecycle controls and a two-model performance comparison are now implemented. See [the phone testing guide](../docs/QVAC-PHONE-TESTING.md). The connected Android 10 / roughly 4 GB Samsung phone fails QVAC's documented Android 12 support floor, so no on-phone model benchmark or APK installation has been verified. The Expo Go/computer model path remains available with `npm start` or `npm run android:local-ai`; phone builds use the separate `phone:*` commands.
+The product. An Expo / React Native app implementing the
+[WallyUI design](https://www.figma.com/design/W3cr11GwRSFIO6AP3PYaYQ/WallyUI?node-id=0-1).
 
-An Android-first React Native / Expo app implementing the active [WallyUI design](https://www.figma.com/design/W3cr11GwRSFIO6AP3PYaYQ/WallyUI?node-id=0-1). It is a frontend wallet preview with fictional balances and simulated transactions. Chat uses scripted replies by default, or a real local QVAC model through the opt-in development adapter. The desktop backend is not needed.
+## What this is, as of 8 November 2026
 
-**Frontend update, 7 October 2026:** Inter typography, the shaped wallet card, Wallet/Chat switch, shared menu drawer, persistent draft dismissal, sample market search/filter/watchlist, asset details, editable profile, local address book, review balance impact, and the original receive QR now use WallyUI. The existing QVAC connection, manual sends, quote expiry, refunds, offline controls and phone performance tools remain connected. Market fixtures cover BTC, ETH and SOL; stablecoin prices and charts beyond the sample Bitcoin 24h render are explicitly unavailable. Wallet creation, real authentication, camera scanning and signing remain future integrations. The desktop browser remains a preview of the Android screens, rather than the separate Figma desktop app.
+**It is no longer a fictional preview.** This file used to open by calling it "a frontend wallet
+preview with fictional balances and simulated transactions" and stating that "no real seed,
+signing, blockchain RPC, WDK, authentication" existed in it. All of that is now wrong, and it
+was the first thing anyone read.
+
+The app runs in **two modes, decided by configuration**:
+
+| | |
+|---|---|
+| **Demo** — `EXPO_PUBLIC_WALLY_API_URL` unset | Fictional balances, simulated transfers, scripted chat. Everything is labelled as such on screen |
+| **Live testnet** — that variable set | Real Sepolia balances and addresses, real signed ETH transfers, indexed history, real market prices |
+
+In live mode the keys are held by the loopback dev wallet server on **your computer**, under
+`internal/testnet-wallet/`. That is a development scaffold. The on-device keystore that replaces
+it — `wallet-keystore.ts` over the WDK Bare worklet — is written and type-checked against WDK's
+real HRPC types and **has never run**: it needs a development build on a physical phone. The two
+are **different wallets with different seeds**, and conflating them is the easiest serious
+mistake to make here.
+
+**Ships today:** balances and addresses on both test networks · a **USDt balance and USDt
+history** on Arbitrum · indexed activity · market prices in USD, NGN and EUR · chat with a human
+gate on every spend · **native ETH transfers** with review, fee quote, confirmation and receipt ·
+wallet creation, recovery phrase, restore and removal · app lock behind fingerprint, face or
+passcode · QR recipient scanning · address book · **CSV export of transaction history** ·
+**clearing chat history** · the open-source licences the app must carry.
+
+**Not built:** sending USDt (read-only for now — the outstanding half of V1) · the on-device
+keystore actually running · gasless sponsorship (off until an operator configures it; no USDT
+paymaster exists on Arbitrum Sepolia regardless) · mainnet.
+
+**One thing that will cost you an hour if nobody says it.** AI chat only works under Metro.
+`store.tsx` reads the model endpoint as `__DEV__ ? process.env.EXPO_PUBLIC_QVAC_URL : ''`, so a
+production bundle — anything from `npm run export:web` — has no endpoint and falls back to
+scripted replies, whatever else is running. Chat also goes through the backend's passthrough on
+8080 rather than to QVAC on 11434, because QVAC omits the CORS header on streamed replies. So
+chat needs **three** things up: the model, the backend, and Metro.
+
+**Checks, 8 November 2026:** 249 tests, TypeScript and ESLint clean. CI runs them on every pull
+request.
+
+Terminal-by-terminal setup is in [docs/RUNNING-LOCALLY.md](../docs/RUNNING-LOCALLY.md).
 
 ## Run
 
 Use Node.js 22.13+ (verified here with Node 24).
 
-```powershell
-cd "C:\Users\kfdos\Desktop\Web Projects\wally\mobile"
+```bash
+cd mobile
 npm ci
-npm start
+npm run start:local     # Metro on 8082, which is the only origin the services accept
 ```
 
 Open the project with a compatible Expo Go app on Android using the terminal QR code, with phone and computer on the same network. The frontend uses Expo-supported native modules. A physical Android run has not yet been verified. If another Metro server occupies the default port, use `npm start -- --port 8082`.
@@ -39,7 +80,7 @@ The browser uses a centered phone preview on wide screens and a full-width layou
 
 Try `Send 25 USDT on Arbitrum to 0x1111111111111111111111111111111111111111`, or use the example buttons. Settings → Demo controls exposes offline mode, five-second quotes, and a rejected transfer.
 
-Only USDT on Arbitrum is simulated for sends. ETH and BTC are illustrative balance rows. No real seed, signing, blockchain RPC, WDK, authentication, swaps, bridge, or lending integration exists in this app. Native model download and lifecycle controls are implemented but have not been verified on a supported physical phone. QVAC development integration is described below. Recovery and local-model screens explain their current status. Do not enter real recovery phrases or fund sample addresses.
+**The paragraph that used to be here said no real seed, signing, blockchain RPC, WDK or authentication existed in this app. That was true in October and is not true now** — see the top of this file. What is still absent: swaps, bridging and lending. The *demo* mode described in this section simulates USDT sends on Arbitrum with ETH and BTC as illustrative rows; live mode does none of that. Native model download and lifecycle controls are implemented but have not been verified on a supported physical phone. QVAC development integration is described below. Recovery and local-model screens explain their current status. Do not enter real recovery phrases or fund sample addresses.
 
 Pending transfers simulate settlement after four seconds; this timer is exclusively demo behavior. Confirmed sends deduct amount plus a fictional 0.02 USDT fee. Failed sends refund both. Repeated confirmation of the same quote cannot debit twice. Existing pending transfers reconcile from their saved timestamp on reopening the preview.
 
@@ -72,6 +113,11 @@ npm run export:web
 Exports go to `dist/android` and `dist/web`. An Android JavaScript/Hermes export is **not an APK**. `eas.json` includes an internal APK preview profile for a later authenticated EAS build (`npx eas-cli@latest build --platform android --profile preview`). No cloud build or publication has been performed.
 
 ## Verification and design adaptations
+
+> **Everything from here down is a dated engineering log, 27 September to 7 October 2026.** It is
+> kept as a record of what was checked and when. It describes the app as it was during the demo
+> phase and is **not** a description of the app today — read the top of this file for that.
+
 
 Verified 27 September 2026: TypeScript, ESLint, five behavior tests, Expo Doctor (21/21), Android and web exports, and browser interaction checks for form validation, confirmed sending, balance persistence, receive copying, scripted balance chat, offline send blocking, and quote expiry.
 

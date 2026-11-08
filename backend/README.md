@@ -25,7 +25,13 @@ Signing happens on the phone — see [`../docs/ADR-001-key-custody.md`](../docs/
 GET  /health                                  liveness; ?deep=1 also pings each chain
 GET  /v1/rpc/methods                          permitted JSON-RPC methods, and which are cached
 POST /v1/rpc/:chain                           JSON-RPC passthrough, allowlisted, read-cached
+POST /v1/bundler/:chain                   ERC-4337 bundler, Arbitrum only, method allowlist
+POST /v1/paymaster/:chain                 paymaster (sponsorship), Arbitrum only, never cached
+GET  /v1/gasless                          whether gasless is configured, and the allowlists
+POST /v1/watch/:chain/:hash               watch a submitted transfer until the chain decides
+GET  /v1/watch/:chain/:hash               what it has decided, or 404 if nothing is watching
 GET  /v1/history?address=[&chain=]            address transactions, both chains by default
+                                          includes ERC-20 transfers for pinned tokens (USDt, Arbitrum)
 GET  /v1/market?currency=usd|ngn|eur          watchlist prices
 GET  /v1/market/chart?id=&days=&currency=     price history
 GET  /v1/models                               QVAC model list (passthrough)
@@ -98,6 +104,39 @@ Cache keys include the params, so two addresses never share an answer, and the c
 JSON-RPC `id` is substituted back on a hit. A JSON-RPC error is never cached — it may be
 transient — and is passed through untouched rather than turned into a 5xx. Every response
 carries `x-wally-cache: hit | miss | bypass`.
+
+---
+
+## The receipt watcher, and the only state this service keeps
+
+A phone sleeps mid-confirmation. A transfer is submitted, the screen locks, and nothing checks
+the receipt until someone opens the app — so Activity shows "pending" for as long as the phone
+is in a pocket, and on the public Sepolia nodes the eventual check is slow too: **11 to 12
+seconds for one call, measured 8 November 2026.**
+
+`POST /v1/watch/:chain/:hash` registers a hash and asks the chain immediately. A background
+interval re-asks every 15 seconds until the chain decides, then stops. `GET` returns what is
+known, or **404 with `watching: false`** — "I have no record" and "it has not landed" are
+different claims and the app has to be able to tell them apart.
+
+**It notifies nobody.** Push needs a device token and therefore a development build, which has
+never been made. This is what will feed that; today it makes the answer ready before the app
+asks.
+
+Two rules worth keeping:
+
+- **A missing receipt is pending, never failure.** It is the ordinary answer for a transaction
+  accepted and not yet in a block, and calling it failed would tell someone their money did not
+  move when it is about to. A node that is down leaves a transfer pending for the same reason:
+  not being able to ask is not the same as "no".
+- **This is the first state the service has ever held**, so it is held as narrowly as possible.
+  Hashes are public chain data. The list is in memory, never touches disk, is capped at 500,
+  and a watch nobody asks about for 30 minutes is dropped whatever its state. A restart forgets
+  everything, which is correct rather than a limitation. When the list is full a **settled**
+  watch is evicted before an unsettled one, because a settled answer has already been useful.
+
+Five mutations cover it, including a missing receipt reading as failed and the list growing
+without a ceiling.
 
 ---
 
@@ -207,6 +246,9 @@ npm run test:mutation          # proves the tests actually catch the bugs they c
 npm run typecheck
 ```
 
+Measured 8 November 2026: **95 tests**, and the mutation harness at **37 killed, 0 survived**.
+CI runs both on every pull request and on pushes to `main` and `correctness`.
+
 ### `npm run test:mutation`
 
 Applies a bug to one line at a time and checks the suite notices. A mutation that survives
@@ -262,7 +304,7 @@ Point the app at it with `EXPO_PUBLIC_WALLY_PROXY_URL` in `mobile/.env.local`.
 
 ## Open decisions
 
-Two choices are outstanding. Both are config-level here, so neither needs an app release.
+One choice is outstanding. It is config-level here, so it needs no app release.
 
 ### 1. Which transaction indexer? — DECIDED: Etherscan V2
 
@@ -287,6 +329,14 @@ the live shape was unconfirmed. It now is:
 
 Every record was validated against the exact rules the app enforces: the amount and fee
 expression, the `${explorer}/tx/${hash}` form, hash shape, status enum, and the 50-item cap.
+
+**A trap worth knowing about, found 8 November 2026.** This worked from the day the key was
+set, and the app said otherwise. The Activity screen's source line was a hardcoded string
+reading "Blockscout and local receipts", ignoring the `source` the response actually carried —
+so a correctly configured stack showed indexed Etherscan history while crediting the provider
+that had 403'd, and disclaiming the token transfers it was displaying. If you are checking
+whether this backend is being used, trust the **network panel** or `x-wally-cache`, not an app
+build older than 8 November. Fixed in the app in PR #37.
 
 The original comparison is kept below for the record.
 
@@ -321,6 +371,10 @@ signature — so this is an availability and abuse question, not a safety one.
 **Recommendation: through the proxy, with a tighter rate limit on that one method.** It keeps
 provider keys out of the app and gives one place to see failed submissions. Currently **off**;
 flip `RPC_ALLOW_BROADCAST` when decided.
+
+Verified off on 8 November 2026: `eth_sendRawTransaction`, `eth_sendTransaction`, `eth_sign`,
+`eth_signTransaction`, `personal_sign` and `eth_accounts` each answer **403** from a running
+instance, and `/health` reports `broadcastEnabled: false`.
 
 ---
 
