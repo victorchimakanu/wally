@@ -297,6 +297,13 @@ export const config = build();
 export function rpcUrl(chain: Chain): string {
   return chain === "arbitrum" ? config.rpcArbitrum : config.rpcEthereum;
 }
+/**
+ * Which indexer host serves this chain.
+ *
+ * Used only by the Blockscout fallback — Etherscan V2 reaches both chains through one host and
+ * a `chainid` parameter, so it needs no per-chain URL. This function had no callers for weeks
+ * while `indexer.ts` wrote the same ternary inline; they are one decision again.
+ */
 export function indexerUrl(chain: Chain): string {
   return chain === "arbitrum" ? config.indexerArbitrum : config.indexerEthereum;
 }

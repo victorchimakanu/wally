@@ -205,3 +205,58 @@ test('a USDt review parses at six decimals, not eighteen', async () => {
   // An asset this app has no decimals for is refused rather than guessed at.
   assert.throws(() => parseQuote({ ...base, symbol: 'DOGE', total: '25 DOGE' }), /cannot display/);
 });
+
+/**
+ * "Send max" means two different sums.
+ *
+ * `maxSendable` has existed, tested, with no caller since it was written — the third piece of
+ * written-tested-unwired code in this app, after the spend gate and the remote stop. Both of
+ * those turned out to be hiding a real bug, so this one is wired rather than left.
+ *
+ * A coin pays its own fee and a token does not, and getting that backwards either strands a
+ * user's entire token balance or produces a transfer that cannot pay for itself.
+ */
+test('send max on a token is the whole balance', async () => {
+  const { sendableMax } = await import(`../src/services/wallet-api.ts?max=${Date.now()}`);
+  // The fee comes out of ETH. Reserving any USDt would strand it for no reason.
+  assert.equal(sendableMax({ balanceBase: 25_000_000n, native: false }), 25_000_000n);
+  // And it needs no gas price at all, so it works with no backend configured.
+  assert.equal(sendableMax({ balanceBase: 25_000_000n, native: false, gasPriceWei: undefined }), 25_000_000n);
+});
+
+test('send max on the coin holds back the fee and a buffer', async () => {
+  const { sendableMax, maxSendable } = await import(`../src/services/wallet-api.ts?max2=${Date.now()}`);
+  const balance = 10n ** 18n;             // 1 ETH
+  const gasPrice = 10n ** 9n;             // 1 gwei
+  const max = sendableMax({ balanceBase: balance, native: true, gasPriceWei: gasPrice });
+
+  assert.equal(max, maxSendable(balance, gasPrice));
+  assert.ok(max < balance, 'something must stay behind to pay the fee');
+  // fee is 21000 gwei; the buffer is 20% on top, so 25200 gwei is withheld in total.
+  assert.equal(balance - max, 25_200n * 10n ** 9n);
+});
+
+test('an unknown gas price yields nothing rather than a guess', async () => {
+  const { sendableMax } = await import(`../src/services/wallet-api.ts?max3=${Date.now()}`);
+  // Offering a figure that the quote then rejects is worse than not offering one.
+  assert.equal(sendableMax({ balanceBase: 10n ** 18n, native: true }), 0n);
+  assert.equal(sendableMax({ balanceBase: 10n ** 18n, native: true, gasPriceWei: 0n }), 0n);
+});
+
+test('a balance too small to cover its own fee yields nothing', async () => {
+  const { sendableMax } = await import(`../src/services/wallet-api.ts?max4=${Date.now()}`);
+  assert.equal(sendableMax({ balanceBase: 1000n, native: true, gasPriceWei: 10n ** 9n }), 0n);
+  assert.equal(sendableMax({ balanceBase: 0n, native: true, gasPriceWei: 10n ** 9n }), 0n);
+  assert.equal(sendableMax({ balanceBase: 0n, native: false }), 0n);
+});
+
+test('the figure send max produces is one the typed-amount parser accepts', async () => {
+  // The coupling that matters: a max the user cannot actually submit is a broken button.
+  const { sendableMax, formatUnits, parseSendAmount } = await import(`../src/services/wallet-api.ts?max5=${Date.now()}`);
+  const max = sendableMax({ balanceBase: 5n * 10n ** 18n, native: true, gasPriceWei: 10n ** 9n });
+  const typed = formatUnits(max, 18, 18);
+  assert.doesNotThrow(() => parseSendAmount(typed, 18, 'ETH'));
+
+  const tokenMax = sendableMax({ balanceBase: 25_000_000n, native: false });
+  assert.doesNotThrow(() => parseSendAmount(formatUnits(tokenMax, 6, 6), 6, 'USDT'));
+});
