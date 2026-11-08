@@ -261,6 +261,20 @@ build-tools. Java is already installed at `/usr/bin/java`, so the JDK blocker no
 
 ## Running it with no GUI, and driving it
 
+> **A static export cannot do AI chat. Nothing you start will change that.**
+>
+> `src/demo/store.tsx` reads the model endpoint as
+> `const endpoint = __DEV__ ? process.env.EXPO_PUBLIC_QVAC_URL ?? '' : '';`
+>
+> `npm run export:web` is a production build, so `__DEV__` compiles to `false`, the endpoint
+> is the empty string, and chat falls back to scripted replies **even with QVAC running and
+> the backend up**. That is deliberate — a production bundle must not call a development AI
+> server — and it is not a failure you can debug from the outside: the app simply never asks.
+>
+> So use this path for the wallet, for Activity, for the market, for export, for anything that
+> is not the assistant. **For chat, run Metro** (`npm run start:local`). It cost an hour on
+> 8 November to work this out from the symptom.
+
 Useful on a server, in a container, or on any machine where Metro will not start. It needs no
 Metro and no file watchers.
 
@@ -355,13 +369,14 @@ something broke.
 | `Activity` says it needs an indexer API key | Expected until `ETHERSCAN_API_KEY` is set in `backend/.env.local`. Activity now reads indexed history from the backend; without a key it falls back to transfers sent from this device and says why. See `BACKEND-ACTIONS-NEEDED.md` |
 | `Activity` names Blockscout as its source | The backend is not configured or its call failed, so history came from the dev wallet server, where Blockscout returns 403 for Arbitrum Sepolia. Set `EXPO_PUBLIC_WALLY_PROXY_URL` and restart Metro. **This line is only trustworthy from 8 Nov 2026**: before that it was a hardcoded string that said Blockscout even when the data came from Etherscan through the backend, so an older build naming Blockscout proves nothing |
 | Settings → Connection says Activity comes from "Local wallet server" | The proxy is being bypassed for history. Same fix: set `EXPO_PUBLIC_WALLY_PROXY_URL` and **restart Metro** |
+| **"The local assistant is unavailable" in chat** | Three causes, in the order to check them. **One:** the QVAC server is not running — `cd mobile && npm run ai:server`, and wait for the model to report ready. **Two:** the backend is not running — chat goes through its passthrough on 8080, not to 11434 directly, so QVAC alone is not enough. **Three:** you are serving a static export, where chat is scripted by construction; run Metro instead. Verified end to end on 8 November: with all three right, a reply came back in about five seconds |
 | Chat gives scripted replies | Terminal 3 is not running, or `EXPO_PUBLIC_QVAC_MODEL` does not match `wally-llm` |
 | **"Wally could not reach or validate the local model"** | `EXPO_PUBLIC_QVAC_URL` points at `11434` instead of `8080`. QVAC omits the CORS header on streamed replies, so the browser blocks them; routing through the backend adds it. Restart Metro after changing this |
 | Chat replies take 8–16 seconds | Normal on a CPU without AVX2. Not a bug. A GPU would cut it to 1–4 seconds, but nouveau is not usable for this |
 | Balances say "Unavailable" | Correct behaviour. It never shows a missing balance as zero. Check Terminal 4 |
 | **"Connect to the local wallet API first"** while the wallet server is clearly running | **You opened the app on a different hostname than the wallet API.** The session cookie is `SameSite=Strict`, and browsers treat `localhost` and `127.0.0.1` as different sites, so the cookie is never stored and every call after the handshake is unauthenticated. Fixed in the app as of 31 Oct 2026 — it now follows the page's hostname — so this should only appear on an older build. If it does, open the app on the same spelling as `EXPO_PUBLIC_WALLY_API_URL` |
 | **Metro dies with `ENOSPC: System limit for number of file watchers reached`** | Not a project problem. Something else is holding your inotify watches — on this machine it was two VS Code file-watcher processes holding 62,776 of 65,536, because VS Code watches `node_modules` unless told not to. Three ways out: add `files.watcherExclude` for `**/node_modules/**` to VS Code settings, raise the limit with `sudo sysctl fs.inotify.max_user_watches=524288`, or close a VS Code window to free about 30,000. Diagnose with `cat /proc/[0-9]*/fdinfo/* 2>/dev/null \| grep -c '^inotify wd:'` |
-| **You need a browser but Metro will not start** | Build a static export instead — it uses no file watchers at all: `npm run export:web`, then serve `dist/web` on **port 8082** with SPA fallback (every unknown path returns `index.html`). 8082 matters: both the backend's `ALLOWED_ORIGINS` and the wallet server's origin allowlist name it |
+| **You need a browser but Metro will not start** | Build a static export instead — it uses no file watchers at all: `npm run export:web`, then serve `dist/web` on **port 8082** with SPA fallback (every unknown path returns `index.html`). 8082 matters: both the backend's `ALLOWED_ORIGINS` and the wallet server's origin allowlist name it. **Chat will be scripted in this build and cannot be fixed by starting anything** — `__DEV__` is false in an export, so the app never calls the model. Everything else works |
 | **First load shows "balance could not be refreshed", then works on Refresh** | A cold start, not a fault. WDK derives the accounts on the first request and the public Sepolia RPCs are slow; at least one chain usually misses the first attempt. The same happens to the first market fetch after the backend starts. Both recover on the next call. It is listed here because the app's first paint reports a problem that is not there |
 | **Everything renders but nothing loads data** | **You are serving the app on a port other than 8082.** Both allowlists name `8082` and nothing else — `ALLOWED_ORIGINS` in `backend/.env.local`, and the hardcoded `origins` in `mobile/scripts/wallet-api-server.mjs`. The app reports this as *"The local wallet API could not be reached"*, which reads like the server is down when it is in fact refusing you. Serve on 8082, or add your port to both |
 | App loads but nothing talks to anything on a phone | Missing `adb reverse` — see above |
