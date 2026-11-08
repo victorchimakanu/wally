@@ -120,33 +120,16 @@ export function checkBackup(words: string[], positions: number[], answers: Recor
   return { ok: wrong.length === 0, wrong };
 }
 
-export type SpendDecision =
-  | { allowed: true }
-  | { allowed: false; reason: string; action: 'create' | 'back-up' };
-
 /**
- * Whether this wallet may be spent from.
+ * The spend gate moved to `custody.ts` on 8 November 2026, and its signature changed with it.
  *
- * **Receiving and balances are never gated — only signing.** A wallet that cannot receive is
- * useless, and a user who has funded a wallet they cannot recover is the worst outcome this
- * app can produce. So the gate sits exactly where the irreversible step is.
+ * It used to live here and take only the vault record, which made it possible — easy, in fact —
+ * to read one wallet's backup flag and permit spending a different wallet's money. Wally has
+ * two wallets: the recovery flow creates one in the OS keystore, while balances and sending
+ * come from a dev server holding its own seed. Wiring the old function into the send flow would
+ * have meant twelve words confirmed, sending unlocked, and the words protecting something else.
  *
- * wallet-vault.ts has promised this in a comment since it was written ("nothing may be signed
- * until the user has written it down") and nothing enforced it. This is the enforcement.
- *
- * Note the honest limit: this is an app rule, not a chain rule. Someone holding the phrase can
- * spend these funds from any other wallet software, and nothing here prevents that.
+ * `spendAllowed(custody, record)` now takes custody first and not optionally, so the question
+ * cannot be asked without answering "whose money?".
  */
-export function spendAllowed(record: { backedUpAt: number } | null): SpendDecision {
-  if (!record) {
-    return { allowed: false, reason: 'Set up your wallet before sending.', action: 'create' };
-  }
-  if (!record.backedUpAt) {
-    return {
-      allowed: false,
-      reason: 'Write down your recovery phrase first. Without it, nothing can bring this wallet back.',
-      action: 'back-up',
-    };
-  }
-  return { allowed: true };
-}
+export { spendAllowed, type SpendDecision } from './custody.ts';

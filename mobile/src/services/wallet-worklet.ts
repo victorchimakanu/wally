@@ -1,3 +1,4 @@
+import { custodyOf, devServerConfigured, splitPermitted, type Custody } from './custody.ts';
 /**
  * Web has no Bare worklet, so there is no keystore here.
  *
@@ -21,9 +22,27 @@ export async function getKeystore(): Promise<Keystore> {
   throw new Error(keystoreUnavailableReason());
 }
 
-export type WalletStatus = { available: false } | { available: true; exists: boolean; backedUpAt: number };
+/**
+ * `custody` travels with `backedUpAt` on purpose. Read alone, that timestamp says "this user
+ * wrote their phrase down" and invites the conclusion "so their money is safe" — which is false
+ * whenever the money on screen belongs to the dev wallet server rather than to this phone.
+ * Carrying custody here means no caller can have one without the other.
+ */
+export type WalletStatus =
+  | { available: false }
+  | { available: true; exists: boolean; backedUpAt: number; custody: Custody; protectsDisplayedFunds: boolean };
 
 /** Web has no keystore, so there is nothing to report. */
 export async function walletStatus(): Promise<WalletStatus> {
   return { available: false };
+}
+
+/**
+ * Custody on a platform that cannot hold a wallet.
+ *
+ * A browser has no keystore, so there is never a device wallet and therefore never a split —
+ * the refusal below can only ever trigger on a phone.
+ */
+export async function currentCustody(): Promise<Custody> {
+  return custodyOf({ keystoreWallet: false, devServerConfigured, splitPermitted });
 }
