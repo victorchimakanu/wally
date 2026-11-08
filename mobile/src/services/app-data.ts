@@ -45,7 +45,7 @@ export type Category = 'keys' | 'personal' | 'cache';
  */
 export type DataId =
   | 'wallet-key' | 'wallet-record'
-  | 'chats' | 'preferences' | 'wallet-cache' | 'app-lock' | 'benchmark'
+  | 'chats' | 'preferences' | 'wallet-cache' | 'app-lock' | 'benchmark' | 'crashes'
   | 'prices' | 'charts';
 
 export type StoredData = {
@@ -88,6 +88,10 @@ export const STORED_DATA: readonly StoredData[] = [
     label: 'Whether app lock is switched on', owner: 'services/app-lock.ts' },
   { id: 'benchmark', key: 'wally.phone-benchmark.v1', exact: true, store: 'async', category: 'personal',
     label: 'The speed test for this phone', owner: 'screens/PhonePerformance.tsx' },
+  // Scrubbed before storage, but still this user's device: truncated addresses, app state, and
+  // whatever a message happened to contain. Personal, and it goes in a wipe.
+  { id: 'crashes', key: 'wally.problem-reports.v1', exact: true, store: 'async', category: 'personal',
+    label: 'Problem reports from this app', owner: 'services/crash-log-device.ts' },
 
   // Public data that is merely cached here.
   { id: 'prices', key: 'wally.market.v1.', exact: false, store: 'async', category: 'cache',

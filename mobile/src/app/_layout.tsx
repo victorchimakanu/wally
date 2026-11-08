@@ -1,9 +1,13 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Stack, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useFonts } from 'expo-font';
 import { ActivityIndicator, Platform, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import Constants from 'expo-constants';
+import { CrashBoundary } from '../components/CrashBoundary';
+import { installCrashHandlers } from '../services/crash-log-device';
+import { buildInfo, supportSummary } from '../services/build-info';
 import { DemoProvider, useDemo } from '../demo/store';
 import { PreferencesProvider } from '../demo/preferences';
 import { MarketProvider } from '../data/market';
@@ -34,9 +38,18 @@ export default function RootLayout() {
     Inter_600SemiBold: require('@expo-google-fonts/inter/600SemiBold/Inter_600SemiBold.ttf'),
     Inter_700Bold: require('@expo-google-fonts/inter/700Bold/Inter_700Bold.ttf'),
   });
+  // Installed once, at the root, before anything else can fail. Returns a teardown so a fast
+  // refresh in development does not stack handlers.
+  useEffect(() => installCrashHandlers(supportSummary(buildInfo({
+    appVersion: Constants.expoConfig?.version, os: Platform.OS, isDevelopment: __DEV__,
+  }))), []);
+
   if (error) return <View style={styles.loading}><Text>Wally could not load its bundled fonts. Reload the preview to try again.</Text></View>;
   if (!loaded) return <View style={styles.loading}><ActivityIndicator color={c.brand} /></View>;
-  return <SafeAreaProvider><StatusBar style="dark" /><WalletProvider><DemoProvider><PreferencesProvider><MarketProvider><AppContent /></MarketProvider></PreferencesProvider></DemoProvider></WalletProvider></SafeAreaProvider>;
+  // The boundary is outermost on purpose: a provider that throws while mounting would
+  // otherwise take the whole tree with it and leave a white screen, which on a wallet is
+  // indistinguishable from a transfer that went through.
+  return <CrashBoundary><SafeAreaProvider><StatusBar style="dark" /><WalletProvider><DemoProvider><PreferencesProvider><MarketProvider><AppContent /></MarketProvider></PreferencesProvider></DemoProvider></WalletProvider></SafeAreaProvider></CrashBoundary>;
 }
 const styles = StyleSheet.create({
   native: { flex: 1 }, loading: { flex: 1, backgroundColor: c.background, justifyContent: 'center', alignItems: 'center', gap: 16, padding: 24 },
