@@ -28,6 +28,8 @@ POST /v1/rpc/:chain                           JSON-RPC passthrough, allowlisted,
 POST /v1/bundler/:chain                   ERC-4337 bundler, Arbitrum only, method allowlist
 POST /v1/paymaster/:chain                 paymaster (sponsorship), Arbitrum only, never cached
 GET  /v1/gasless                          whether gasless is configured, and the allowlists
+POST /v1/watch/:chain/:hash               watch a submitted transfer until the chain decides
+GET  /v1/watch/:chain/:hash               what it has decided, or 404 if nothing is watching
 GET  /v1/history?address=[&chain=]            address transactions, both chains by default
                                           includes ERC-20 transfers for pinned tokens (USDt, Arbitrum)
 GET  /v1/market?currency=usd|ngn|eur          watchlist prices
@@ -102,6 +104,39 @@ Cache keys include the params, so two addresses never share an answer, and the c
 JSON-RPC `id` is substituted back on a hit. A JSON-RPC error is never cached — it may be
 transient — and is passed through untouched rather than turned into a 5xx. Every response
 carries `x-wally-cache: hit | miss | bypass`.
+
+---
+
+## The receipt watcher, and the only state this service keeps
+
+A phone sleeps mid-confirmation. A transfer is submitted, the screen locks, and nothing checks
+the receipt until someone opens the app — so Activity shows "pending" for as long as the phone
+is in a pocket, and on the public Sepolia nodes the eventual check is slow too: **11 to 12
+seconds for one call, measured 8 November 2026.**
+
+`POST /v1/watch/:chain/:hash` registers a hash and asks the chain immediately. A background
+interval re-asks every 15 seconds until the chain decides, then stops. `GET` returns what is
+known, or **404 with `watching: false`** — "I have no record" and "it has not landed" are
+different claims and the app has to be able to tell them apart.
+
+**It notifies nobody.** Push needs a device token and therefore a development build, which has
+never been made. This is what will feed that; today it makes the answer ready before the app
+asks.
+
+Two rules worth keeping:
+
+- **A missing receipt is pending, never failure.** It is the ordinary answer for a transaction
+  accepted and not yet in a block, and calling it failed would tell someone their money did not
+  move when it is about to. A node that is down leaves a transfer pending for the same reason:
+  not being able to ask is not the same as "no".
+- **This is the first state the service has ever held**, so it is held as narrowly as possible.
+  Hashes are public chain data. The list is in memory, never touches disk, is capped at 500,
+  and a watch nobody asks about for 30 minutes is dropped whatever its state. A restart forgets
+  everything, which is correct rather than a limitation. When the list is full a **settled**
+  watch is evicted before an unsettled one, because a settled answer has already been useful.
+
+Five mutations cover it, including a missing receipt reading as failed and the list growing
+without a ceiling.
 
 ---
 
