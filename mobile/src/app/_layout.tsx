@@ -1,10 +1,12 @@
 import React, { useEffect } from 'react';
-import { Stack, usePathname } from 'expo-router';
+import { router, Stack, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useFonts } from 'expo-font';
 import { ActivityIndicator, Platform, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import Constants from 'expo-constants';
+import * as Linking from 'expo-linking';
+import { routeForLink } from '../services/deep-link';
 import { CrashBoundary } from '../components/CrashBoundary';
 import { installCrashHandlers } from '../services/crash-log-device';
 import { buildInfo, supportSummary } from '../services/build-info';
@@ -38,6 +40,23 @@ export default function RootLayout() {
     Inter_600SemiBold: require('@expo-google-fonts/inter/600SemiBold/Inter_600SemiBold.ttf'),
     Inter_700Bold: require('@expo-google-fonts/inter/700Bold/Inter_700Bold.ttf'),
   });
+  // Incoming links: the one Wally was opened with, and any that arrive while it is running.
+  // Routed through `routeForLink`, which holds a link to the same refusals as a scanned code,
+  // because both are untrusted descriptions of a payment arriving from somewhere else.
+  useEffect(() => {
+    let live = true;
+    const open = (url: string | null) => {
+      if (!live || !url) return;
+      const route = routeForLink(url);
+      // A link that is not for us is not an error, and a refused one is not worth a screen of
+      // its own: the app simply opens where it was going to.
+      if (route.ok) router.push({ pathname: route.pathname as never, params: route.params });
+    };
+    void Linking.getInitialURL().then(open).catch(() => {});
+    const subscription = Linking.addEventListener('url', event => open(event.url));
+    return () => { live = false; subscription.remove(); };
+  }, []);
+
   // Installed once, at the root, before anything else can fail. Returns a teardown so a fast
   // refresh in development does not stack handlers.
   useEffect(() => installCrashHandlers(supportSummary(buildInfo({
