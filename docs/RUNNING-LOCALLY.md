@@ -2,7 +2,9 @@
 
 How to start the whole thing by hand, one service per terminal. No Docker, no containers.
 
-Verified on the `phone-local-signing` branch, 20 October 2026.
+**Last run end to end on 8 November 2026**, on `correctness`: backend, dev wallet server and
+the app, against real Sepolia nodes, real Etherscan and real CoinGecko. Every step below was
+executed, not remembered.
 
 ---
 
@@ -193,6 +195,20 @@ EXPO_PUBLIC_WALLY_API_URL=http://127.0.0.1:3003
 A fresh wallet is empty. Open **Receive** in the app, copy the address, and request funds from
 a Sepolia faucet for the network you picked. Testnet ETH has no monetary value.
 
+Checking it with `curl` needs two calls, not one. `/api/wallet` is gated behind a session
+cookie, so a bare request answers `{"error":"Connect to the local wallet API first."}`:
+
+```bash
+curl -s -c /tmp/wally.jar http://127.0.0.1:3003/api/wallet/session   # {"ready":true,...}
+curl -s -b /tmp/wally.jar http://127.0.0.1:3003/api/wallet | head -c 200
+```
+
+**The first call after the server starts can fail, and that is not a real failure.** WDK
+derives the accounts on the first request, and the public Sepolia RPCs are slow enough that at
+least one chain usually comes back `"balance could not be refreshed"`. Ask again and it
+answers. Seen on both chains on 8 November. The app shows the same thing on its first paint,
+so a cold start reports a problem that is not there.
+
 Two things to know: this path handles **native testnet ETH only**, not USDt. And the keys sit
 on your computer, not on a phone — it is a development scaffold, superseded by on-device
 signing. See [`docs/ADR-001-key-custody.md`](ADR-001-key-custody.md).
@@ -243,6 +259,51 @@ build-tools. Java is already installed at `/usr/bin/java`, so the JDK blocker no
 
 ---
 
+## Running it with no GUI, and driving it
+
+Useful on a server, in a container, or on any machine where Metro will not start. It needs no
+Metro and no file watchers.
+
+```bash
+cd mobile && npm run export:web          # bundles the whole app into dist/web
+```
+
+Then serve `dist/web` on **port 8082** with SPA fallback — every unknown path must return
+`index.html`, or deep links 404:
+
+```bash
+cd dist/web && python3 -c "
+import http.server, socketserver, os, posixpath
+class H(http.server.SimpleHTTPRequestHandler):
+    def send_head(self):
+        if not os.path.exists(self.translate_path(self.path)) and '.' not in posixpath.basename(self.path):
+            self.path = '/index.html'
+        return super().send_head()
+socketserver.TCPServer.allow_reuse_address = True
+socketserver.TCPServer(('127.0.0.1', 8082), H).serve_forever()"
+```
+
+**8082 is not arbitrary.** It is the only origin the backend and the wallet server accept.
+
+The export compiles `EXPO_PUBLIC_*` in at build time, exactly as Metro does, so change
+`.env.local` and export again — there is nothing to restart.
+
+To drive it without a desktop, start Chrome headless and talk to it over the DevTools
+protocol. Node's built-in `WebSocket` is enough; no Playwright or Puppeteer needed:
+
+```bash
+google-chrome --headless=new --disable-gpu --remote-debugging-port=9222 \
+  --user-data-dir=/tmp/wally-chrome --window-size=430,932 about:blank &
+curl -s http://127.0.0.1:9222/json/version     # confirms the endpoint
+```
+
+From there `Page.navigate` loads a route and `Runtime.evaluate` reads
+`document.body.innerText`, or clicks a control by its label. That is how the 8 November run
+walked all 22 routes, clicked through *Export your history*, and read back the CSV the
+browser would have downloaded.
+
+---
+
 ## Running the tests
 
 ```bash
@@ -265,13 +326,23 @@ default suite now, and skip with a visible reason when the WDK runtime is absent
 From the repository root:
 
 ```bash
-cd backend && npm run typecheck && npm test && cd ..
+cd backend && npm run typecheck && npm test && npm run test:mutation && cd ..
 cd mobile  && npm run typecheck && npm test && npm run lint && cd ..
+npm run typecheck && npm test                      # the reference app, at the root
 ```
 
-Expected: backend **20/20**, mobile **53/53**, lint clean.
+Measured on 8 November 2026:
 
-Those run offline and need none of the servers above.
+| | |
+|---|---|
+| `mobile` | **245 tests** |
+| `backend` | **95 tests** |
+| reference app (root) | **66 tests** |
+| `backend` mutation harness | **37 killed, 0 survived** |
+
+Those run offline and need none of the servers above. CI runs the same four as separate jobs,
+so a number here that no longer matches is a sign this document has drifted, not that
+something broke.
 
 ---
 
@@ -291,6 +362,8 @@ Those run offline and need none of the servers above.
 | **"Connect to the local wallet API first"** while the wallet server is clearly running | **You opened the app on a different hostname than the wallet API.** The session cookie is `SameSite=Strict`, and browsers treat `localhost` and `127.0.0.1` as different sites, so the cookie is never stored and every call after the handshake is unauthenticated. Fixed in the app as of 31 Oct 2026 — it now follows the page's hostname — so this should only appear on an older build. If it does, open the app on the same spelling as `EXPO_PUBLIC_WALLY_API_URL` |
 | **Metro dies with `ENOSPC: System limit for number of file watchers reached`** | Not a project problem. Something else is holding your inotify watches — on this machine it was two VS Code file-watcher processes holding 62,776 of 65,536, because VS Code watches `node_modules` unless told not to. Three ways out: add `files.watcherExclude` for `**/node_modules/**` to VS Code settings, raise the limit with `sudo sysctl fs.inotify.max_user_watches=524288`, or close a VS Code window to free about 30,000. Diagnose with `cat /proc/[0-9]*/fdinfo/* 2>/dev/null \| grep -c '^inotify wd:'` |
 | **You need a browser but Metro will not start** | Build a static export instead — it uses no file watchers at all: `npm run export:web`, then serve `dist/web` on **port 8082** with SPA fallback (every unknown path returns `index.html`). 8082 matters: both the backend's `ALLOWED_ORIGINS` and the wallet server's origin allowlist name it |
+| **First load shows "balance could not be refreshed", then works on Refresh** | A cold start, not a fault. WDK derives the accounts on the first request and the public Sepolia RPCs are slow; at least one chain usually misses the first attempt. The same happens to the first market fetch after the backend starts. Both recover on the next call. It is listed here because the app's first paint reports a problem that is not there |
+| **Everything renders but nothing loads data** | **You are serving the app on a port other than 8082.** Both allowlists name `8082` and nothing else — `ALLOWED_ORIGINS` in `backend/.env.local`, and the hardcoded `origins` in `mobile/scripts/wallet-api-server.mjs`. The app reports this as *"The local wallet API could not be reached"*, which reads like the server is down when it is in fact refusing you. Serve on 8082, or add your port to both |
 | App loads but nothing talks to anything on a phone | Missing `adb reverse` — see above |
 | Changed `.env.local`, nothing happened | Metro caches env at startup. Restart it |
 | Port already in use | `ss -lptn 'sport = :8080'` to find the process, then `kill` that PID |
@@ -299,13 +372,33 @@ Those run offline and need none of the servers above.
 
 ## What you can and cannot test locally
 
-**Works now:** the whole interface, live market prices and charts through your backend,
-the demo wallet end to end, **real AI chat in the browser** through the backend passthrough,
-real Sepolia ETH transfers with review and confirmation, activity, receipts and the address
-book.
+**Works now**, and all of it was exercised in a browser against the live services on
+8 November 2026:
 
-**Does not work yet:** USDt (native ETH only), gasless fees via the paymaster, wallet
-creation and recovery, app lock, and QR scanning.
+- The whole interface. Every one of the 22 routes renders.
+- Live market prices and charts through your backend, in USD, NGN or EUR.
+- The demo wallet end to end, and the real testnet wallet's balances and addresses.
+- **Real AI chat in the browser** through the backend passthrough.
+- Real Sepolia **ETH** transfers with review and confirmation, activity, and receipts.
+- Activity through the backend's Etherscan path, paged.
+- Wallet creation, recovery phrase, restore and removal (`/wallet-setup`, `/recovery-phrase`,
+  `/restore-wallet`, `/reset-wallet`).
+- App lock, and QR scanning (`/scan`).
+- The address book, and **Settings → Your data**: *Export your history* (`/export-data`) and
+  *Clear chat history* (`/clear-chats`).
+
+**Does not work yet:**
+
+- **Sending USDt.** The balance and the history are read and displayed; the send path is
+  native ETH only.
+- **Gasless fees** via the paymaster. `GET /v1/gasless` answers `available:false` until a
+  bundler and paymaster URL are configured, and no USDT paymaster exists on Arbitrum Sepolia
+  in any case — see `GASLESS.md`.
+- **The WDK Bare worklet**, which holds the on-device keys. It has never run: it needs a
+  development build on a physical phone. The browser path above uses the dev wallet server,
+  which is a different wallet with its own seed. Conflating the two is the easiest serious
+  mistake to make here.
+- **Mainnet.** Both the app and the backend hardcode Sepolia.
 
 Activity now reads indexed history from the backend and merges in transfers sent from this
 device, so a just-sent transfer never disappears while it waits to be indexed. It needs
