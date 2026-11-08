@@ -8,6 +8,7 @@ import { Button, Card, Label, Note, Pill, QrTile, ReceiveAddress, shared } from 
 import { useWallet } from '../data/wallet';
 import { historyProvenance } from '../services/history-source';
 import { custodyNotice } from '../services/custody';
+import { receiveAdvice } from '../services/receive-advice';
 import { CHAINS, formatEth, type Chain } from '../services/wallet-api';
 import { colors as c } from '../theme';
 
@@ -110,11 +111,16 @@ export function LiveReceiveCard() {
       setNotice(result.copied ? '' : copyNotice(result));
     } catch { setNotice('Copy is unavailable on this device. Share the address instead.'); }
   }
+  const addresses = Object.fromEntries((wallet.snapshot?.balances ?? []).map(item => [item.chain, item.address])) as Partial<Record<Chain, string>>;
+  const advice = receiveAdvice(chain, CHAINS[chain].name, addresses, key => CHAINS[key].name);
   return <Card style={{ gap: 16 }}>
     <View style={{ gap: 4 }}><Label size={18} weight="bold" style={{ lineHeight: 22 }}>Receive testnet ETH</Label><Note>{CHAINS[chain].name} · Testnet</Note></View>
     <NetworkChoice value={chain} onChange={next => { setChain(next); setNotice(''); setCopied(false); }} />
     {balance ? <><QrTile><Image source={{ uri: balance.qr }} contentFit="contain" accessibilityLabel={`QR code for ${balance.address}`} style={{ width: 168, height: 168 }} /></QrTile><ReceiveAddress value={balance.address} onCopy={() => { void copy(); }} /><View style={shared.row}><Button label={copied ? 'Copied' : 'Copy address'} style={shared.flex} onPress={() => { void copy(); }} /><Button accent label="Share" style={shared.flex} onPress={() => { void Share.share({ message: `Wally ${CHAINS[chain].name} testnet ETH address: ${balance.address}. Testnet only.` }).catch(() => setNotice('Sharing is unavailable. You can copy the address.')); }} /></View></> : <WalletStatus />}
-    <Note>Send only testnet ETH on {CHAINS[chain].name}. The same address works on both test networks.</Note>{!!notice && <Note error>{notice}</Note>}
+    {/* Derived from the addresses, never asserted. The fixed version of this line claimed the
+        same address works on both networks, which held only while the dev server derived one
+        EOA for both. Arbitrum's real account is a Safe addressed by the account factory. */}
+    <Note error={advice.chainSpecific}>{advice.text}</Note>{!!notice && <Note error>{notice}</Note>}
   </Card>;
 }
 export function LiveActivityCard({ compact = false, search = '', filter = 'All' }: { compact?: boolean; search?: string; filter?: string }) {

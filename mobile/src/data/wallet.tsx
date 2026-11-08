@@ -5,6 +5,9 @@ import { createWalletClient, parseWallet, type Chain, type LiveHistory, type Liv
 // Extensionless: Metro picks the native biometric path on a phone, the no-op on web.
 import { requireUnlock } from '../services/unlock';
 import { quoteExpired } from '../services/quote-clock';
+import Constants from 'expo-constants';
+import { checkSendGate } from '../services/send-gate';
+import { backendOrigin, backendHeaders } from '../services/backend';
 // Extensionless: Metro picks the native vault reader on a phone, the no-keystore stub on web.
 import { currentCustody } from '../services/wallet-worklet';
 import { custodyNotice, moneySource, type Custody } from '../services/custody';
@@ -153,6 +156,24 @@ export function WalletProvider({ children }: React.PropsWithChildren) {
       // no protection to perform, and refusing would leave such a user unable to send at all.
       const unlocked = await requireUnlock('send', `${q.amount} ${q.symbol}`);
       if (!unlocked.ok) throw new Error(unlocked.message);
+
+      // The remote stop, asked here and not earlier. `send-gate.ts` and the backend's
+      // `/v1/status` have both existed since 5 November with nothing between them: the
+      // repository looked like it had a kill switch and the app had no way to be stopped.
+      //
+      // After the unlock rather than before, so a paused service costs a user one biometric
+      // prompt instead of silently refusing before they have confirmed they meant it — and
+      // immediately before the irreversible call, so the answer is as fresh as it can be.
+      //
+      // It fails OPEN by construction (see checkSendGate): a backend that is down, slow or
+      // unreachable must never stop someone spending their own money. This stops Wally when
+      // Wally is broken; it is not a permission to transact.
+      const gate = await checkSendGate({
+        origin: backendOrigin(),
+        appVersion: Constants.expoConfig?.version ?? '0.0.0',
+        headers: backendHeaders(),
+      });
+      if (!gate.allowed) throw new Error(gate.reason);
 
       submitting.current = true; clearQuote();
       try { const tx = await client.confirm(q); void refresh(); void refreshHistory(); return tx; }
