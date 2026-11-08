@@ -90,6 +90,70 @@ export function ethUnits(raw) {
   if (value <= 0n) throw new Error('The amount must be positive.');
   return value;
 }
+/**
+ * ERC-20 `transfer(address,uint256)`, encoded and decoded here rather than by a library.
+ *
+ * Both directions, because for a token transfer the recipient and the amount do not live in
+ * the transaction's `to` and `value` — they live inside the calldata, and `to` is the token
+ * contract. Everything the confirm path checks before signing a native transfer has to be
+ * checked *inside* the data for a token one, or the comparison that has guarded every spend so
+ * far would be comparing the wrong fields and passing.
+ *
+ * The selector is the first four bytes of keccak("transfer(address,uint256)"), fixed by the
+ * standard. The two arguments are each padded to 32 bytes.
+ */
+export const TRANSFER_SELECTOR = '0xa9059cbb';
+
+export function encodeTransfer(recipient, value) {
+  if (!validAddress(recipient)) throw new Error('Choose a test network and enter a complete recipient address.');
+  if (typeof value !== 'bigint' || value <= 0n) throw new Error('The amount must be positive.');
+  // uint256 is the ceiling the ABI can carry; above it the padding silently truncates.
+  if (value >= 2n ** 256n) throw new Error('The amount is larger than this token can represent.');
+  const to = recipient.toLowerCase().replace(/^0x/, '').padStart(64, '0');
+  const amount = value.toString(16).padStart(64, '0');
+  return `${TRANSFER_SELECTOR}${to}${amount}`;
+}
+
+/**
+ * Read back what a transfer calldata actually says, or null if it is not one.
+ *
+ * Used to verify a *signed* transaction before broadcast. Checking the calldata string against
+ * the one we built would pass for any data of the right shape; reading the recipient and amount
+ * out and comparing those is what makes the guarantee the same as the native path's.
+ */
+export function decodeTransfer(data) {
+  if (typeof data !== 'string' || !/^0x[\da-fA-F]{136}$/.test(data)) return null;
+  if (data.slice(0, 10).toLowerCase() !== TRANSFER_SELECTOR) return null;
+  const to = data.slice(10, 74), amount = data.slice(74, 138);
+  // The high 12 bytes of an address argument must be zero. Anything there is not an address.
+  if (!/^0{24}/.test(to)) return null;
+  const recipient = `0x${to.slice(24)}`;
+  if (!validAddress(recipient)) return null;
+  return { recipient, value: BigInt(`0x${amount}`) };
+}
+
+/**
+ * What a person typed, in a token's own units.
+ *
+ * Same shape as `ethUnits` and the same 4-whole-digit bound, but the scale is the token's.
+ * USDt is 6 decimals and ETH is 18: running a token amount through the ETH scale is wrong by a
+ * factor of a million million and looks like an ordinary number on the way past.
+ */
+export function tokenUnits(raw, decimals, symbol) {
+  const text = normaliseAmount(raw);
+  const fraction = decimals > 0 ? `(?:\\.\\d{1,${decimals}})?` : '';
+  if (typeof text !== 'string' || !new RegExp(`^(?:0|[1-9]\\d*)${fraction}$`).test(text)) {
+    throw new Error(`Enter a ${symbol} amount with up to ${decimals} decimals.`);
+  }
+  if (!new RegExp(`^(?:0|[1-9]\\d{0,3})${fraction}$`).test(text)) {
+    throw new Error(`The amount is more than this wallet will send at once. The most is 9,999 ${symbol}.`);
+  }
+  const [whole, decimalPart = ''] = text.split('.');
+  const value = BigInt(whole) * 10n ** BigInt(decimals) + BigInt(decimalPart.padEnd(decimals, '0') || '0');
+  if (value <= 0n) throw new Error('The amount must be positive.');
+  return value;
+}
+
 export function ethDisplay(value) { const n = BigInt(value), whole = n / 10n ** 18n, fraction = (n % 10n ** 18n).toString().padStart(18, '0').replace(/0+$/, ''); return `${whole}${fraction ? '.' + fraction : ''}`; }
 export function validAddress(address) { return typeof address === 'string' && /^0x[\da-fA-F]{40}$/.test(address) && !/^0x0{40}$/i.test(address); }
 /**
@@ -289,8 +353,15 @@ export async function createWalletService(directory, { transport = fetch } = {})
     return { version: 1, network: 'testnet', location: 'computer', fetchedAt: Date.now(), balances, tokenNotice: 'Native testnet ETH and testnet USDt on Arbitrum. The USDt contract is a third-party testnet deployment, not Tether\u2019s; gas is paid in ETH.' };
   }
   async function quote(owner, body) {
-    if (!body || typeof body !== 'object' || Object.keys(body).some(key => !['chain', 'recipient', 'amount'].includes(key)) || !Object.hasOwn(NETWORKS, body.chain) || !validAddress(body.recipient)) throw new Error('Choose a test network and enter a complete recipient address.');
-    const recipient = ethers.getAddress(body.recipient), value = ethUnits(body.amount), chain = body.chain;
+    if (!body || typeof body !== 'object' || Object.keys(body).some(key => !['chain', 'recipient', 'amount', 'token'].includes(key)) || !Object.hasOwn(NETWORKS, body.chain) || !validAddress(body.recipient)) throw new Error('Choose a test network and enter a complete recipient address.');
+    const chain = body.chain;
+    // A token is named by symbol and resolved here. An unknown symbol is refused rather than
+    // guessed at: an address with unknown decimals cannot be sent safely at all.
+    const token = body.token === undefined || body.token === 'ETH' ? null
+      : (TOKENS[chain] ?? []).find(entry => entry.symbol === body.token) ?? null;
+    if (body.token !== undefined && body.token !== 'ETH' && !token) throw new Error('Only testnet ETH and the pinned token are supported on this network.');
+    const recipient = ethers.getAddress(body.recipient);
+    const value = token ? tokenUnits(body.amount, token.decimals, token.symbol) : ethUnits(body.amount);
     await checked(chain);
     // OUTSTANDING, not a second copy of ['unknown', 'pending']: this list and SETTLED have to
     // stay complements, and the way they stop being is somebody adding a status to one.
@@ -299,20 +370,44 @@ export async function createWalletService(directory, { transport = fetch } = {})
       if (OUTSTANDING.includes(pending.status)) throw new Error('A transfer on this network still needs a receipt. Resolve it in Activity before creating another send.');
     }
     const info = accountInfo.get(chain), a = await account(chain);
-    const balance = await a.getBalance(); if (balance < value) throw new Error('Not enough testnet ETH. Fund this address from a faucet before sending.');
-    if (await rpc(chain, 'eth_getCode', [recipient, 'latest']) !== '0x') throw new Error('This native ETH send supports ordinary wallet recipients. Contract interactions need their own review.');
-    const [gasHex, gasPriceHex, nonceHex] = await Promise.all([rpc(chain, 'eth_estimateGas', [{ from: info.address, to: recipient, value: ethers.toQuantity(value), data: '0x' }]), rpc(chain, 'eth_gasPrice'), rpc(chain, 'eth_getTransactionCount', [info.address, 'pending'])]);
+    const native = await a.getBalance();
+    if (token) {
+      // The token pays the amount; ETH still pays the fee. Two balances, two failures, and
+      // they are told apart because "not enough USDt" and "not enough ETH for the fee" send a
+      // user to completely different places.
+      const held = await tokenBalance(chain, token, info.address);
+      if (held < value) throw new Error(`Not enough testnet ${token.symbol}. This wallet holds ${tokenDisplay(held, token.decimals)}.`);
+    } else if (native < value) {
+      throw new Error('Not enough testnet ETH. Fund this address from a faucet before sending.');
+    }
+    // Always the RECIPIENT, never the transaction's `to`. For a token transfer `to` is the
+    // token contract and is supposed to be a contract; checking that field instead would
+    // refuse every token send and, worse, would stop checking the address the money reaches.
+    if (await rpc(chain, 'eth_getCode', [recipient, 'latest']) !== '0x') throw new Error('This send supports ordinary wallet recipients. Contract interactions need their own review.');
+    const data = token ? encodeTransfer(recipient, value) : '0x';
+    const to = token ? ethers.getAddress(token.address) : recipient;
+    const sent = token ? 0n : value;
+    const [gasHex, gasPriceHex, nonceHex] = await Promise.all([rpc(chain, 'eth_estimateGas', [{ from: info.address, to, value: ethers.toQuantity(sent), data }]), rpc(chain, 'eth_gasPrice'), rpc(chain, 'eth_getTransactionCount', [info.address, 'pending'])]);
     const gasLimit = BigInt(gasHex), gasPrice = BigInt(gasPriceHex), fee = gasLimit * gasPrice;
     if (fee <= 0n || fee > 10n ** 16n || gasLimit > 1000000n) throw new Error('The fee estimate is outside the configured testnet limit.');
-    if (balance < value + fee) throw new Error('Not enough testnet ETH to cover the amount and network fee.');
-    const tx = { to: recipient, value, data: '0x', chainId: NETWORKS[chain].chainId, nonce: Number(BigInt(nonceHex)), gasLimit, gasPrice, type: 0 };
+    if (native < sent + fee) throw new Error(token
+      ? 'Not enough testnet ETH to pay the network fee. A token transfer still costs ETH.'
+      : 'Not enough testnet ETH to cover the amount and network fee.');
+    const tx = { to, value: sent, data, chainId: NETWORKS[chain].chainId, nonce: Number(BigInt(nonceHex)), gasLimit, gasPrice, type: 0 };
     const wdkQuote = await a.quoteSendTransaction(tx); if (wdkQuote.fee > 10n ** 16n) throw new Error('WDK rejected the network fee limit.');
-    const entry = book.create(owner, { chain, recipient, amount: ethers.formatEther(value), fee: ethers.formatEther(fee), feeWei: fee.toString(), total: ethers.formatEther(value + fee), from: info.address, tx });
+    const shown = token ? tokenDisplay(value, token.decimals) : ethers.formatEther(value);
+    const entry = book.create(owner, {
+      chain, recipient, amount: shown, fee: ethers.formatEther(fee), feeWei: fee.toString(),
+      // For a token the amount and the fee are different assets, so there is no single total
+      // to add up. Saying so beats inventing a number in one of them.
+      total: token ? `${shown} ${token.symbol} + ${ethers.formatEther(fee)} ETH` : ethers.formatEther(value + fee),
+      from: info.address, tx, symbol: token ? token.symbol : 'ETH', decimals: token ? token.decimals : 18,
+    });
     return { id: entry.id, chain, network: NETWORKS[chain].name, recipient, amount: entry.amount, fee: entry.fee, total: entry.total, from: entry.from, expiresAt: entry.expiresAt,
       // The duration, which is what the app actually uses. expiresAt stays for the explorer
       // view and for anything reading the journal, but comparing it against a phone's clock is
       // the bug this fixes.
-      expiresInMs: QUOTE_MS, symbol: 'ETH', chainId: NETWORKS[chain].chainId };
+      expiresInMs: QUOTE_MS, symbol: token ? token.symbol : 'ETH', chainId: NETWORKS[chain].chainId };
   }
   async function confirm(owner, body) {
     if (!body || typeof body !== 'object' || Object.keys(body).some(key => !['quoteId', 'approved'].includes(key)) || typeof body.quoteId !== 'string' || body.approved !== true) throw new Error('Confirm the exact reviewed quote before submitting.');
@@ -335,16 +430,45 @@ export async function createWalletService(directory, { transport = fetch } = {})
       }
       await checked(q.chain);
       const a = await account(q.chain), tx = q.tx;
-      const balance = await a.getBalance(); if (balance < tx.value + BigInt(q.feeWei)) throw new Error('The balance changed. Request a fresh review.');
+      // A token transfer is the same protocol with the money in a different field: `to` is the
+      // contract, `value` is zero, and the recipient and amount are inside `data`. Every check
+      // below has a token form for exactly that reason.
+      const sendingToken = q.symbol && q.symbol !== 'ETH';
+      const token = sendingToken ? (TOKENS[q.chain] ?? []).find(entry => entry.symbol === q.symbol) : null;
+      if (sendingToken && !token) throw new Error('Only testnet ETH and the pinned token are supported on this network. Nothing was broadcast.');
+
+      const native = await a.getBalance();
+      if (native < tx.value + BigInt(q.feeWei)) throw new Error('The balance changed. Request a fresh review.');
+      if (token) {
+        const approved = decodeTransfer(tx.data);
+        if (!approved) throw new Error('The review could not be read back. Nothing was broadcast.');
+        const held = await tokenBalance(q.chain, token, q.from);
+        if (held < approved.value) throw new Error(`The balance of ${token.symbol} changed. Request a fresh review.`);
+      }
+
       const nonce = Number(BigInt(await rpc(q.chain, 'eth_getTransactionCount', [q.from, 'pending']))); if (nonce !== tx.nonce) throw new Error('The wallet nonce changed. Request a fresh review.');
+      // The recipient, not tx.to. For a token send tx.to is the contract and is meant to be one.
       if (await rpc(q.chain, 'eth_getCode', [q.recipient, 'latest']) !== '0x') throw new Error('The recipient changed. Request a fresh review.');
-      const requiredGas = BigInt(await rpc(q.chain, 'eth_estimateGas', [{ from: q.from, to: q.recipient, value: ethers.toQuantity(tx.value), data: '0x' }])); if (requiredGas > tx.gasLimit) throw new Error('The fee estimate changed. Request a fresh review.');
+      const requiredGas = BigInt(await rpc(q.chain, 'eth_estimateGas', [{ from: q.from, to: tx.to, value: ethers.toQuantity(tx.value), data: tx.data }])); if (requiredGas > tx.gasLimit) throw new Error('The fee estimate changed. Request a fresh review.');
+
       const raw = await a.signTransaction(tx), decoded = ethers.Transaction.from(raw);
-      if (decoded.to !== tx.to || decoded.from?.toLowerCase() !== q.from.toLowerCase() || decoded.value !== tx.value || decoded.data !== '0x' || decoded.chainId !== BigInt(tx.chainId) || decoded.nonce !== tx.nonce || decoded.gasLimit !== tx.gasLimit || decoded.gasPrice !== tx.gasPrice || decoded.type !== 0) throw new Error('The signed transaction did not match the approved review. Nothing was broadcast.');
+      if (decoded.to !== tx.to || decoded.from?.toLowerCase() !== q.from.toLowerCase() || decoded.value !== tx.value || decoded.data !== tx.data || decoded.chainId !== BigInt(tx.chainId) || decoded.nonce !== tx.nonce || decoded.gasLimit !== tx.gasLimit || decoded.gasPrice !== tx.gasPrice || decoded.type !== 0) throw new Error('The signed transaction did not match the approved review. Nothing was broadcast.');
+
+      // And for a token, compare what the calldata SAYS rather than only that the string
+      // matched. Identical bytes are already covered above; this is the check that the bytes
+      // mean what the user was shown — the recipient they read and the amount they approved.
+      if (token) {
+        const signedSays = decodeTransfer(decoded.data);
+        if (!signedSays
+          || signedSays.recipient.toLowerCase() !== q.recipient.toLowerCase()
+          || tokenDisplay(signedSays.value, token.decimals) !== q.amount) {
+          throw new Error('The signed transfer did not match the recipient and amount you approved. Nothing was broadcast.');
+        }
+      }
       const hash = ethers.keccak256(raw);
       // nonce is journalled so a stranded record can later be judged against the chain: if the
       // account has moved past this nonce and this hash has no receipt, it can never land.
-      const record = { quoteId: q.id, owner, hash, chain: q.chain, network: NETWORKS[q.chain].name, from: q.from, recipient: q.recipient, amount: q.amount, fee: q.fee, nonce: tx.nonce, status: 'unknown', submittedAt: Date.now(), explorerUrl: `${NETWORKS[q.chain].explorer}/tx/${hash}`, symbol: 'ETH' };
+      const record = { quoteId: q.id, owner, hash, chain: q.chain, network: NETWORKS[q.chain].name, from: q.from, recipient: q.recipient, amount: q.amount, fee: q.fee, nonce: tx.nonce, status: 'unknown', submittedAt: Date.now(), explorerUrl: `${NETWORKS[q.chain].explorer}/tx/${hash}`, symbol: q.symbol || 'ETH' };
       journal.unshift(record); save();
       try { const returned = await rpc(q.chain, 'eth_sendRawTransaction', [raw]); if (returned?.toLowerCase() === hash.toLowerCase()) record.status = 'pending'; }
       catch (error) {

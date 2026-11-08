@@ -13,6 +13,22 @@ import { CHAINS, formatEth, type Chain } from '../services/wallet-api';
 import { colors as c } from '../theme';
 
 /** Figma network/receive-selector: one pill with the selected network on an amber segment. */
+/**
+ * Pick the asset to send, when the chain has more than one.
+ *
+ * Built from the same primitives as `NetworkChoice` and deliberately identical in shape, so
+ * the Send screen gains a row rather than a new idea.
+ */
+export function AssetChoice({ value, options, onChange }: { value: string; options: readonly string[]; onChange: (value: string) => void }) {
+  if (options.length < 2) return null;
+  return <View accessibilityRole="radiogroup" style={{ flexDirection: 'row', padding: 4, borderRadius: 29, borderWidth: 1, borderColor: c.line, backgroundColor: c.surface }}>
+    {options.map(option => <Pressable key={option} accessibilityRole="radio" accessibilityState={{ selected: value === option }} onPress={() => onChange(option)}
+      style={{ flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 25, backgroundColor: value === option ? c.amber : 'transparent' }}>
+      <Label size={14} weight={value === option ? 'semibold' : 'regular'}>{option}</Label>
+    </Pressable>)}
+  </View>;
+}
+
 export function NetworkChoice({ value, onChange }: { value: Chain; onChange: (value: Chain) => void }) {
   return <View accessibilityRole="radiogroup" style={{ flexDirection: 'row', padding: 4, borderRadius: 29, borderWidth: 1, borderColor: c.line, backgroundColor: c.surface }}>{(Object.keys(CHAINS) as Chain[]).map(chain => { const selected = value === chain; return <Pressable key={chain} accessibilityRole="radio" aria-checked={selected} accessibilityState={{ checked: selected }} accessibilityLabel={CHAINS[chain].name} onPress={() => onChange(chain)} style={{ flex: 1, minHeight: 46, paddingHorizontal: 8, borderRadius: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: selected ? c.amber : 'transparent' }}><Label size={15} weight={selected ? 'semibold' : 'medium'} numberOfLines={1}>{CHAINS[chain].name}</Label></Pressable>; })}</View>;
 }
