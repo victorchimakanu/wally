@@ -167,6 +167,27 @@ const MUTATIONS = [
   ["cache-never-expires", "src/cache.ts",
    "    if (Date.now() - entry.storedAt >= this.ttlMs) return null;", "    if (false) return null;",
    "stale data is served as fresh forever"],
+
+  // the receipt watcher
+  ["missing-receipt-reads-as-failed", "src/watcher.ts",
+   '  if (!receipt || typeof receipt !== "object") return { state: "pending" };',
+   '  if (!receipt || typeof receipt !== "object") return { state: "failed" };',
+   "a transfer not yet in a block is reported to the user as failed"],
+  ["unknown-status-reads-as-confirmed", "src/watcher.ts",
+   '  return { state: "pending" };\n}',
+   '  return { state: "confirmed" };\n}',
+   "a status the EVM does not define is announced as success"],
+  ["watch-list-unbounded", "src/watcher.ts",
+   "      if (watches.size >= maxWatches) {", "      if (false) {",
+   "anyone can grow the watch list until the process dies"],
+  ["watch-never-expires", "src/watcher.ts",
+   "    for (const [key, watch] of watches) if (at - watch.since > ttlMs) watches.delete(key);",
+   "    for (const [key, watch] of watches) if (false) watches.delete(key);",
+   "a hash nobody asked about is kept for the life of the process"],
+  ["unwatched-reads-as-settled", "src/routes/watch.ts",
+   '    if (!watch) return reply.code(404).send({ error: "That transfer is not being watched.", watching: false });',
+   "    if (!watch) return reply.send({ state: 'confirmed' });",
+   "a transfer nobody is watching is reported as confirmed"],
 ];
 
 const suitePasses = () =>
