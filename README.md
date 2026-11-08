@@ -18,6 +18,37 @@ A crypto wallet you talk to. The AI runs on your device. The keys never leave it
 > The root `Dockerfile` and `docker-compose.yml` build the **reference app**, carry a seed, and
 > point at **mainnet** RPCs. They are not how the backend gets deployed.
 
+## The product today — 8 November 2026
+
+The mobile app, run end to end in a browser against the live backend, the local WDK signer and
+real Sepolia nodes. Dated because every line of it is a measurement, not a plan.
+
+**Works, and was exercised:** balances and addresses on Arbitrum Sepolia and Ethereum Sepolia ·
+a **USDt balance and USDt history** on Arbitrum · activity from indexed history · live market
+prices in USD, NGN and EUR · chat, with a human gate on every spend · **native ETH transfers**
+with review, fee quote, confirmation and receipt · wallet creation, recovery phrase, restore and
+removal · app lock behind fingerprint, face or passcode · QR recipient scanning · an address book
+· **transaction history export to CSV** · **clearing chat history** · the open-source licences
+the app is obliged to carry.
+
+**Not built yet, stated plainly:**
+
+| | |
+|---|---|
+| **Sending USDt** | the balance and history are read; the send path is native ETH only. This is the outstanding half of V1 |
+| **The on-device keystore** | `wallet-keystore.ts` over the WDK Bare worklet is written and type-checked against WDK's real HRPC types, and **has never run** — it needs a development build on a physical phone. Until then the app's balances and sending come from the loopback dev wallet server, which is **a different wallet with its own seed** |
+| **Gasless** | sponsorship is wired and off until an operator configures a bundler and paymaster. No USDT paymaster exists on Arbitrum Sepolia in any case |
+| **Mainnet** | both app and backend hardcode Sepolia |
+| **The fiat off-ramp** | no implementation, and the question that gates it is legal rather than technical |
+
+**Checks, measured on 8 November 2026:** 249 mobile tests, 95 backend, 66 reference app, and a
+mutation harness at 37 killed / 0 survived. CI runs all four as separate jobs on every pull
+request and on pushes to `main` and `correctness` — it reports but does not yet block.
+
+Start at [docs/RUNNING-LOCALLY.md](docs/RUNNING-LOCALLY.md).
+
+---
+
 Phone-local QVAC integration and performance testing: [Android phone test setup and current hardware limitations](docs/QVAC-PHONE-TESTING.md). The native path is prepared; physical-device inference and APK compilation remain unverified.
 
 ![Wally](docs/screenshot.png)
@@ -176,4 +207,11 @@ Wally is a reference app. Read it, run it, copy the pattern.
 
 ## Mobile frontend: live testnet APIs
 
-The Expo mobile app connects public market prices and a local WDK testnet wallet. Setup, supported flows and current limits are documented in [Live API integration](docs/LIVE-API-INTEGRATION.md). Wallet keys remain on this computer in the development setup.
+The Expo app reads market prices through the backend proxy and talks to a local WDK testnet
+wallet for balances and sending. Setup, supported flows and current limits are in
+[Live API integration](docs/LIVE-API-INTEGRATION.md); the terminal-by-terminal guide is
+[RUNNING-LOCALLY.md](docs/RUNNING-LOCALLY.md).
+
+**In this development setup the wallet keys sit on your computer, not on a phone.** That server
+is a scaffold. The on-device keystore that replaces it exists in the code and has never run —
+see the table at the top of this file.

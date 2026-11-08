@@ -2,6 +2,14 @@
 
 Two common extension patterns: adding a new chain and adding a new intent type.
 
+> **This walkthrough is for the reference app (`src/`).** Adding a chain to the **backend** is a
+> different set of touchpoints — `CHAINS` in `backend/src/config.ts`, `EXPLORERS` in
+> `backend/src/indexer.ts` (which must match `CHAINS` in `mobile/src/services/wallet-api.ts`
+> **character for character**, because `parseTransaction` refuses any deviation), the chain id
+> mapping in `viaEtherscan`, and a mutation in `backend/scripts/mutation-test.mjs`. Adding one to
+> the **app** also means `tokensFor` in `mobile/src/services/tokens.ts`, whose token list exists
+> in three places that cannot import each other and is held in step by `backend/test/usdt.test.ts`.
+
 ## How to add a new chain
 
 Wally uses the WDK MCP toolkit's auto-discovery: if the wallet package for a chain is installed, the toolkit registers it automatically at startup.

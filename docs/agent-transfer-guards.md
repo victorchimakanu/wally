@@ -5,6 +5,13 @@ before one specific feature, and this record exists so that dependency is not di
 
 Written 22 October 2026, from an audit of the mobile app against the reference app.
 
+**Re-checked 8 November 2026 and still accurate.** `liveIntentReply()` still discards the model's
+amount and recipient and opens Send empty, which remains a stronger guarantee than validating
+them. Driving chat in a browser against the live stack produced a draft and then refused to act
+on it — *"This fictional USDt draft cannot be submitted to the connected testnet wallet"* — so
+the invariant holds in the shipped UI, not only in the source. The prerequisite below becomes
+due the moment chat is allowed to prefill a transfer.
+
 ---
 
 ## What the reference app does

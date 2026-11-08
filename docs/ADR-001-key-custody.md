@@ -1,6 +1,12 @@
 # ADR-001: Wallet keys stay on the phone
 
 **Status:** Accepted · 18 October 2026
+**Implementation, 8 November 2026:** *partly done, and the unfinished half is the important one.*
+The recovery flow and the vault exist (`wallet-keystore.ts` over `wallet-vault.ts`, keys chosen
+by the worklet and held in the OS keystore), and are type-checked against WDK's real HRPC types.
+**The worklet has never run** — it needs a development build on a physical phone. Until it does,
+balances and sending come from the loopback dev wallet server, which holds *its own seed on a
+developer's computer*. That server is the thing this ADR supersedes, and it is still in use.
 **Supersedes:** the development wallet API server as a production path
 
 ---

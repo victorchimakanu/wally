@@ -1,8 +1,15 @@
 # Setting up Wally locally
 
-This sets up the current web app in this repository — a Fastify server you talk to in a browser.
-The standalone mobile app described in [CLAUDE.md](CLAUDE.md) does not exist yet; this is the
-reference app it will be built from.
+> **This page sets up the reference app, which is not the product.**
+>
+> It is the Fastify server you talk to in a browser, kept for reference because it holds the
+> agent invariants the phone inherits. This page used to say the mobile app "does not exist
+> yet". **It does** — it is the product, it lives in [`mobile/`](../mobile/), and as of
+> 8 November 2026 it reads real testnet balances, sends real ETH, shows indexed history and
+> exports it. Set that up with [RUNNING-LOCALLY.md](RUNNING-LOCALLY.md) instead.
+>
+> The reference app's custodial shape was rejected for the product in
+> [ADR-001](ADR-001-key-custody.md): keys stay on the phone.
 
 Wally needs **two processes running side by side**: the QVAC model server (which owns the LLM) and
 Wally itself (which owns the wallet and the agent loop). Plan on two terminals.
