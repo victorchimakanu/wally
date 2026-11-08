@@ -1,16 +1,80 @@
 # Wally
 
-A crypto wallet you talk to. The AI runs on your machine. The keys never leave it either.
+A crypto wallet you talk to. The AI runs on your device. The keys never leave it either.
+
+> **Read this first — the repository holds three things.**
+>
+> | Directory | What it is | Status |
+> |---|---|---|
+> | [`mobile/`](mobile/) | The Expo / React Native app | **The product** |
+> | [`backend/`](backend/) | A provider proxy on 8080. Holds no keys, cannot sign | Live, not deployed |
+> | `src/`, `public/` | The original reference app: a browser UI and a server that holds a seed | Reference only |
+>
+> The rest of this README describes the **reference app**. Its custodial shape was rejected for the
+> product in [docs/ADR-001-key-custody.md](docs/ADR-001-key-custody.md) — keys stay on the phone.
+> For the product, start at [docs/RUNNING-LOCALLY.md](docs/RUNNING-LOCALLY.md) and
+> [backend/README.md](backend/README.md).
+>
+> The root `Dockerfile` and `docker-compose.yml` build the **reference app**, carry a seed, and
+> point at **mainnet** RPCs. They are not how the backend gets deployed.
+
+## The product today — 8 November 2026
+
+The mobile app, run end to end in a browser against the live backend, the local WDK signer and
+real Sepolia nodes. Dated because every line of it is a measurement, not a plan.
+
+**Works, and was exercised:** balances and addresses on Arbitrum Sepolia and Ethereum Sepolia ·
+a **USDt balance and USDt history** on Arbitrum · activity from indexed history · live market
+prices in USD, NGN and EUR · chat, with a human gate on every spend · **native ETH transfers**
+with review, fee quote, confirmation and receipt · wallet creation, recovery phrase, restore and
+removal · app lock behind fingerprint, face or passcode · QR recipient scanning · an address book
+· **transaction history export to CSV** · **clearing chat history** · the open-source licences
+the app is obliged to carry.
+
+**Not built yet, stated plainly:**
+
+| | |
+|---|---|
+| **Sending USDt** | the balance and history are read; the send path is native ETH only. This is the outstanding half of V1 |
+| **The on-device keystore** | `wallet-keystore.ts` over the WDK Bare worklet is written and type-checked against WDK's real HRPC types, and **has never run** — it needs a development build on a physical phone. Until then the app's balances and sending come from the loopback dev wallet server, which is **a different wallet with its own seed** |
+| **Gasless** | sponsorship is wired and off until an operator configures a bundler and paymaster. No USDT paymaster exists on Arbitrum Sepolia in any case |
+| **Mainnet** | both app and backend hardcode Sepolia |
+| **The fiat off-ramp** | no implementation, and the question that gates it is legal rather than technical |
+
+**Checks, measured on 8 November 2026:** 249 mobile tests, 95 backend, 66 reference app, and a
+mutation harness at 37 killed / 0 survived. CI runs all four as separate jobs on every pull
+request and on pushes to `main` and `correctness` — it reports but does not yet block.
+
+Start at [docs/RUNNING-LOCALLY.md](docs/RUNNING-LOCALLY.md).
+
+---
+
+Phone-local QVAC integration and performance testing: [Android phone test setup and current hardware limitations](docs/QVAC-PHONE-TESTING.md). The native path is prepared; physical-device inference and APK compilation remain unverified.
 
 ![Wally](docs/screenshot.png)
 
 You type plain English. Wally understands it with a local model, quotes the fee, asks you to confirm, and executes on-chain. No cloud AI, no API keys, no custodian.
 
-- **USDT in, USDT out, fees in USDT.** Wally's home chain is Arbitrum with an ERC-4337 smart account: you hold USDT, you send USDT, and the network fee is paid in USDT. The wallet never needs to hold ETH. ([setup](GASLESS.md))
+- **The wallet never needs to hold ETH.** Wally's home chain is Arbitrum with an ERC-4337 smart
+  account, so the network fee does not have to come out of a balance of ETH the user never asked
+  for. **What that means today depends on which app and which chain**, and the honest version is
+  worth stating on the front page:
+  - **Fees paid in USDT** is the reference app on **Arbitrum One**, via Pimlico's ERC-20
+    paymaster. That is what [GASLESS.md](GASLESS.md) sets up, and it works.
+  - **On Arbitrum Sepolia** — the chain the mobile app runs — **no USDT paymaster exists.**
+    Pimlico's supported tokens there are USDC, EURe, ostUSDC and PIM. So the mobile app uses
+    *sponsorship* instead: Wally pays the gas, the user holds no ETH, and fees-in-USDT becomes a
+    configuration change when the app reaches mainnet rather than a promise made in advance.
+  - Gasless is off until an operator configures a bundler and paymaster, and the app asks the
+    backend whether it is available rather than assuming.
 - **Local intelligence.** [QVAC](https://qvac.tether.io), Tether's on-device AI runtime, runs a quantized Qwen3 4B on your laptop, served through the QVAC CLI's OpenAI-compatible HTTP server. With the default loopback setup your messages never leave the machine to be understood; pointing at a remote QVAC server is an explicit opt-in that requires https and an API key.
 - **Local keys.** [WDK](https://wdk.tether.io), Tether's Wallet Development Kit, derives your wallet from a seed phrase and signs locally. Only signed transactions touch the network.
 - **A human gate on every spend.** The AI proposes a transaction. Nothing moves until you press CONFIRM inside a 60 second window.
 - **Chained DeFi from one sentence.** "Deposit 200 USDT into Aave and borrow at 50% LTV" runs the whole chain (approve, deposit, borrow) as one confirmed plan. If you leave out the loan-to-value, Wally asks for it. The borrow amount is computed in code from live prices and capped below the liquidation threshold; the model parses your words but never picks the numbers. Afterwards, ask "how safe is my loan" any time for a live health-factor readout with an on-chain proof link.
+
+## Local UI simulation
+
+Run `npm run dev:sim` and open http://127.0.0.1:3000. Node.js is the only requirement; this preview uses fictional balances and scripted replies, with no wallet keys, AI model, or blockchain access. See [the local feature review](docs/LOCAL-DEV-REVIEW.md) for tested flows and implementation gaps.
 
 ## Run it in five minutes
 
@@ -140,3 +204,14 @@ resolving the install fails loudly rather than silently drifting.
 [QVAC](https://qvac.tether.io) local AI runtime · [WDK](https://wdk.tether.io) Wallet Development Kit · Fastify + WebSocket · SQLite
 
 Wally is a reference app. Read it, run it, copy the pattern.
+
+## Mobile frontend: live testnet APIs
+
+The Expo app reads market prices through the backend proxy and talks to a local WDK testnet
+wallet for balances and sending. Setup, supported flows and current limits are in
+[Live API integration](docs/LIVE-API-INTEGRATION.md); the terminal-by-terminal guide is
+[RUNNING-LOCALLY.md](docs/RUNNING-LOCALLY.md).
+
+**In this development setup the wallet keys sit on your computer, not on a phone.** That server
+is a scaffold. The on-device keystore that replaces it exists in the code and has never run —
+see the table at the top of this file.

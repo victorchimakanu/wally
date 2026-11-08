@@ -1,0 +1,272 @@
+/**
+ * Mutation testing for the backend.  Run with: npm run test:mutation
+ *
+ * Each entry below is a bug someone could plausibly introduce. The mutation is applied, the
+ * suite is run, and the file is restored from the exact bytes read before mutating. If the
+ * suite still passes, that mutant SURVIVED: the suite is not protecting that line, whatever
+ * the coverage number says.
+ *
+ * Restore is NOT `git checkout`. An earlier version used it and destroyed uncommitted work
+ * mid-run, which is exactly when you are most likely to be running this — you have just added
+ * a guard and want to know whether it is tested.
+ *
+ * Why this exists. On 22 Oct 2026 the suite was green at 52 passing tests while seven of these
+ * mutations survived, five of them in server.ts — every key accepted, the origin allowlist
+ * gone, the rate limiter never refusing, the deep health check unauthenticated. Two of the
+ * tests meant to cover that code were not testing it at all: one re-implemented the function
+ * inline instead of importing it, another asserted a status code that the mutated path
+ * returned anyway, and a third compared a constant against itself.
+ *
+ * Add a mutation whenever you add a guard. A guard with no mutation is a guard nobody has
+ * shown to be tested.
+ */
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const BACKEND = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+/** [id, file relative to backend/, find, replace, what the bug would mean] */
+const MUTATIONS = [
+  // USDt: the arithmetic that is wrong by a factor of a million million when it is wrong
+  ["token-decimals-from-record", "src/indexer.ts",
+   "    const amount = appSafeAmount(value, token.decimals);",
+   "    const amount = appSafeAmount(value, declared !== null ? Number(declared) : token.decimals);",
+   "a remote contract decides how an amount is scaled on screen"],
+  ["token-contract-unchecked", "src/indexer.ts",
+   "  if (typeof contract !== \"string\" || contract.toLowerCase() !== token.address.toLowerCase()) {",
+   "  if (false) {",
+   "a transfer of some other token is rendered as USDt"],
+  ["token-amount-uncapped", "src/indexer.ts",
+   "function appSafeAmount(value: bigint, decimals: number): string | null {\n  const text = formatUnits(value, decimals);\n  return APP_AMOUNT.test(text) ? text : null;\n}",
+   "function appSafeAmount(value: bigint, decimals: number): string | null {\n  return formatUnits(value, decimals);\n}",
+   "one spam token transfer blanks the whole Activity list"],
+  // gasless: the one route that spends money when it is used
+  ["gasless-method-allowlist-gone", "src/routes/gasless.ts",
+   "    if (!allowed.includes(body.method)) {", "    if (false) {",
+   "any bundler or paymaster method is forwarded"],
+  ["gasless-serves-without-config", "src/routes/gasless.ts",
+   "    if (!target) {", "    if (false) {",
+   "an unconfigured service forwards to undefined instead of refusing"],
+  ["gasless-submit-always-allowed", "src/config.ts",
+   "  return config.rpcAllowBroadcast ? [...BUNDLER_READ_METHODS, \"eth_sendUserOperation\"] : BUNDLER_READ_METHODS;",
+   "  return [...BUNDLER_READ_METHODS, \"eth_sendUserOperation\"];",
+   "a user operation is submitted while broadcasting is switched off"],
+  ["gasless-batches-accepted", "src/routes/gasless.ts",
+   "    if (Array.isArray(body)) {", "    if (false) {",
+   "a batch fans out past the rate limit that protects the budget"],
+  ["gasless-returns-upstream-id", "src/routes/gasless.ts",
+   "      return reply.send({ ...result, id });", "      return reply.send(result);",
+   "a coalesced response carries another caller's JSON-RPC id"],
+  // access control
+  ["auth-always-match", "src/server.ts",
+   "  return timingSafeEqual(a, b);", "  return true;", "any key is accepted"],
+  ["auth-length-shortcut", "src/server.ts",
+   "  if (a.length !== b.length) return false;", "  if (a.length !== b.length) return true;",
+   "a wrong-length key is accepted"],
+  ["cors-allow-any-origin", "src/server.ts",
+   "      if (!config.allowedOrigins.includes(origin)) {", "      if (false) {",
+   "any website may call the API from a browser"],
+  ["health-prefix-open", "src/server.ts",
+   '    const shallowHealth = request.url === "/health";',
+   '    const shallowHealth = request.url.startsWith("/health");',
+   "/health?deep=1 becomes unauthenticated"],
+  ["ratelimit-off", "src/server.ts",
+   "    return window.count <= perMinute;", "    return true;", "the rate limiter never refuses"],
+  ["trustproxy-true", "src/server.ts",
+   "    trustProxy: trustProxySetting(),", "    trustProxy: true,", "any client may forge its IP"],
+
+  // config
+  ["ischain-proto", "src/config.ts",
+   '  return typeof value === "string" && Object.hasOwn(CHAINS, value);',
+   '  return typeof value === "string" && value in CHAINS;',
+   "__proto__ passes chain validation"],
+  ["broadcast-always-on", "src/config.ts",
+   '  return config.rpcAllowBroadcast ? [...RPC_READ_METHODS, "eth_sendRawTransaction"] : RPC_READ_METHODS;',
+   '  return [...RPC_READ_METHODS, "eth_sendRawTransaction"];',
+   "broadcasting is enabled regardless of config"],
+
+  // rpc proxy
+  ["rpc-allowlist-off", "src/routes/rpc.ts",
+   "    if (!allowed.includes(body.method)) {", "    if (false) {",
+   "any JSON-RPC method is forwarded"],
+  ["rpc-cache-nonce", "src/routes/rpc.ts",
+   'const CACHEABLE = new Set(["eth_getBalance", "eth_chainId", "eth_blockNumber", "eth_getCode"]);',
+   'const CACHEABLE = new Set(["eth_getBalance", "eth_chainId", "eth_blockNumber", "eth_getCode", "eth_getTransactionCount"]);',
+   "the nonce is cached, producing rejected transactions"],
+  ["rpc-cache-ignores-params", "src/routes/rpc.ts",
+   '    const key = cacheable ? `${chain}:${body.method}:${JSON.stringify(params)}` : "";',
+   '    const key = cacheable ? `${chain}:${body.method}` : "";',
+   "one address's balance is served for another"],
+  ["rpc-batch-allowed", "src/routes/rpc.ts",
+   "    if (Array.isArray(body)) {", "    if (false) {",
+   "batched requests fan out past the rate limit"],
+
+  // history
+  ["history-empty-not-503", "src/routes/history.ts",
+   "    if (items.length === 0 && errors.length === chains.length) {", "    if (false) {",
+   "a total failure is shown as 'no transactions'"],
+  ["history-no-dedupe", "src/routes/history.ts",
+   "        if (seen.has(id)) return false;", "        if (false) return false;",
+   "the same transaction appears twice"],
+  ["history-cap-raised", "src/routes/history.ts",
+   "      .slice(0, PAGE_SIZE);", "      .slice(0, 500);", "more items than parseHistory accepts"],
+  ["history-page-ignored", "src/routes/history.ts",
+   "fetchHistory(chain, address, page)", "fetchHistory(chain, address, 1)",
+   "every page returns page 1, so old history stays unreachable"],
+  ["history-page-unvalidated", "src/routes/history.ts",
+   "    if (!Number.isInteger(page) || page < 1 || page > MAX_PAGE) {", "    if (false) {",
+   "a nonsense page reaches the provider and spends quota"],
+  ["history-weak-address", "src/routes/history.ts",
+   "const ADDRESS = /^0x[0-9a-fA-F]{40}$/;", "const ADDRESS = /^0x/;",
+   "a malformed address reaches the indexer"],
+
+  // indexer
+  ["indexer-no-amount-cap", "src/indexer.ts",
+   "    const amount = appSafeEth(value);", "    const amount = formatEth(value);",
+   "an oversized amount poisons the whole list"],
+  ["indexer-wrong-explorer", "src/indexer.ts",
+   '  arbitrum: "https://sepolia.arbiscan.io",', '  arbitrum: "https://arbiscan.io",',
+   "explorerUrl no longer matches what the app requires"],
+  ["indexer-empty-is-error", "src/indexer.ts",
+   "    if (/no transactions found/i.test(message)) return [];", "    if (false) return [];",
+   "a brand new wallet looks broken"],
+  ["indexer-blockscout-filter", "src/indexer.ts",
+   "    `${host}/api/v2/addresses/${address}/transactions`,",
+   "    `${host}/api/v2/addresses/${address}/transactions?filter=to%20%7C%20from`,",
+   "the 422 regression returns"],
+
+  // the stop button
+  ["stop-button-ignored", "src/routes/status.ts",
+   "      sendingEnabled: disabled.length === 0,", "      sendingEnabled: true,",
+   "the kill switch reports enabled even when an operator disabled sending"],
+  ["stop-button-cached", "src/server.ts",
+   '    reply.header("Cache-Control", "no-store");', "    ;",
+   "responses become cacheable, including the stop button after it is pressed"],
+
+  // concurrency
+  ["no-coalescing-rpc", "src/routes/rpc.ts",
+   "      const result = await flight.run(flightKey, () =>",
+   "      const result = await ((async (_k, f) => f())(flightKey, () =>",
+   "every concurrent caller goes upstream separately"],
+  ["coalesce-ignores-params", "src/routes/rpc.ts",
+   "      const flightKey = `${chain}:${body.method}:${JSON.stringify(params)}`;",
+   "      const flightKey = `${chain}:${body.method}`;",
+   "two different addresses share one in-flight answer"],
+  ["rpc-id-not-substituted", "src/routes/rpc.ts",
+   '      return reply.header("x-wally-cache", cacheable ? "miss" : "bypass").send({ ...result, id });',
+   '      return reply.header("x-wally-cache", cacheable ? "miss" : "bypass").send(result);',
+   "a coalesced response carries another caller's JSON-RPC id"],
+  ["no-coalescing-market", "src/routes/market.ts",
+   "      const data = await flight.run(key, () =>",
+   "      const data = await ((async (_k, f) => f())(key, () =>",
+   "a price cache expiry stampedes CoinGecko"],
+
+  // cache
+  ["cache-never-expires", "src/cache.ts",
+   "    if (Date.now() - entry.storedAt >= this.ttlMs) return null;", "    if (false) return null;",
+   "stale data is served as fresh forever"],
+
+  // the receipt watcher
+  ["missing-receipt-reads-as-failed", "src/watcher.ts",
+   '  if (!receipt || typeof receipt !== "object") return { state: "pending" };',
+   '  if (!receipt || typeof receipt !== "object") return { state: "failed" };',
+   "a transfer not yet in a block is reported to the user as failed"],
+  ["unknown-status-reads-as-confirmed", "src/watcher.ts",
+   '  return { state: "pending" };\n}',
+   '  return { state: "confirmed" };\n}',
+   "a status the EVM does not define is announced as success"],
+  ["watch-list-unbounded", "src/watcher.ts",
+   "      if (watches.size >= maxWatches) {", "      if (false) {",
+   "anyone can grow the watch list until the process dies"],
+  ["watch-never-expires", "src/watcher.ts",
+   "    for (const [key, watch] of watches) if (at - watch.since > ttlMs) watches.delete(key);",
+   "    for (const [key, watch] of watches) if (false) watches.delete(key);",
+   "a hash nobody asked about is kept for the life of the process"],
+  ["unwatched-reads-as-settled", "src/routes/watch.ts",
+   '    if (!watch) return reply.code(404).send({ error: "That transfer is not being watched.", watching: false });',
+   "    if (!watch) return reply.send({ state: 'confirmed' });",
+   "a transfer nobody is watching is reported as confirmed"],
+];
+
+const suitePasses = () =>
+  spawnSync("npx", ["vitest", "run"], { cwd: BACKEND, encoding: "utf8" }).status === 0;
+
+/**
+ * Where a pristine copy lives while its file is mutated.
+ *
+ * `finally` is not enough. On 5 Nov 2026 this process was killed mid-run and left
+ * `broadcast-always-on` applied to src/config.ts — the mutation that makes
+ * eth_sendRawTransaction allowed regardless of RPC_ALLOW_BROADCAST. A security guard was
+ * disabled in the working tree, silently, by the tool meant to prove guards work.
+ *
+ * So the copy goes to disk before the mutation, and `recover()` puts it back on the next run.
+ * A SIGKILL cannot run a finally block, but it also cannot stop the next invocation reading
+ * what is sitting here.
+ */
+const SAFE = path.join(BACKEND, ".mutation-backup");
+
+/** Restore anything a previous run left behind. Runs before anything else. */
+function recover() {
+  if (!existsSync(SAFE)) return;
+  const left = readdirSync(SAFE);
+  for (const name of left) {
+    const rel = Buffer.from(name, "base64url").toString("utf8");
+    const target = path.join(BACKEND, rel);
+    writeFileSync(target, readFileSync(path.join(SAFE, name)));
+    console.error(`  recovered ${rel} — a previous run was interrupted while it was mutated`);
+  }
+  rmSync(SAFE, { recursive: true, force: true });
+  if (left.length) console.error("");
+}
+
+const stash = (rel, original) => {
+  mkdirSync(SAFE, { recursive: true });
+  writeFileSync(path.join(SAFE, Buffer.from(rel).toString("base64url")), original);
+};
+
+/** Restore the bytes we read, and drop the on-disk copy once the file is safe again. */
+const restore = (file, original, rel) => {
+  writeFileSync(file, original);
+  rmSync(path.join(SAFE, Buffer.from(rel).toString("base64url")), { force: true });
+};
+
+recover();
+
+if (!suitePasses()) {
+  console.error("The suite is already failing. Fix that before mutation testing means anything.");
+  process.exit(1);
+}
+console.log("baseline passing\n");
+
+const survived = [];
+let killed = 0;
+
+for (const [id, rel, find, replace, meaning] of MUTATIONS) {
+  const file = path.join(BACKEND, rel);
+  const original = readFileSync(file, "utf8");
+  if (!original.includes(find)) {
+    console.log(`  !! ${id}: anchor not found in ${rel} — the mutation needs updating`);
+    survived.push([id, rel, "anchor missing; this mutation no longer tests anything"]);
+    continue;
+  }
+  stash(rel, original);
+  writeFileSync(file, original.replace(find, replace));
+  let caught;
+  try {
+    caught = !suitePasses();
+  } finally {
+    restore(file, original, rel);
+  }
+  if (caught) killed++;
+  else survived.push([id, rel, meaning]);
+  console.log(`  ${caught ? "killed  " : "SURVIVED"}  ${id.padEnd(28)} ${meaning}`);
+}
+
+console.log(`\n${killed} killed, ${survived.length} survived, ${MUTATIONS.length} total`);
+if (survived.length) {
+  console.log("\nUNPROTECTED — the suite passes while these bugs are present:");
+  for (const [id, rel, meaning] of survived) console.log(`  - ${id} (${rel}): ${meaning}`);
+  process.exit(1);
+}

@@ -1,0 +1,9 @@
+{
+  "plugins": ["@qvac/sdk/llamacpp-completion/plugin"],
+  "loggerLevel": "warn",
+  "loggerConsoleOutput": true,
+  "requireHttpChecksum": true,
+  "requireSecureTransport": true,
+  "httpDownloadConcurrency": 1,
+  "httpConnectionTimeoutMs": 15000
+}
