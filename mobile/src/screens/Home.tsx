@@ -1,3 +1,4 @@
+import { CustodyGuard } from '../components/WalletData';
 import React, { useState } from 'react';
 import { Redirect, router } from 'expo-router';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
@@ -35,6 +36,10 @@ export function WalletScreen() {
     { title: 'Trends', detail: '24h movers', icon: '0aca9.svg', color: c.amber, action: () => router.push({ pathname: '/market', params: { filter: 'Trends' } }) },
   ] as const;
   return <Screen tab="wallet" contentStyle={{ gap: 24 }}>
+    {/* Above the overview, not below it. In a refused split this screen falls back to the demo
+        wallet, which is safe but silent — the real balances simply vanish with no explanation.
+        The card says which wallet is missing and why. */}
+    <CustodyGuard />
     <WalletOverview />
     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>
       {tools.map(tool => <Pressable key={tool.title} accessibilityRole="button" accessibilityLabel={tool.title} onPress={tool.action} style={({ pressed }) => ({ width: '47.8%', flexGrow: 1, backgroundColor: tool.color, borderRadius: 24, paddingHorizontal: 16, paddingVertical: 14, gap: 6, opacity: pressed ? .75 : 1 })}>
@@ -59,7 +64,11 @@ export function ChatsScreen() {
   </Screen>;
 }
 
-export function HistoryScreen() { return useWallet().enabled ? <LiveHistoryScreen /> : <DemoHistoryScreen />; }
+export function HistoryScreen() {
+  const wallet = useWallet();
+  if (wallet.blocked) return <Screen title="Activity" subtitle="Unavailable in this build"><CustodyGuard /></Screen>;
+  return wallet.enabled ? <LiveHistoryScreen /> : <DemoHistoryScreen />;
+}
 function DemoHistoryScreen() {
   const { state } = useDemo();
   const [search, setSearch] = useState('');

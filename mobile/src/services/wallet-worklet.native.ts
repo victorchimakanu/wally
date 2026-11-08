@@ -1,3 +1,4 @@
+import { custodyOf, devServerConfigured, protectsDisplayedFunds, splitPermitted, type Custody } from './custody.ts';
 /**
  * Opens the WDK Bare worklet and hands back a keystore bound to it.
  *
@@ -116,7 +117,15 @@ export async function getKeystore(): Promise<Keystore> {
   return shared;
 }
 
-export type WalletStatus = { available: false } | { available: true; exists: boolean; backedUpAt: number };
+/**
+ * `custody` travels with `backedUpAt` on purpose. Read alone, that timestamp says "this user
+ * wrote their phrase down" and invites the conclusion "so their money is safe" — which is false
+ * whenever the money on screen belongs to the dev wallet server rather than to this phone.
+ * Carrying custody here means no caller can have one without the other.
+ */
+export type WalletStatus =
+  | { available: false }
+  | { available: true; exists: boolean; backedUpAt: number; custody: Custody; protectsDisplayedFunds: boolean };
 
 /**
  * What this device holds, read from the vault alone.
@@ -129,5 +138,26 @@ export async function walletStatus(): Promise<WalletStatus> {
   const storage = await loadSecureStorage(Platform.OS);
   if (!storage) return { available: false };
   const record = await createWalletVault(storage).read();
-  return { available: true, exists: record !== null, backedUpAt: record?.backedUpAt ?? 0 };
+  const custody = custodyOf({ keystoreWallet: record !== null, devServerConfigured, splitPermitted });
+  return {
+    available: true,
+    exists: record !== null,
+    backedUpAt: record?.backedUpAt ?? 0,
+    custody,
+    protectsDisplayedFunds: protectsDisplayedFunds(custody),
+  };
+}
+
+/**
+ * Which wallet this build is using, read from the vault alone.
+ *
+ * Like `walletStatus`, this deliberately does not start the worklet: the refusal has to be
+ * decidable before any key material is opened, and on a build where the worklet cannot start
+ * at all it still has to produce the right answer.
+ */
+export async function currentCustody(): Promise<Custody> {
+  const storage = await loadSecureStorage(Platform.OS);
+  if (!storage) return custodyOf({ keystoreWallet: false, devServerConfigured, splitPermitted });
+  const record = await createWalletVault(storage).read();
+  return custodyOf({ keystoreWallet: record !== null, devServerConfigured, splitPermitted });
 }

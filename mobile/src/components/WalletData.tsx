@@ -4,9 +4,10 @@ import { router } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
 import { createClipboardSafety, copyNotice } from '../services/clipboard-safety.ts';
 import { Pressable, Share, View } from 'react-native';
-import { Button, Card, Label, Note, QrTile, ReceiveAddress, shared } from './ui';
+import { Button, Card, Label, Note, Pill, QrTile, ReceiveAddress, shared } from './ui';
 import { useWallet } from '../data/wallet';
 import { historyProvenance } from '../services/history-source';
+import { custodyNotice } from '../services/custody';
 import { CHAINS, formatEth, type Chain } from '../services/wallet-api';
 import { colors as c } from '../theme';
 
@@ -14,6 +15,31 @@ import { colors as c } from '../theme';
 export function NetworkChoice({ value, onChange }: { value: Chain; onChange: (value: Chain) => void }) {
   return <View accessibilityRole="radiogroup" style={{ flexDirection: 'row', padding: 4, borderRadius: 29, borderWidth: 1, borderColor: c.line, backgroundColor: c.surface }}>{(Object.keys(CHAINS) as Chain[]).map(chain => { const selected = value === chain; return <Pressable key={chain} accessibilityRole="radio" aria-checked={selected} accessibilityState={{ checked: selected }} accessibilityLabel={CHAINS[chain].name} onPress={() => onChange(chain)} style={{ flex: 1, minHeight: 46, paddingHorizontal: 8, borderRadius: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: selected ? c.amber : 'transparent' }}><Label size={15} weight={selected ? 'semibold' : 'medium'} numberOfLines={1}>{CHAINS[chain].name}</Label></Pressable>; })}</View>;
 }
+/**
+ * The refusal, and the warning that replaces it when a developer opts in.
+ *
+ * Rendered by every screen that shows money or an address. Receive matters most: an address on
+ * screen is an invitation to send funds to it, and in a split that address belongs to a wallet
+ * the user’s recovery phrase cannot recover. Showing nothing is the only honest option.
+ *
+ * Returns null in the two safe states, so a screen can render it unconditionally.
+ */
+export function CustodyGuard() {
+  const wallet = useWallet();
+
+  if (wallet.blocked) return <Card>
+    <Pill tone="warning">TWO WALLETS</Pill>
+    <Label size={16} weight="medium">This build cannot open your wallet</Label>
+    <Note>{wallet.blocked}</Note>
+    <Note>A wallet is stored on this phone, and this build is also configured to use the development wallet server on a computer. Those are different wallets with different recovery phrases, so showing you one while offering to back up the other could cost you money. Wally would rather show you nothing.</Note>
+    <Note>Two ways out: remove the wallet from this phone in Settings, or unset EXPO_PUBLIC_WALLY_API_URL and rebuild. Your funds on both are untouched either way.</Note>
+  </Card>;
+
+  const notice = wallet.custody ? custodyNotice(wallet.custody) : null;
+  if (!notice) return null;
+  return <Card><Pill tone="warning">WHOSE MONEY THIS IS</Pill><Note>{notice}</Note></Card>;
+}
+
 export function WalletStatus() {
   const wallet = useWallet();
   return <View style={{ gap: 8 }}><Note>{wallet.loading ? 'Refreshing testnet balances…' : wallet.snapshot ? `${wallet.stale ? 'Saved' : 'Fetched'} balances · ${new Date(wallet.snapshot.fetchedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Connecting to the local wallet…'}</Note>{!!wallet.error && <Note error>{wallet.error}</Note>}<Note>WDK wallet on your computer · Testnet ETH has no monetary value.</Note><Button secondary label="Refresh wallet" disabled={wallet.loading || wallet.offline} onPress={() => { void wallet.refresh(); }} /></View>;

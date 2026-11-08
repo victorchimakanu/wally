@@ -20,6 +20,7 @@ import { buildInfo, supportSummary, versionLabel } from '../services/build-info'
 import { backendOrigin } from '../services/backend';
 import { walletStatus, keystoreAvailable, keystoreUnavailableReason, type WalletStatus as VaultStatus } from '../services/wallet-worklet';
 import { lockCapability, lockEnabled, type LockCapability } from '../services/app-lock';
+import { custodyNotice } from '../services/custody';
 import { readDeviceLock, readLockPreference, writeLockPreference } from '../services/device-lock';
 
 /**
@@ -184,6 +185,10 @@ function WalletKeysCard({ devWallet }: { devWallet: boolean }) {
   return <>
     {status?.available === true && (status.exists ? <Card>
       <Pill tone={status.backedUpAt ? 'success' : 'warning'}>{status.backedUpAt ? 'WALLET ON THIS PHONE' : 'NOT BACKED UP'}</Pill>
+      {/* The phrase and the money can belong to different wallets. Saying "you confirmed your
+          recovery phrase" beside balances it does not protect is the confusion custody.ts
+          exists to prevent, so the warning sits with the claim. */}
+      {!status.protectsDisplayedFunds && <Note error>{custodyNotice(status.custody) ?? 'This phrase does not control the balances shown elsewhere in the app.'}</Note>}
       <Label>{status.backedUpAt
         ? `Your keys are held on this phone. You confirmed your recovery phrase on ${new Date(status.backedUpAt).toLocaleDateString()}.`
         : 'Your keys are held on this phone, and your recovery phrase is not written down yet. Until it is, sending stays switched off — there would be no way back if you lost this phone.'}</Label>

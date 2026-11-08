@@ -1,3 +1,4 @@
+import { CustodyGuard } from '../components/WalletData';
 import React, { useState } from 'react';
 import { View } from 'react-native';
 import { router } from 'expo-router';
@@ -62,6 +63,8 @@ export function ExportDataScreen() {
       setError(problem instanceof Error ? problem.message : 'The file could not be saved.');
     } finally { setBusy(false); }
   }
+
+  if (wallet.blocked) return <Screen title="Export your history" subtitle="Unavailable in this build"><CustodyGuard /></Screen>;
 
   if (!wallet.enabled) return <Screen title="Export your history" subtitle="Nothing to export yet">
     <Card>

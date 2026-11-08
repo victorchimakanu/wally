@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   PHRASE_WORDS, normalisePhrase, phraseWords, phraseShape,
-  backupPositions, checkBackup, spendAllowed,
+  backupPositions, checkBackup,
 } from '../src/services/recovery.ts';
 
 /**
@@ -92,32 +92,6 @@ test('a typed answer is forgiven its capitals and spaces, but not its spelling',
   assert.deepEqual(checkBackup(words, [99], { 99: 'abandon' }), { ok: false, wrong: [99] });
 });
 
-test('sending is blocked until the phrase is written down, and receiving never is', () => {
-  // No wallet at all.
-  const none = spendAllowed(null);
-  assert.equal(none.allowed, false);
-  assert.equal(none.allowed === false ? none.action : '', 'create');
-
-  // A wallet that exists but has never been backed up. This is the dangerous state: funds can
-  // arrive and nothing could bring them back.
-  const unbacked = spendAllowed({ backedUpAt: 0 });
-  assert.equal(unbacked.allowed, false);
-  assert.equal(unbacked.allowed === false ? unbacked.action : '', 'back-up');
-  assert.match(unbacked.allowed === false ? unbacked.reason : '', /recovery phrase/i);
-
-  assert.deepEqual(spendAllowed({ backedUpAt: 1_700_000_000_000 }), { allowed: true });
-});
-
-test('no reason shown to the user leaks key material', () => {
-  // These strings go on screen next to a wallet. Nothing here should ever be able to carry a
-  // phrase or a key, so the guard is asserted rather than assumed.
-  const short = phraseShape('abandon ability');
-  const noWallet = spendAllowed(null);
-  const unbacked = spendAllowed({ backedUpAt: 0 });
-  const messages = [
-    short.ok === false ? short.reason : '',
-    noWallet.allowed === false ? noWallet.reason : '',
-    unbacked.allowed === false ? unbacked.reason : '',
-  ].join(' ');
-  assert.doesNotMatch(messages, /abandon|ability|0x|[A-Za-z0-9+/]{32,}={0,2}/);
-});
+// The spend-gate cases moved to custody.test.ts on 8 November 2026. They now have to name
+// whose money is being spent, because answering that is the whole point: a backup of the
+// keystore wallet must never unlock spending from the dev server's.
