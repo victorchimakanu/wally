@@ -35,6 +35,13 @@ passcode · QR recipient scanning · address book · **CSV export of transaction
 keystore actually running · gasless sponsorship (off until an operator configures it; no USDT
 paymaster exists on Arbitrum Sepolia regardless) · mainnet.
 
+**One thing that will cost you an hour if nobody says it.** AI chat only works under Metro.
+`store.tsx` reads the model endpoint as `__DEV__ ? process.env.EXPO_PUBLIC_QVAC_URL : ''`, so a
+production bundle — anything from `npm run export:web` — has no endpoint and falls back to
+scripted replies, whatever else is running. Chat also goes through the backend's passthrough on
+8080 rather than to QVAC on 11434, because QVAC omits the CORS header on streamed replies. So
+chat needs **three** things up: the model, the backend, and Metro.
+
 **Checks, 8 November 2026:** 249 tests, TypeScript and ESLint clean. CI runs them on every pull
 request.
 
