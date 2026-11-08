@@ -12,7 +12,16 @@ import { tokensFor } from './tokens.ts';
 import { plausibleQuoteSpan, quoteDeadline } from './quote-clock.ts';
 export type Chain = 'arbitrum' | 'ethereum';
 export const CHAINS = { arbitrum: { name: 'Arbitrum Sepolia', id: 421614, explorer: 'https://sepolia.arbiscan.io' }, ethereum: { name: 'Ethereum Sepolia', id: 11155111, explorer: 'https://sepolia.etherscan.io' } } as const;
-export type WalletBalance = { chain: Chain; name: string; chainId: number; symbol: 'ETH'; address: string; qr: string; balance: string | null; balanceWei: string | null; error: string };
+/**
+ * `symbol` is a string, not the literal 'ETH'.
+ *
+ * It said 'ETH' from before tokens existed and stayed that way after USDt balances started
+ * flowing through it on 6 November — a type that disagreed with the data for two days, which
+ * is the kind of thing that makes a later `symbol === 'ETH'` look safe when it is not.
+ * `parseWallet` is what actually constrains it: the chain's own coin, or a token pinned for
+ * that chain, and nothing else.
+ */
+export type WalletBalance = { chain: Chain; name: string; chainId: number; symbol: string; address: string; qr: string; balance: string | null; balanceWei: string | null; error: string };
 export type WalletSnapshot = { version: 1; network: 'testnet'; location: 'computer'; fetchedAt: number; balances: WalletBalance[]; tokenNotice: string };
 export type LiveQuote = { id: string; chain: Chain; chainId: number; network: string; symbol: string; decimals: number; from: string; recipient: string; amount: string; fee: string; total: string;
   /** The server's own clock. Kept for the record; never compared against this phone's. */
@@ -156,6 +165,57 @@ export function wei(value: string): bigint {
  * Erring high costs the user a little dust left behind; erring low costs them a failed
  * transaction, so the default leans high.
  */
+/**
+ * The most of this asset that can actually be sent, which is not the balance.
+ *
+ * Two different sums, because a coin pays its own fee and a token does not:
+ *
+ * - **A token.** The fee comes out of ETH, so the whole token balance is sendable. Reserving
+ *   anything would strand funds for no reason.
+ * - **The chain's own coin.** The fee comes out of the same balance, so the fee plus a buffer
+ *   has to stay behind. Without the buffer a gas price that rises between the estimate and
+ *   the broadcast turns "send max" into a transfer that cannot pay for itself.
+ *
+ * Returns 0 when the answer is unknown — no gas price for a coin — so the caller can refuse
+ * rather than offer a figure it cannot stand behind. "Send max" producing a number that is
+ * then rejected is worse than not offering it.
+ */
+export function sendableMax(input: {
+  balanceBase: bigint;
+  native: boolean;
+  gasPriceWei?: bigint;
+  gasLimit?: bigint;
+}): bigint {
+  if (input.balanceBase <= 0n) return 0n;
+  if (!input.native) return input.balanceBase;
+  if (input.gasPriceWei === undefined || input.gasPriceWei <= 0n) return 0n;
+  return maxSendable(input.balanceBase, input.gasPriceWei, input.gasLimit ?? 21000n);
+}
+
+/**
+ * The current gas price, read through the backend proxy.
+ *
+ * Needed before a quote exists, because "send max" has to fill the field the quote is made
+ * from. Returns null rather than throwing: an unavailable gas price disables the button, and
+ * a failure here must never block an ordinary typed transfer.
+ */
+export async function fetchGasPrice(chain: Chain, transport: typeof fetch = fetch): Promise<bigint | null> {
+  const origin = backendOrigin();
+  if (!origin) return null;
+  try {
+    const response = await transport(`${origin}/v1/rpc/${chain}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...backendHeaders(origin) },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_gasPrice', params: [] }),
+    });
+    if (!response.ok) return null;
+    const body = await response.json() as { result?: unknown };
+    if (typeof body?.result !== 'string' || !/^0x[\da-f]+$/i.test(body.result)) return null;
+    const price = BigInt(body.result);
+    return price > 0n ? price : null;
+  } catch { return null; }
+}
+
 export function maxSendable(balanceWei: bigint, gasPriceWei: bigint, gasLimit = 21000n, bufferPercent = 20n): bigint {
   if (balanceWei <= 0n || gasPriceWei <= 0n || gasLimit <= 0n) return 0n;
   const fee = gasLimit * gasPriceWei;

@@ -7,7 +7,7 @@ import { tokensFor } from '../services/tokens';
 import { AssetChoice, LiveActivityCard, LiveReceiveCard, NetworkChoice, WalletStatus } from '../components/WalletData';
 import { useWallet } from '../data/wallet';
 import { useDemo } from '../demo/store';
-import { CHAINS, isAddress, type Chain, type LiveTransaction, parseSendAmount } from '../services/wallet-api';
+import { CHAINS, fetchGasPrice, formatUnits, isAddress, parseSendAmount, sendableMax, type Chain, type LiveTransaction } from '../services/wallet-api';
 import { monotonicNow, quoteExpired, secondsLeft } from '../services/quote-clock';
 import { addressTrust, trustWarning } from '../services/address-safety.ts';
 import { usePreferences } from '../demo/preferences';
@@ -53,6 +53,31 @@ export function LiveSendScreen() {
     preferences.recipients.map(item => ({ address: item.address, label: item.name })),
   ));
 
+  /**
+   * Fill the amount with everything that can actually be sent.
+   *
+   * For a token that is the whole balance — the fee comes out of ETH. For the coin the fee
+   * and a buffer stay behind, which needs a gas price, which needs the backend; without one
+   * the button is not offered rather than offering a figure the quote would reject.
+   */
+  const [maxBusy, setMaxBusy] = useState(false);
+  async function fillMax() {
+    if (maxBusy || !balance?.balanceWei) return;
+    setMaxBusy(true); setError('');
+    try {
+      const gasPriceWei = token ? undefined : (await fetchGasPrice(chain)) ?? undefined;
+      const most = sendableMax({ balanceBase: BigInt(balance.balanceWei), native: !token, ...(gasPriceWei === undefined ? {} : { gasPriceWei }) });
+      if (most <= 0n) {
+        throw new Error(token
+          ? `There is no ${sending} here to send.`
+          : 'The network fee could not be read, so Wally will not guess at a maximum. Type an amount instead.');
+      }
+      wallet.clearQuote();
+      setAmount(formatUnits(most, decimals, decimals));
+    } catch (failure) { setError(failure instanceof Error ? failure.message : 'A maximum could not be worked out.'); }
+    finally { setMaxBusy(false); }
+  }
+
   async function review() {
     if (busy) return;
     setError('');
@@ -71,7 +96,7 @@ export function LiveSendScreen() {
     } catch (failure) { setError(failure instanceof Error ? failure.message : 'Could not prepare the transfer.'); }
     finally { setBusy(false); }
   }
-  return <Screen title={`Send testnet ${sending}`} subtitle="A real testnet transfer" footer={<Button label={busy ? 'Checking network fee…' : 'Review transfer'} disabled={busy || wallet.offline || state.offline || !balance || balance.balance === null} onPress={() => { void review(); }} />}><Pill>TESTNET ONLY</Pill><NetworkChoice value={chain} onChange={next => { wallet.clearQuote(); setChain(next); setAsset('ETH'); setError(''); }} /><AssetChoice value={sending} options={assets} onChange={next => { wallet.clearQuote(); setAsset(next); setAmount(''); setError(''); }} /><Note>Available on {CHAINS[chain].name}: {balance?.balance ?? 'Unavailable'} {sending}</Note>{!!token && <Note>The network fee is paid in ETH, not {sending}. You need a little ETH on this network as well.</Note>}<View style={shared.row}><View style={shared.flex}><Label weight="medium">Recipient address</Label></View><Button secondary label="Scan a code" onPress={() => router.push('/scan')} /></View>{!!scannedChain && <Note>Switched to {CHAINS[scannedChain].name}, which the scanned code asked for.</Note>}{params.scannedAmountIgnored === '1' && <Note>That code also contained an amount. Wally does not fill it in — type the amount you mean to send.</Note>}<TextInput accessibilityLabel="Recipient address" value={recipient} editable={!busy} autoCapitalize="none" autoCorrect={false} placeholder="0x…" placeholderTextColor={c.muted} onChangeText={value => { wallet.clearQuote(); setRecipient(value); }} style={shared.input} /><Button secondary label="Choose saved recipient" disabled={busy} onPress={() => router.push('/address-book')} /><Label weight="medium">Amount in {sending}</Label><TextInput accessibilityLabel={`Amount in ${sending}`} value={amount} editable={!busy} keyboardType="decimal-pad" placeholder={token ? "25" : "0.001"} placeholderTextColor={c.muted} onChangeText={value => { wallet.clearQuote(); setAmount(value); }} style={shared.input} /><Note>Only ordinary wallet addresses can receive this transfer. Fees are estimated from the selected network and always paid in ETH. Nothing is sent until you approve the next screen.</Note>{balance?.balance === '0' && <Card style={{ backgroundColor: c.warningTint }}><Label weight="semibold">Fund your testnet wallet first</Label><Note>Request ETH from a {CHAINS[chain].name} faucet for your Receive address. Testnet tokens have no monetary value.</Note><Button secondary label="Open receive address" onPress={() => router.push('/receive')} /></Card>}{!!lookalike && <Card style={{ backgroundColor: c.warningTint }}><Label weight="semibold">Check this address carefully</Label><Note>{lookalike}</Note></Card>}{!!error && <Note error>{error}</Note>}<WalletStatus /></Screen>;
+  return <Screen title={`Send testnet ${sending}`} subtitle="A real testnet transfer" footer={<Button label={busy ? 'Checking network fee…' : 'Review transfer'} disabled={busy || wallet.offline || state.offline || !balance || balance.balance === null} onPress={() => { void review(); }} />}><Pill>TESTNET ONLY</Pill><NetworkChoice value={chain} onChange={next => { wallet.clearQuote(); setChain(next); setAsset('ETH'); setError(''); }} /><AssetChoice value={sending} options={assets} onChange={next => { wallet.clearQuote(); setAsset(next); setAmount(''); setError(''); }} /><Note>Available on {CHAINS[chain].name}: {balance?.balance ?? 'Unavailable'} {sending}</Note>{!!token && <Note>The network fee is paid in ETH, not {sending}. You need a little ETH on this network as well.</Note>}<View style={shared.row}><View style={shared.flex}><Label weight="medium">Recipient address</Label></View><Button secondary label="Scan a code" onPress={() => router.push('/scan')} /></View>{!!scannedChain && <Note>Switched to {CHAINS[scannedChain].name}, which the scanned code asked for.</Note>}{params.scannedAmountIgnored === '1' && <Note>That code also contained an amount. Wally does not fill it in — type the amount you mean to send.</Note>}<TextInput accessibilityLabel="Recipient address" value={recipient} editable={!busy} autoCapitalize="none" autoCorrect={false} placeholder="0x…" placeholderTextColor={c.muted} onChangeText={value => { wallet.clearQuote(); setRecipient(value); }} style={shared.input} /><Button secondary label="Choose saved recipient" disabled={busy} onPress={() => router.push('/address-book')} /><View style={shared.row}><View style={shared.flex}><Label weight="medium">Amount in {sending}</Label></View><Button secondary label={maxBusy ? 'Working…' : 'Send max'} disabled={busy || maxBusy || !balance?.balanceWei || balance.balanceWei === '0'} onPress={() => { void fillMax(); }} /></View><TextInput accessibilityLabel={`Amount in ${sending}`} value={amount} editable={!busy} keyboardType="decimal-pad" placeholder={token ? "25" : "0.001"} placeholderTextColor={c.muted} onChangeText={value => { wallet.clearQuote(); setAmount(value); }} style={shared.input} /><Note>Only ordinary wallet addresses can receive this transfer. Fees are estimated from the selected network and always paid in ETH. Nothing is sent until you approve the next screen.</Note>{balance?.balance === '0' && <Card style={{ backgroundColor: c.warningTint }}><Label weight="semibold">Fund your testnet wallet first</Label><Note>Request ETH from a {CHAINS[chain].name} faucet for your Receive address. Testnet tokens have no monetary value.</Note><Button secondary label="Open receive address" onPress={() => router.push('/receive')} /></Card>}{!!lookalike && <Card style={{ backgroundColor: c.warningTint }}><Label weight="semibold">Check this address carefully</Label><Note>{lookalike}</Note></Card>}{!!error && <Note error>{error}</Note>}<WalletStatus /></Screen>;
 }
 export function LiveReviewScreen() {
   const wallet = useWallet(), { state } = useDemo();

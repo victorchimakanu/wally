@@ -9,7 +9,7 @@
  * server as well as to the phone (measured 20 Oct 2026) — so it cannot be the default.
  * Etherscan V2 covers both chains through one endpoint and one key.
  */
-import { config, tokensFor, type Chain, type TokenSpec } from "./config.js";
+import { config, indexerUrl, tokensFor, type Chain, type TokenSpec } from "./config.js";
 import { fetchJson } from "./upstream.js";
 import { getLogger } from "./logger.js";
 
@@ -341,7 +341,9 @@ function fromBlockscout(chain: Chain, raw: Record<string, unknown>): LiveTransac
  */
 async function viaBlockscout(chain: Chain, address: string, page: number): Promise<LiveTransaction[]> {
   if (page > 1) return [];
-  const host = chain === "arbitrum" ? config.indexerArbitrum : config.indexerEthereum;
+  // indexerUrl(), not the ternary again. This line and that function were the same decision
+  // written twice, and the function had no callers — so one of them was going to drift.
+  const host = indexerUrl(chain);
   // No `filter`: the endpoint already returns transactions in both directions, and the only
   // accepted values are the singular "to" or "from". Asking for `filter=to | from` is a 422
   // ("Invalid value for enum") from the live service — measured 21 Oct 2026. Kojo's dev
