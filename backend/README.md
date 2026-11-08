@@ -211,6 +211,9 @@ npm run test:mutation          # proves the tests actually catch the bugs they c
 npm run typecheck
 ```
 
+Measured 8 November 2026: **95 tests**, and the mutation harness at **37 killed, 0 survived**.
+CI runs both on every pull request and on pushes to `main` and `correctness`.
+
 ### `npm run test:mutation`
 
 Applies a bug to one line at a time and checks the suite notices. A mutation that survives
@@ -266,7 +269,7 @@ Point the app at it with `EXPO_PUBLIC_WALLY_PROXY_URL` in `mobile/.env.local`.
 
 ## Open decisions
 
-Two choices are outstanding. Both are config-level here, so neither needs an app release.
+One choice is outstanding. It is config-level here, so it needs no app release.
 
 ### 1. Which transaction indexer? — DECIDED: Etherscan V2
 
@@ -291,6 +294,14 @@ the live shape was unconfirmed. It now is:
 
 Every record was validated against the exact rules the app enforces: the amount and fee
 expression, the `${explorer}/tx/${hash}` form, hash shape, status enum, and the 50-item cap.
+
+**A trap worth knowing about, found 8 November 2026.** This worked from the day the key was
+set, and the app said otherwise. The Activity screen's source line was a hardcoded string
+reading "Blockscout and local receipts", ignoring the `source` the response actually carried —
+so a correctly configured stack showed indexed Etherscan history while crediting the provider
+that had 403'd, and disclaiming the token transfers it was displaying. If you are checking
+whether this backend is being used, trust the **network panel** or `x-wally-cache`, not an app
+build older than 8 November. Fixed in the app in PR #37.
 
 The original comparison is kept below for the record.
 
@@ -325,6 +336,10 @@ signature — so this is an availability and abuse question, not a safety one.
 **Recommendation: through the proxy, with a tighter rate limit on that one method.** It keeps
 provider keys out of the app and gives one place to see failed submissions. Currently **off**;
 flip `RPC_ALLOW_BROADCAST` when decided.
+
+Verified off on 8 November 2026: `eth_sendRawTransaction`, `eth_sendTransaction`, `eth_sign`,
+`eth_signTransaction`, `personal_sign` and `eth_accounts` each answer **403** from a running
+instance, and `/health` reports `broadcastEnabled: false`.
 
 ---
 

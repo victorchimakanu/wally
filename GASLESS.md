@@ -12,6 +12,11 @@
 > The mobile app also never talks to Pimlico directly. Both the bundler and the paymaster go
 > through the backend proxy's `/v1/bundler/:chain` and `/v1/paymaster/:chain`, because the API
 > key lives in the endpoint URL and an app bundle carrying it leaks a spendable budget.
+>
+> **Status, verified 8 November 2026:** gasless is **off**. A running backend answers
+> `GET /v1/gasless` with `available:false, submitEnabled:false` because no bundler or paymaster
+> URL is configured. The app asks rather than assuming, so it simply does not offer it. Turning
+> it on needs a Pimlico key and a sponsorship policy — a budget, and therefore a decision.
 
 This is Wally's default story: **you hold USDT, you send USDT, and the network fee comes out
 in USDT.** The wallet never holds ETH. This guide takes about ten minutes, and at the end your

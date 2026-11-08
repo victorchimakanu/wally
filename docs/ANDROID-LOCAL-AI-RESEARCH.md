@@ -1,5 +1,16 @@
 # Wally: local Android AI research and implementation brief
 
+> **Historical record — read with the date in mind.**
+>
+> Research into running the model on Android. It is kept because it says what was true and checked at the time, and rewriting it
+> would destroy that. **It is not a description of Wally today.**
+>
+> Much of what it lists as missing now ships. As of 8 November 2026 the mobile app has wallet
+> creation and recovery, app lock, QR recipient scanning, a USDt balance and history, indexed
+> activity, CSV export of transaction history, chat-history clearing, licence notices, CI on
+> every pull request, and dependency automation. For the current state see the repository
+> [README](../README.md) and `FEATURE-AUDIT.md` at the workspace base.
+
 Research date: 22 September 2026. Target selected by the user: midrange Android phones with 6–8 GB RAM.
 
 Status: source review and primary-source research. No Android application has been built in this task, no model has been benchmarked on a phone, and no real wallet transaction has been executed. The existing localhost demo is a scripted simulator. Recommendations and acceptance targets below are proposed engineering decisions, not measured performance claims.

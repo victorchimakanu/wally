@@ -1,5 +1,16 @@
 # Superseded design audit - see WALLY-APP-DESIGN-STATUS-2026-10-01.md
 
+> **Historical record — read with the date in mind.**
+>
+> A UX audit from 1 October 2026. It is kept because it says what was true and checked at the time, and rewriting it
+> would destroy that. **It is not a description of Wally today.**
+>
+> Much of what it lists as missing now ships. As of 8 November 2026 the mobile app has wallet
+> creation and recovery, app lock, QR recipient scanning, a USDt balance and history, indexed
+> activity, CSV export of transaction history, chat-history clearing, licence notices, CI on
+> every pull request, and dependency automation. For the current state see the repository
+> [README](../README.md) and `FEATURE-AUDIT.md` at the workspace base.
+
 This earlier V1-versus-Future split is obsolete. Wallet and Market now belong to the same active app, while exchange and multiwallet explorations are archived. See [the current design status](./WALLY-APP-DESIGN-STATUS-2026-10-01.md) for saved changes and remaining work.
 
 ## Historical audit below
