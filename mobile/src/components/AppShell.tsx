@@ -1,7 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { router, usePathname } from 'expo-router';
-import { Keyboard, Platform, Pressable, ScrollView, StyleSheet, useWindowDimensions, View, type PressableStateCallbackType, type ViewStyle } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Pressable, ScrollView, StyleSheet, useWindowDimensions, View, type PressableStateCallbackType, type ViewStyle } from 'react-native';
 import { Avatar, WallyAsset } from './WallyAsset';
 import { Button, Label, NetworkBadge } from './ui';
 import { ShellContext, WIDE_LAYOUT } from './shell';
@@ -41,20 +40,6 @@ function useOpenSection() {
 /** Hover is web-only and missing from React Native's types; pressed covers touch. */
 const rowStyle = (base: ViewStyle, selected = false) => (state: PressableStateCallbackType) => [base, selected ? { backgroundColor: c.tint } : (state as PressableStateCallbackType & { hovered?: boolean }).hovered || state.pressed ? { backgroundColor: c.toggle } : null];
 
-function TabBar({ active }: { active: Section['path'] | undefined }) {
-  const insets = useSafeAreaInsets();
-  const open = useOpenSection();
-  return <View accessibilityRole="tablist" style={[s.tabBar, { paddingBottom: Math.max(insets.bottom, Platform.OS === 'web' ? 8 : 6) }]}>
-    {SECTIONS.map(section => {
-      const selected = active === section.path;
-      return <Pressable key={section.path} accessibilityRole="tab" accessibilityLabel={section.label} accessibilityState={{ selected }} onPress={() => { if (!selected) open(section.path); }} style={s.tab}>
-        <View style={{ opacity: selected ? 1 : 0.45 }}><WallyAsset name={section.icon} size={24} /></View>
-        <Label size={11} weight={selected ? 'semibold' : 'medium'} color={selected ? c.ink : c.muted} style={{ lineHeight: 14 }}>{section.label}</Label>
-      </Pressable>;
-    })}
-  </View>;
-}
-
 function Sidebar({ active, pathname }: { active: Section['path'] | undefined; pathname: string }) {
   const { state, newChat } = useDemo();
   const { preferences } = usePreferences();
@@ -84,26 +69,18 @@ function Sidebar({ active, pathname }: { active: Section['path'] | undefined; pa
   </View>;
 }
 
-/** The app's frame: a sidebar on wide windows, a bottom tab bar on the main phone screens. */
+/** The app's frame: a sidebar on wide windows. Phones navigate from the Wallet/Chat bar's drawer. */
 export function AppShell({ children }: React.PropsWithChildren) {
   const { width } = useWindowDimensions();
   const pathname = usePathname();
-  const [keyboard, setKeyboard] = useState(false);
-  useEffect(() => {
-    if (Platform.OS === 'web') return;
-    const show = Keyboard.addListener('keyboardDidShow', () => setKeyboard(true)), hide = Keyboard.addListener('keyboardDidHide', () => setKeyboard(false));
-    return () => { show.remove(); hide.remove(); };
-  }, []);
   const wide = width >= WIDE_LAYOUT;
   const onboarding = ONBOARDING.includes(pathname);
   const topLevel = SECTIONS.some(section => section.path === pathname);
   const active = SECTIONS.find(section => section.path === pathname)?.path ?? OWNER[pathname];
-  const tabBar = !wide && topLevel && !keyboard;
-  return <ShellContext value={{ wide, topLevel, tabBar }}>
+  return <ShellContext value={{ wide, topLevel }}>
     <View style={[s.frame, wide && { flexDirection: 'row' }]}>
       {wide && !onboarding && <Sidebar active={active} pathname={pathname} />}
       <View style={s.main}>{children}</View>
-      {tabBar && <TabBar active={active} />}
     </View>
   </ShellContext>;
 }
@@ -111,8 +88,6 @@ export function AppShell({ children }: React.PropsWithChildren) {
 const s = StyleSheet.create({
   frame: { flex: 1, backgroundColor: c.background }, main: { flex: 1, minWidth: 0, minHeight: 0 },
   between: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
-  tabBar: { flexDirection: 'row', backgroundColor: c.surface, borderTopWidth: 1, borderColor: c.line, paddingTop: 8 },
-  tab: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 4, minHeight: 48 },
   sidebar: { width: 272, borderRightWidth: 1, borderColor: c.line, backgroundColor: c.surface, paddingHorizontal: 16, paddingTop: 20, paddingBottom: 16 },
   sideRow: { flexDirection: 'row', alignItems: 'center', gap: 14, minHeight: 44, paddingHorizontal: 12, borderRadius: 14 },
   chatRow: { minHeight: 36, justifyContent: 'center', paddingHorizontal: 12, borderRadius: 12 },

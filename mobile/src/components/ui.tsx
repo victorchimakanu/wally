@@ -1,13 +1,15 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View, type StyleProp, type TextProps, type TextStyle, type ViewStyle } from 'react-native';
-import { WallyAsset, type AssetName } from './WallyAsset';
+import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View, type StyleProp, type TextProps, type TextStyle, type ViewStyle } from 'react-native';
+import { Avatar, WallyAsset, type AssetName } from './WallyAsset';
+import Animated, { FadeIn } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useShell } from './shell';
 import { colors as c, fonts, radius } from '../theme';
 import { useDemo } from '../demo/store';
 import { useWallet } from '../data/wallet';
+import { usePreferences } from '../demo/preferences';
 
 const icons = {
   back: require('../../assets/figma/22421.svg'), spark: require('../../assets/figma/2c6cd.svg'),
@@ -66,13 +68,50 @@ export function NetworkBadge() {
     <Pill tone="warning">{wallet.enabled ? 'Testnet' : 'Demo'}</Pill>
   </View>;
 }
-/** Title bar for the five main sections: no back button, the network badge on the right. */
-export function TopBar({ title, brand = false }: { title: string; brand?: boolean }) {
-  const { wide } = useShell();
-  return <View style={[s.topBar, wide && { paddingTop: 32 }]}>
-    {brand ? <WallyAsset name="wally-lockup-light.svg" size={108} /> : <Label size={26} weight="semibold" accessibilityRole="header" style={{ lineHeight: 32 }}>{title}</Label>}
-    {!wide && <NetworkBadge />}
+/** Title bar for the main sections on wide windows, where the sidebar carries the network badge. */
+export function TopBar({ title }: { title: string }) {
+  return <View style={s.topBar}>
+    <Label size={26} weight="semibold" accessibilityRole="header" style={{ lineHeight: 32 }}>{title}</Label>
   </View>;
+}
+/**
+ * Phone navigation for the two places people live: a menu button and the Wallet/Chat switch,
+ * with everything else in the drawer. `floating` keeps only the menu button over an ongoing
+ * chat. Wide windows use the sidebar in AppShell instead.
+ */
+export function AppNavigation({ surface, floating = false }: { surface: 'wallet' | 'chat'; floating?: boolean }) {
+  const [open, setOpen] = useState(false);
+  const { state, newChat } = useDemo();
+  const { preferences } = usePreferences();
+  const insets = useSafeAreaInsets();
+  function chat(fresh = false) { const id = fresh ? newChat() : state.chats[0]?.id ?? newChat(); setOpen(false); router.replace({ pathname: '/chat', params: { id } }); }
+  function go(path: '/wallet' | '/chats' | '/history' | '/market' | '/settings' | '/profile' | '/address-book') { setOpen(false); router.push(path); }
+  const menu = <Pressable accessibilityRole="button" accessibilityLabel="Open app menu" onPress={() => setOpen(true)} style={[s.menu, floating && s.floatingShadow]}><WallyAsset name="f3b34.svg" /></Pressable>;
+  return <>
+    {floating ? <Animated.View entering={FadeIn.duration(200)} style={s.floatingMenu}>{menu}</Animated.View> : <View style={s.navigation}>
+      {menu}
+      <View style={s.segment}>{(['wallet', 'chat'] as const).map(value => <Pressable key={value} accessibilityRole="tab" accessibilityLabel={value === 'wallet' ? 'Wallet' : 'Chat'} accessibilityState={{ selected: surface === value }} onPress={() => value === 'wallet' ? router.replace('/wallet') : chat()} style={[s.segmentButton, surface === value && { backgroundColor: c.surface }]}><Label size={17} weight={surface === value ? 'semibold' : 'regular'}>{value === 'wallet' ? 'Wallet' : 'Chat'}</Label></Pressable>)}</View>
+      <NetworkBadge />
+    </View>}
+    <Modal transparent visible={open} animationType="fade" onRequestClose={() => setOpen(false)}>
+      <View style={s.modal}>
+        <Pressable accessibilityRole="button" accessibilityLabel="Dismiss app menu" onPress={() => setOpen(false)} style={StyleSheet.absoluteFill} />
+        <View accessibilityViewIsModal style={[s.drawer, { paddingTop: Math.max(insets.top, 24) + 32, paddingBottom: Math.max(insets.bottom, 20) }]}>
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 16 }}>
+            <View style={shared.between}><WallyAsset name="wally-lockup-light.svg" size={120} /><Pressable accessibilityRole="button" accessibilityLabel="Close app menu" onPress={() => setOpen(false)} style={s.iconButton}><WallyAsset name="9e528.svg" /></Pressable></View>
+            <Button label="New chat" onPress={() => chat(true)} />
+            <View>{([['Wallet', 'bfa3b.svg', '/wallet'], ['Chats', '49ec3.svg', '/chats'], ['Activity', 'b1b14.svg', '/history'], ['Market', '56a25.svg', '/market']] as const).map(([label, icon, path]) => <Pressable key={path} accessibilityRole="button" onPress={() => go(path)} style={s.drawerRow}><WallyAsset name={icon} size={24} /><Label size={16} weight="medium">{label}</Label></Pressable>)}</View>
+            {!!state.chats.length && <Label size={12} color={c.muted}>Recent chats</Label>}
+            {state.chats.slice(0, 3).map(item => <Pressable key={item.id} accessibilityRole="button" onPress={() => { setOpen(false); router.push({ pathname: '/chat', params: { id: item.id } }); }} style={{ paddingVertical: 8 }}><Label numberOfLines={1}>{item.title}</Label></Pressable>)}
+            <Divider />
+            <Pressable accessibilityRole="button" onPress={() => go('/address-book')} style={s.drawerRow}><WallyAsset name="9a2cd.svg" /><Label>Address book</Label></Pressable>
+            <Pressable accessibilityRole="button" onPress={() => go('/settings')} style={s.drawerRow}><WallyAsset name="f2470.svg" /><Label>Settings</Label></Pressable>
+            <Pressable accessibilityRole="button" accessibilityLabel="View profile" onPress={() => go('/profile')} style={[s.drawerRow, { backgroundColor: c.tint, borderRadius: 22, padding: 16 }]}><Avatar size={44} /><Label weight="semibold">{preferences.name}</Label></Pressable>
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+  </>;
 }
 /** Messages fade out under the chat's title bar instead of sliding beneath a hard edge. */
 // Stepped bands rather than a gradient style, which is still experimental on native.
@@ -98,9 +137,12 @@ export function Screen({ children, title, tab, surface, immersive = false, foote
   }, [scrollRequest, autoScroll]);
   const insets = useSafeAreaInsets();
   const { state, storageError } = useDemo();
-  const { wide, topLevel, tabBar } = useShell();
-  // Main sections get a title bar; pushed screens keep their back button; chat draws its own bar.
-  const header = surface === 'chat' ? null : topLevel || tab === 'wallet' ? <TopBar title={title ?? 'Wallet'} brand={tab === 'wallet' && !wide} /> : title ? <Header title={title} back={back} /> : null;
+  const { wide, topLevel } = useShell();
+  // Wide: the sidebar navigates, so main sections get a plain title bar and chat draws its own.
+  // Phone: Wallet and Chat carry the menu and switch; every other screen is pushed and has Back.
+  const header = wide
+    ? surface === 'chat' ? null : topLevel || tab === 'wallet' ? <TopBar title={title ?? 'Wallet'} /> : title ? <Header title={title} back={back} /> : null
+    : surface || tab === 'wallet' ? <AppNavigation surface={surface ?? 'wallet'} floating={immersive} /> : title ? <Header title={title} back={back} /> : null;
   return <View style={[s.screen, (wide || surface === 'chat') && { width: '100%', maxWidth: surface === 'chat' ? 928 : 760, alignSelf: 'center' }, { paddingTop: Platform.OS === 'web' ? 0 : insets.top }]}>
     <KeyboardAvoidingView style={[s.flex, { minHeight: 0 }]} onLayout={event => onViewportHeightChange?.(event.nativeEvent.layout.height)} behavior={Platform.OS === 'ios' ? 'padding' : Platform.OS === 'android' ? 'height' : undefined}>
       {header}
@@ -118,11 +160,10 @@ export function Screen({ children, title, tab, surface, immersive = false, foote
         {state.offline && tab && <Pill tone="warning">Offline</Pill>}
         {children}
       </ScrollView>
-      {immersive && <View style={s.fade}>{FADE_STEPS.map(opacity => <View key={opacity} style={{ flex: 1, backgroundColor: c.background, opacity }} />)}</View>}
+      {immersive && <View style={[s.fade, { height: wide ? 40 : 72 }]}>{FADE_STEPS.map(opacity => <View key={opacity} style={{ flex: 1, backgroundColor: c.background, opacity }} />)}</View>}
       {footer && <View style={s.footer}>{footer}</View>}
     </KeyboardAvoidingView>
-    {/* The tab bar already clears the home indicator; otherwise the screen does. */}
-    {!tabBar && Platform.OS !== 'web' && <View style={{ height: insets.bottom }} />}
+    {Platform.OS !== 'web' && <View style={{ height: insets.bottom }} />}
   </View>;
 }
 /**
@@ -180,7 +221,7 @@ export const shared = StyleSheet.create({
 });
 const s = StyleSheet.create({
   flex: { flex: 1 }, screen: { flex: 1, backgroundColor: c.background }, content: { flexGrow: 1, paddingHorizontal: 28, paddingTop: 16, paddingBottom: 24, gap: 24 },
-  topBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingHorizontal: 28, paddingTop: 20, paddingBottom: 4, minHeight: 64 },
+  topBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 28, paddingTop: 32, paddingBottom: 4, minHeight: 64 },
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 28, paddingTop: 12, paddingBottom: 4, minHeight: 64 },
   back: { width: 50, minHeight: 50, alignItems: 'center', justifyContent: 'center' },
   button: { minHeight: 56, borderRadius: radius.button, paddingHorizontal: 20, paddingVertical: 15, alignItems: 'center', justifyContent: 'center' }, center: { textAlign: 'center' },
@@ -195,5 +236,12 @@ const s = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: 14, minHeight: 54, paddingHorizontal: 16, paddingVertical: 12 },
   divider: { height: 1, backgroundColor: c.line, marginVertical: 3 }, detail: { flexDirection: 'row', gap: 8, alignItems: 'center', minHeight: 28 },
   error: { backgroundColor: c.errorTint, padding: 12, borderRadius: 12 },
-  fade: { position: 'absolute', top: 0, left: 0, right: 0, height: 40, zIndex: 5, pointerEvents: 'none' },
+  fade: { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 5, pointerEvents: 'none' },
+  navigation: { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 8, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  menu: { width: 58, height: 58, borderRadius: 29, backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center' },
+  floatingMenu: { position: 'absolute', top: 8, left: 16, zIndex: 10 }, floatingShadow: { borderWidth: 1, borderColor: c.line, boxShadow: '0 6px 18px #1F292424', elevation: 6 },
+  segment: { flex: 1, maxWidth: 250, flexDirection: 'row', backgroundColor: c.toggle, borderRadius: 29, padding: 5 },
+  segmentButton: { flex: 1, minHeight: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center' },
+  modal: { flex: 1, backgroundColor: '#0000003D' }, drawer: { width: '82%', maxWidth: 358, flex: 1, paddingHorizontal: 28, backgroundColor: c.background, borderTopRightRadius: 28, borderBottomRightRadius: 28 },
+  drawerRow: { flexDirection: 'row', alignItems: 'center', gap: 20, minHeight: 52, paddingHorizontal: 8 }, iconButton: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
 });
