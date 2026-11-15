@@ -9,6 +9,9 @@ import { useWallet } from '../data/wallet';
 import { custodyNotice } from '../services/custody';
 import { receiveAdvice } from '../services/receive-advice';
 import { CHAINS, formatEth, type Chain } from '../services/wallet-api';
+import { fiatDisplayable, fiatTotal } from '../services/fiat-value';
+import { formatPrice } from '../services/market-api';
+import { useMarket } from '../data/market';
 import { useColors } from '../theme';
 
 /** Figma network/receive-selector: one pill with the selected network on an amber segment. */
@@ -74,7 +77,13 @@ export function LiveWalletOverview({ onActivity }: { onActivity?: () => void } =
   const c = useColors();
   const shared = useShared();
   const wallet = useWallet();
+  const market = useMarket();
   const balances = wallet.snapshot?.balances ?? [];
+  // What the balances are worth in the chosen currency. Testnet tokens are worth nothing and
+  // the app says so, so until the wallet reports a mainnet the figure says it is priced as if
+  // they were mainnet coins, rather than being hidden.
+  const fiat = balances.length ? fiatTotal(balances.map(item => ({ amount: item.balance, symbol: item.symbol })), market.data?.assets ?? [], market.currency) : null;
+  const priced = fiat?.amount == null ? null : `${formatPrice(fiat.amount, fiat.currency)}${fiatDisplayable({ network: wallet.snapshot?.network }) ? '' : ' at mainnet prices'}`;
   // ETH only, and the filter is the whole point: `balanceWei` holds base units at the asset's
   // own scale, so summing across assets would add 10.5 USDt (10,500,000 base units) into a wei
   // total and then label the result ETH. Apples into oranges, presented as apples.
@@ -91,6 +100,7 @@ export function LiveWalletOverview({ onActivity }: { onActivity?: () => void } =
   return <View style={{ gap: 12 }}>
     <Card style={{ backgroundColor: c.tint, borderColor: c.tint, alignItems: 'center', gap: 4, paddingVertical: 24 }}>
       <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 6 }}><Label size={40} weight="semibold" style={{ lineHeight: 48 }}>{total ?? '—'}</Label><Label size={16} weight="semibold">ETH</Label></View>
+      {priced && <Label size={16} color={c.muted} accessibilityLabel={`About ${priced}`}>{priced}</Label>}
       <View style={[shared.row, { gap: 16 }]}><Label size={13} color={c.muted}>{wallet.loading ? 'Updating balances…' : synced}</Label><LinkButton label="Refresh" accessibilityLabel="Refresh balances" disabled={wallet.loading || wallet.offline} onPress={() => { void wallet.refresh(); }} /></View>
       {nativeKnown.length < balances.filter(item => item.symbol === 'ETH').length && <Label size={12} color={c.error}>Total excludes a network that could not refresh</Label>}
     </Card>
