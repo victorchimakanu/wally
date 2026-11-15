@@ -3,10 +3,10 @@ import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { Pressable, useWindowDimensions, View } from 'react-native';
 import { WallyAsset } from './WallyAsset';
-import { Button, Card, Detail, Label, shared } from './ui';
+import { Button, Card, Detail, Label, useShared } from './ui';
 import { useDemo } from '../demo/store';
 import { money } from '../demo/model';
-import { colors as c } from '../theme';
+import { useColors, useTheme } from '../theme';
 import { useWallet } from '../data/wallet';
 import { LiveWalletOverview } from './WalletData';
 
@@ -15,6 +15,9 @@ export function WalletOverview({ balance, transactionId, snapshot = false }: { b
   return wallet.enabled && !snapshot ? <LiveWalletOverview /> : <DemoWalletOverview balance={balance} transactionId={transactionId} snapshot={snapshot} />;
 }
 function DemoWalletOverview({ balance, transactionId, snapshot = false }: { balance?: number; transactionId?: string; snapshot?: boolean }) {
+  const c = useColors();
+  const { dark } = useTheme();
+  const shared = useShared();
   const { state } = useDemo();
   const [width, setWidth] = useState(384);
   const [expanded, setExpanded] = useState(false);
@@ -26,10 +29,12 @@ function DemoWalletOverview({ balance, transactionId, snapshot = false }: { bala
   return <View style={{ gap: 12 }}>
     <View onLayout={event => setWidth(event.nativeEvent.layout.width)} style={{ height: 238 * scale }}>
       <View style={{ width: 384, height: 238, position: 'absolute', transformOrigin: 'top left', transform: [{ scale }] }}>
-        <View style={{ position: 'absolute', top: 13.4, width: 384, height: 223.439, overflow: 'hidden', borderRadius: 22.326 }}>
-          <WallyAsset name="6a869.svg" />
-          <WallyAsset name="d7e4c.svg" style={{ position: 'absolute', left: 324.49, top: 5.61, opacity: .55 }} />
-          <WallyAsset name="27e99.svg" style={{ position: 'absolute', left: -150.46, top: 5.61, opacity: .55 }} />
+        <View style={{ position: 'absolute', top: 13.4, width: 384, height: 223.439, overflow: 'hidden', borderRadius: 22.326, backgroundColor: c.tint }}>
+          {!dark && <>
+            <WallyAsset name="6a869.svg" />
+            <WallyAsset name="d7e4c.svg" style={{ position: 'absolute', left: 324.49, top: 5.61, opacity: .55 }} />
+            <WallyAsset name="27e99.svg" style={{ position: 'absolute', left: -150.46, top: 5.61, opacity: .55 }} />
+          </>}
         </View>
         <Pressable accessibilityRole="button" accessibilityLabel="View profile" onPress={() => router.push('/profile')} style={{ position: 'absolute', left: 165.05, top: 2.23, width: 53.895, height: 53.895, borderRadius: 27, overflow: 'hidden' }}>
           <Image source={require('../../assets/wallyui/9b60e.png')} accessible={false} contentFit="cover" style={{ position: 'absolute', left: -37.726, top: 0, width: 139.436, height: 92.968 }} />

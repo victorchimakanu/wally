@@ -2,11 +2,11 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View, type StyleProp, type TextProps, type TextStyle, type ViewStyle } from 'react-native';
-import { Avatar, WallyAsset, type AssetName } from './WallyAsset';
+import { Avatar, Lockup, WallyAsset, type AssetName } from './WallyAsset';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useShell } from './shell';
-import { colors as c, fonts, radius } from '../theme';
+import { fonts, makeStyles, radius, useColors } from '../theme';
 import { useDemo } from '../demo/store';
 import { useWallet } from '../data/wallet';
 import { usePreferences } from '../demo/preferences';
@@ -29,33 +29,42 @@ export function Icon({ name }: { name: IconName }) {
   const size = name === 'receive' ? 62 : ['clock', 'expired', 'confirmed'].includes(name) ? 44 : name === 'sparkSmall' ? 20 : 24;
   return <Image source={icons[name]} contentFit="contain" style={{ width: name === 'system' ? 66.662 : size, height: name === 'system' ? 11.334 : size }} accessible={false} />;
 }
-export function Label({ children, size = 14, weight = 'regular', color = c.ink, style, ...props }: TextProps & { size?: number; weight?: keyof typeof fonts; color?: string }) {
-  return <Text {...props} style={[{ fontFamily: fonts[weight], color, fontSize: size, lineHeight: Math.round(size * 1.5) }, style]}>{children}</Text>;
+export function Label({ children, size = 14, weight = 'regular', color, style, ...props }: TextProps & { size?: number; weight?: keyof typeof fonts; color?: string }) {
+  const c = useColors();
+  return <Text {...props} style={[{ fontFamily: fonts[weight], color: color ?? c.ink, fontSize: size, lineHeight: Math.round(size * 1.5) }, style]}>{children}</Text>;
 }
 export function Button({ label, onPress, secondary = false, accent = false, disabled = false, style }: { label: string; onPress: () => void; secondary?: boolean; accent?: boolean; disabled?: boolean; style?: StyleProp<ViewStyle> }) {
+  const c = useColors();
+  const s = useStyles();
   return <Pressable accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ disabled }} disabled={disabled} onPress={onPress}
     style={({ pressed }) => [s.button, { backgroundColor: accent ? c.yellow : secondary ? c.surface : c.brand, borderWidth: secondary ? 1 : 0, borderColor: c.line, opacity: disabled ? 0.45 : pressed ? 0.8 : 1 }, style]}>
-    <Label size={16} weight="semibold" color={secondary || accent ? c.ink : c.surface} style={s.center}>{label}</Label>
+    <Label size={16} weight="semibold" color={secondary ? c.ink : accent ? c.onAccent : c.onBrand} style={s.center}>{label}</Label>
   </Pressable>;
 }
 /** An inline action beside a label or a status line: text only, so it never outweighs the screen's main button. */
 export function LinkButton({ label, onPress, disabled = false, accessibilityLabel }: { label: string; onPress: () => void; disabled?: boolean; accessibilityLabel?: string }) {
+  const c = useColors();
   return <Pressable accessibilityRole="button" accessibilityLabel={accessibilityLabel ?? label} accessibilityState={{ disabled }} disabled={disabled} onPress={onPress} hitSlop={10}
     style={({ pressed }) => ({ minHeight: 44, justifyContent: 'center', opacity: disabled ? .4 : pressed ? .6 : 1 })}>
     <Label size={14} weight="semibold" color={c.brand}>{label}</Label>
   </Pressable>;
 }
-export function Card({ children, style }: React.PropsWithChildren<{ style?: StyleProp<ViewStyle> }>) { return <View style={[s.card, style]}>{children}</View>; }
+export function Card({ children, style }: React.PropsWithChildren<{ style?: StyleProp<ViewStyle> }>) { const s = useStyles(); return <View style={[s.card, style]}>{children}</View>; }
 export function Pill({ children, tone = 'brand' }: React.PropsWithChildren<{ tone?: 'brand' | 'warning' | 'success' }>) {
+  const c = useColors();
+  const s = useStyles();
   return <View style={[s.pill, { backgroundColor: tone === 'warning' ? c.warningTint : tone === 'success' ? c.successTint : c.tint }]}>
     <Label size={11} weight="medium" color={tone === 'warning' ? c.warning : tone === 'success' ? c.success : c.brand}>{children}</Label>
   </View>;
 }
 export function Note({ children, error = false }: React.PropsWithChildren<{ error?: boolean }>) {
+  const c = useColors();
+  const s = useStyles();
   return <Label size={12} color={error ? c.error : c.muted} accessibilityLiveRegion={error ? 'polite' : 'none'} style={error ? s.error : undefined}>{children}</Label>;
 }
 /** Title bar for pushed screens: a back button and one centred title, nothing under it. */
 export function Header({ title, back = true }: { title: string; back?: boolean }) {
+  const s = useStyles();
   return <View style={s.header}>
     {back && <Pressable accessibilityLabel="Go back" accessibilityRole="button" onPress={() => router.canGoBack() ? router.back() : router.replace('/wallet')} style={s.back}><View style={{ transform: [{ rotate: '180deg' }] }}><WallyAsset name="afc43.svg" /></View></Pressable>}
     <View style={{ flex: 1, alignItems: 'center', paddingRight: back ? 50 : 0 }}><Label weight="semibold" size={16} accessibilityRole="header" numberOfLines={1}>{title}</Label></View>
@@ -70,6 +79,7 @@ export function NetworkBadge() {
 }
 /** Title bar for the main sections on wide windows, where the sidebar carries the network badge. */
 export function TopBar({ title }: { title: string }) {
+  const s = useStyles();
   return <View style={s.topBar}>
     <Label size={26} weight="semibold" accessibilityRole="header" style={{ lineHeight: 32 }}>{title}</Label>
   </View>;
@@ -80,6 +90,9 @@ export function TopBar({ title }: { title: string }) {
  * chat. Wide windows use the sidebar in AppShell instead.
  */
 export function AppNavigation({ surface, floating = false }: { surface: 'wallet' | 'chat'; floating?: boolean }) {
+  const c = useColors();
+  const s = useStyles();
+  const shared = useShared();
   const [open, setOpen] = useState(false);
   const { state, newChat } = useDemo();
   const { preferences } = usePreferences();
@@ -90,7 +103,7 @@ export function AppNavigation({ surface, floating = false }: { surface: 'wallet'
   return <>
     {floating ? <Animated.View entering={FadeIn.duration(200)} style={s.floatingMenu}>{menu}</Animated.View> : <View style={s.navigation}>
       {menu}
-      <View style={s.segment}>{(['wallet', 'chat'] as const).map(value => <Pressable key={value} accessibilityRole="tab" accessibilityLabel={value === 'wallet' ? 'Wallet' : 'Chat'} accessibilityState={{ selected: surface === value }} onPress={() => value === 'wallet' ? router.replace('/wallet') : chat()} style={[s.segmentButton, surface === value && { backgroundColor: c.surface }]}><Label size={17} weight={surface === value ? 'semibold' : 'regular'}>{value === 'wallet' ? 'Wallet' : 'Chat'}</Label></Pressable>)}</View>
+      <View style={s.segment}>{(['wallet', 'chat'] as const).map(value => <Pressable key={value} accessibilityRole="tab" accessibilityLabel={value === 'wallet' ? 'Wallet' : 'Chat'} accessibilityState={{ selected: surface === value }} onPress={() => value === 'wallet' ? router.replace('/wallet') : chat()} style={[s.segmentButton, surface === value && { backgroundColor: c.raised }]}><Label size={17} weight={surface === value ? 'semibold' : 'regular'}>{value === 'wallet' ? 'Wallet' : 'Chat'}</Label></Pressable>)}</View>
       <NetworkBadge />
     </View>}
     <Modal transparent visible={open} animationType="fade" onRequestClose={() => setOpen(false)}>
@@ -98,7 +111,7 @@ export function AppNavigation({ surface, floating = false }: { surface: 'wallet'
         <Pressable accessibilityRole="button" accessibilityLabel="Dismiss app menu" onPress={() => setOpen(false)} style={StyleSheet.absoluteFill} />
         <View accessibilityViewIsModal style={[s.drawer, { paddingTop: Math.max(insets.top, 24) + 32, paddingBottom: Math.max(insets.bottom, 20) }]}>
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 16 }}>
-            <View style={shared.between}><WallyAsset name="wally-lockup-light.svg" size={120} /><Pressable accessibilityRole="button" accessibilityLabel="Close app menu" onPress={() => setOpen(false)} style={s.iconButton}><WallyAsset name="9e528.svg" /></Pressable></View>
+            <View style={shared.between}><Lockup size={120} /><Pressable accessibilityRole="button" accessibilityLabel="Close app menu" onPress={() => setOpen(false)} style={s.iconButton}><WallyAsset name="9e528.svg" /></Pressable></View>
             <Button label="New chat" onPress={() => chat(true)} />
             <View>{([['Wallet', 'bfa3b.svg', '/wallet'], ['Chats', '49ec3.svg', '/chats'], ['Activity', 'b1b14.svg', '/history'], ['Market', '56a25.svg', '/market']] as const).map(([label, icon, path]) => <Pressable key={path} accessibilityRole="button" onPress={() => go(path)} style={s.drawerRow}><WallyAsset name={icon} size={24} /><Label size={16} weight="medium">{label}</Label></Pressable>)}</View>
             {!!state.chats.length && <Label size={12} color={c.muted}>Recent chats</Label>}
@@ -117,6 +130,8 @@ export function AppNavigation({ surface, floating = false }: { surface: 'wallet'
 // Stepped bands rather than a gradient style, which is still experimental on native.
 const FADE_STEPS = [1, .86, .7, .54, .38, .24, .12, .04];
 export function Screen({ children, title, tab, surface, immersive = false, footer, back = true, contentStyle, autoScroll = false, fixedHeader, scrollRequest, onScrollActivity, onNearBottomChange, onViewportHeightChange }: React.PropsWithChildren<{ title?: string; tab?: 'wallet' | 'chats' | 'settings'; surface?: 'wallet' | 'chat'; immersive?: boolean; footer?: React.ReactNode; back?: boolean; contentStyle?: StyleProp<ViewStyle>; autoScroll?: boolean; fixedHeader?: React.ReactNode; scrollRequest?: string | number; onScrollActivity?: () => void; onNearBottomChange?: (near: boolean) => void; onViewportHeightChange?: (height: number) => void }>) {
+  const c = useColors();
+  const s = useStyles();
   const scroll = useRef<ScrollView>(null);
   // autoScroll keeps the newest content locked to the bottom, as in a chat, until the user scrolls away.
   const following = useRef(true);
@@ -171,6 +186,8 @@ export function Screen({ children, title, tab, surface, immersive = false, foote
  * A group carries its own meaning through its rows; `title` is only for when a screen has several.
  */
 export function Group({ title, children }: React.PropsWithChildren<{ title?: string }>) {
+  const c = useColors();
+  const s = useStyles();
   const rows = React.Children.toArray(children);
   if (!rows.length) return null;
   return <View style={{ gap: 8 }}>
@@ -184,9 +201,11 @@ export function Group({ title, children }: React.PropsWithChildren<{ title?: str
  * the one row on a screen that removes something.
  */
 export function Row({ icon, title, value, onPress, danger = false, selected }: { icon?: AssetName; title: string; value?: string; onPress?: () => void; danger?: boolean; selected?: boolean }) {
+  const c = useColors();
+  const s = useStyles();
   const content = <>
     {icon && <WallyAsset name={icon} size={22} />}
-    <Label size={16} color={danger ? c.error : c.ink} numberOfLines={1} style={s.flex}>{title}</Label>
+    <Label size={16} color={danger ? c.error : c.ink} numberOfLines={value ? 1 : 2} style={s.flex}>{title}</Label>
     {!!value && <Label size={15} color={c.muted} numberOfLines={1} style={{ flexShrink: 1, textAlign: 'right' }}>{value}</Label>}
     {selected && <Icon name="check" />}
     {onPress && selected === undefined && <View style={{ opacity: .35 }}><WallyAsset name="afc43.svg" size={14} /></View>}
@@ -197,29 +216,32 @@ export function Row({ icon, title, value, onPress, danger = false, selected }: {
     : <View accessible accessibilityLabel={label} style={s.row}>{content}</View>;
 }
 export function Detail({ label, value, emphasis = false }: { label: string; value: string; emphasis?: boolean }) {
+  const c = useColors();
+  const s = useStyles();
   return <View style={s.detail}><Label size={emphasis ? 14 : 12} color={emphasis ? c.ink : c.muted} style={{ flex: 1 }}>{label}</Label><Label size={emphasis ? 16 : 13} weight={emphasis ? 'semibold' : 'medium'} style={{ flexShrink: 1, textAlign: 'right' }}>{value}</Label></View>;
 }
-export function Divider() { return <View style={s.divider} />; }
+export function Divider() { const s = useStyles(); return <View style={s.divider} />; }
 export function Address({ value }: { value: string }) { return <Label selectable weight="medium" style={{ overflowWrap: 'anywhere' } as TextStyle}>{value}</Label>; }
 /** Frames a receive QR code in a bordered tile so it reads as one scannable object. */
-export function QrTile({ children }: React.PropsWithChildren) { return <View style={s.qrTile}>{children}</View>; }
+export function QrTile({ children }: React.PropsWithChildren) { const s = useStyles(); return <View style={s.qrTile}>{children}</View>; }
 /** A receive address in two balanced lines, first and last characters emphasised for checking. Tapping copies the exact address. */
 export function ReceiveAddress({ value, onCopy }: { value: string; onCopy?: () => void }) {
+  const s = useStyles();
   const half = Math.ceil(value.length / 2), first = value.slice(0, half), second = value.slice(half);
   return <Pressable accessibilityRole="button" accessibilityLabel={`Copy address ${value}`} disabled={!onCopy} onPress={onCopy} style={({ pressed }) => [s.addressWell, { opacity: pressed ? .7 : 1 }]}>
     <Label size={15} style={s.addressLine}><Label size={15} weight="semibold">{first.slice(0, 6)}</Label>{first.slice(6)}</Label>
     <Label size={15} style={s.addressLine}>{second.slice(0, -4)}<Label size={15} weight="semibold">{second.slice(-4)}</Label></Label>
   </Pressable>;
 }
-export const shared = StyleSheet.create({
+/** Layout helpers every screen uses; a hook because `input` and `orb` carry colour. */
+export const useShared = makeStyles(c => ({
   row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   between: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   gap: { gap: 12 }, center: { textAlign: 'center' }, flex: { flex: 1 },
   section: { marginTop: 28 }, input: { color: c.ink, fontFamily: fonts.regular, fontSize: 14, lineHeight: 21, padding: 18, backgroundColor: c.surface, borderRadius: radius.card, minHeight: 58, borderWidth: 1, borderColor: 'transparent' },
-  hero: { backgroundColor: c.brand, borderRadius: radius.hero, padding: 24 },
   orb: { width: 104, height: 104, borderRadius: 52, backgroundColor: c.tint, alignItems: 'center', justifyContent: 'center', alignSelf: 'center' },
-});
-const s = StyleSheet.create({
+}));
+const useStyles = makeStyles(c => ({
   flex: { flex: 1 }, screen: { flex: 1, backgroundColor: c.background }, content: { flexGrow: 1, paddingHorizontal: 28, paddingTop: 16, paddingBottom: 24, gap: 24 },
   topBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 28, paddingTop: 32, paddingBottom: 4, minHeight: 64 },
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 28, paddingTop: 12, paddingBottom: 4, minHeight: 64 },
@@ -228,7 +250,7 @@ const s = StyleSheet.create({
   card: { backgroundColor: c.surface, borderRadius: radius.card, borderWidth: 1, borderColor: c.line, padding: 20, gap: 14 },
   pill: { borderRadius: 14, paddingHorizontal: 10, paddingVertical: 5, alignSelf: 'flex-start' },
   footer: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 8, gap: 10 },
-  qrTile: { alignSelf: 'center', padding: 8, borderRadius: 20, borderWidth: 1, borderColor: c.line, backgroundColor: c.surface },
+  qrTile: { alignSelf: 'center', padding: 8, borderRadius: 20, borderWidth: 1, borderColor: c.line, backgroundColor: c.paper },
   addressWell: { alignItems: 'center', gap: 2, paddingVertical: 12, paddingHorizontal: 16, borderRadius: 18, borderWidth: 1, borderColor: c.line, backgroundColor: c.background },
   addressLine: { textAlign: 'center', lineHeight: 22, letterSpacing: .4 },
   group: { backgroundColor: c.surface, borderRadius: radius.card, overflow: 'hidden' },
@@ -238,10 +260,10 @@ const s = StyleSheet.create({
   error: { backgroundColor: c.errorTint, padding: 12, borderRadius: 12 },
   fade: { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 5, pointerEvents: 'none' },
   navigation: { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 8, flexDirection: 'row', alignItems: 'center', gap: 12 },
-  menu: { width: 58, height: 58, borderRadius: 29, backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center' },
-  floatingMenu: { position: 'absolute', top: 8, left: 16, zIndex: 10 }, floatingShadow: { borderWidth: 1, borderColor: c.line, boxShadow: '0 6px 18px #1F292424', elevation: 6 },
+  menu: { width: 58, height: 58, borderRadius: 29, backgroundColor: c.raised, alignItems: 'center', justifyContent: 'center' },
+  floatingMenu: { position: 'absolute', top: 8, left: 16, zIndex: 10 }, floatingShadow: { borderWidth: 1, borderColor: c.line, boxShadow: `0 6px 18px ${c.shadow}`, elevation: 6 },
   segment: { flex: 1, maxWidth: 250, flexDirection: 'row', backgroundColor: c.toggle, borderRadius: 29, padding: 5 },
   segmentButton: { flex: 1, minHeight: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center' },
-  modal: { flex: 1, backgroundColor: '#0000003D' }, drawer: { width: '82%', maxWidth: 358, flex: 1, paddingHorizontal: 28, backgroundColor: c.background, borderTopRightRadius: 28, borderBottomRightRadius: 28 },
+  modal: { flex: 1, backgroundColor: c.overlay }, drawer: { width: '82%', maxWidth: 358, flex: 1, paddingHorizontal: 28, backgroundColor: c.background, borderTopRightRadius: 28, borderBottomRightRadius: 28 },
   drawerRow: { flexDirection: 'row', alignItems: 'center', gap: 20, minHeight: 52, paddingHorizontal: 8 }, iconButton: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
-});
+}));

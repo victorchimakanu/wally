@@ -2,6 +2,7 @@ import React from 'react';
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 import { Button, Card, Label, Note, Screen } from './ui';
+import { SystemTheme } from './ThemeProvider';
 import { recordCrash } from '../services/crash-log-device';
 import { buildInfo, supportSummary } from '../services/build-info';
 
@@ -36,7 +37,8 @@ export class CrashBoundary extends React.Component<Props, State> {
 
   override render() {
     if (!this.state.crashed) return this.props.children;
-    return <Screen title="Something broke" back={false}>
+    // Outside the app's providers, so the theme comes from the system alone.
+    return <SystemTheme><Screen title="Something broke" back={false}>
       <Card>
         <Label size={16} weight="medium">Nothing was sent</Label>
         <Note>A problem on this screen cannot move money.</Note>
@@ -46,6 +48,6 @@ export class CrashBoundary extends React.Component<Props, State> {
         <Note>Saved to Settings → Problem reports.</Note>
       </Card>
       <Button label="Try again" onPress={() => this.setState({ crashed: false, message: '' })} />
-    </Screen>;
+    </Screen></SystemTheme>;
   }
 }

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { router } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
 import { Modal, Pressable, Share, StyleSheet, TextInput, View } from 'react-native';
-import { Address, Button, Card, Detail, Divider, Group, Label, Note, Pill, QrTile, ReceiveAddress, Row, shared } from './ui';
+import { Address, Button, Card, Detail, Divider, Group, Label, Note, Pill, QrTile, ReceiveAddress, Row, useShared } from './ui';
 import { CURRENCIES } from '../services/preferences-store';
 import { WallyAsset } from './WallyAsset';
 import { WalletOverview } from './WalletOverview';
@@ -13,13 +13,16 @@ import { COINS, formatChange, formatPrice } from '../services/market-api';
 import { DEMO_ADDRESS, FEE, draftStatus, money, units, type ChatTool, type Draft, type Message, type Quote, type Transaction } from '../demo/model';
 import { useDemo } from '../demo/store';
 import { usePreferences } from '../demo/preferences';
-import { colors as c } from '../theme';
+import { useColors } from '../theme';
 import { LiveActivityCard, LiveReceiveCard, LiveWalletOverview } from './WalletData';
 
 function Field({ label, value }: { label: string; value: string }) {
+  const c = useColors();
   return <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12 }}><Label size={12} color={c.muted} style={{ width: '31%', lineHeight: 17 }}>{label}</Label><Label size={12} weight="medium" style={{ flex: 1, textAlign: 'right', lineHeight: 17 }}>{value}</Label></View>;
 }
 export function ToolStateCard({ kind, detail, onAction }: { kind: 'unavailable' | 'timeout' | 'stopped' | 'expired' | 'insufficient' | 'blocked'; detail?: string; onAction?: () => void }) {
+  const c = useColors();
+  const shared = useShared();
   const copy = {
     unavailable: ['Wally is unavailable', 'Use the wallet tools while the assistant is unavailable.', 'Open wallet'],
     timeout: ['That took too long', 'The request timed out. Your wallet is still available.', 'Try again'],
@@ -31,18 +34,22 @@ export function ToolStateCard({ kind, detail, onAction }: { kind: 'unavailable' 
   return <Card style={{ gap: 12, backgroundColor: kind === 'expired' || kind === 'insufficient' || kind === 'blocked' ? c.amber : c.surface }}><View style={[shared.row, { alignItems: 'flex-start' }]}><View style={{ width: 24, alignItems: 'center' }}><WallyAsset name={kind === 'unavailable' ? '4ee0b.svg' : ['expired', 'insufficient', 'blocked'].includes(kind) ? '91154.svg' : '8dca8.svg'} /></View><Label size={18} weight="bold" style={{ flex: 1, lineHeight: 22 }}>{copy[0]}</Label></View><Label size={16} color={c.muted} style={{ lineHeight: 23 }}>{detail || copy[1]}</Label>{onAction && <Button secondary label={copy[2]} onPress={onAction} />}</Card>;
 }
 export function ReceiveChatCard() {
+  const c = useColors();
+  const shared = useShared();
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState('');
   async function copy() { try { const ok = await Clipboard.setStringAsync(DEMO_ADDRESS); setCopied(ok); setError(ok ? '' : 'Copy is unavailable on this device. Share the address instead.'); } catch { setError('Copy is unavailable on this device. Share the address instead.'); } }
   async function share() { try { await Share.share({ message: `Wally preview address (fictional; do not fund): ${DEMO_ADDRESS}` }); setError(''); } catch { setError('Sharing is unavailable. You can still copy the address.'); } }
-  return <Card style={{ gap: 12 }}><View style={shared.between}><Label size={18} weight="bold" style={{ lineHeight: 22 }}>Receive USDt · Arbitrum</Label><Pill tone="warning">Demo · do not fund</Pill></View><QrTile><WallyAsset name="eab8b.svg" /></QrTile><ReceiveAddress value={DEMO_ADDRESS} onCopy={() => { void copy(); }} /><View style={shared.row}><Button label={copied ? 'Copied' : 'Copy address'} onPress={() => { void copy(); }} style={[shared.flex, { paddingHorizontal: 12 }]} /><Button accent label="Share" onPress={() => { void share(); }} style={shared.flex} /></View>{copied && <Label size={12} color={c.success} accessibilityLiveRegion="polite">Address copied</Label>}{!!error && <Note error>{error}</Note>}</Card>;
+  return <Card style={{ gap: 12 }}><View style={shared.between}><Label size={18} weight="bold" style={{ lineHeight: 22 }}>Receive USDt · Arbitrum</Label><Pill tone="warning">Demo · do not fund</Pill></View><QrTile><WallyAsset name="eab8b.svg" tint={false} /></QrTile><ReceiveAddress value={DEMO_ADDRESS} onCopy={() => { void copy(); }} /><View style={shared.row}><Button label={copied ? 'Copied' : 'Copy address'} onPress={() => { void copy(); }} style={[shared.flex, { paddingHorizontal: 12 }]} /><Button accent label="Share" onPress={() => { void share(); }} style={shared.flex} /></View>{copied && <Label size={12} color={c.success} accessibilityLiveRegion="polite">Address copied</Label>}{!!error && <Note error>{error}</Note>}</Card>;
 }
 export function TransactionChatCard({ transaction: tx }: { transaction: Transaction }) {
+  const c = useColors();
+  const shared = useShared();
   const pending = tx.status === 'pending', failed = tx.status === 'failed';
   const badge = pending ? 'a6471.svg' : failed ? '68d0f.svg' : 'd5ad6.svg';
   const icon = pending ? 'bfc84.svg' : failed ? '98a2e.svg' : '0c821.svg';
-  const line = pending ? '#EEE3CE' : failed ? '#E8CCCC' : '#BFE5C9';
-  return <Card style={{ backgroundColor: pending ? '#FFF9EF' : failed ? c.errorTint : '#F0FBF4', borderColor: line, borderRadius: 28, gap: 16 }}>
+  const line = c.line;
+  return <Card style={{ backgroundColor: pending ? c.amber : failed ? c.errorTint : c.successTint, borderColor: line, borderRadius: 28, gap: 16 }}>
     <View style={shared.row}><View style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}><WallyAsset name={badge} style={{ position: 'absolute' }} /><WallyAsset name={icon} /></View><Label size={19} weight="semibold" style={{ flex: 1, lineHeight: 24 }}>{pending ? 'Pending confirmation' : failed ? 'Transfer failed' : 'Transfer confirmed'}</Label></View>
     <View style={{ height: 1, backgroundColor: line }} />
     {(['Approved by you', 'Submitted to demo simulation', pending ? 'Waiting for confirmation' : failed ? 'Demo transfer rejected' : 'Confirmed by simulation'] as const).map((label, index) => <View key={label} style={[shared.row, { minHeight: 28 }]}><WallyAsset name={index < 2 ? '70fe0.svg' : pending ? '3fc33.svg' : failed ? '5cfbe.svg' : 'de3bd.svg'} /><Label size={16} weight={index < 2 ? 'semibold' : 'regular'} color={index < 2 ? c.ink : c.muted} style={{ flex: 1, lineHeight: 21 }}>{label}</Label></View>)}
@@ -52,6 +59,8 @@ export function TransactionChatCard({ transaction: tx }: { transaction: Transact
   </Card>;
 }
 export function DraftChatCard({ message, quote, now, editRequest = 0, onReview, onCancelReview, onConfirm, onEdit }: { message: Message; quote: Quote | null; now: number; editRequest?: number; onReview: () => void; onCancelReview: () => void; onConfirm: () => void; onEdit: (draft: Draft) => string | null }) {
+  const c = useColors();
+  const shared = useShared();
   const { state } = useDemo();
   const { preferences } = usePreferences();
   const [editing, setEditing] = useState(false);
@@ -77,6 +86,8 @@ export function DraftChatCard({ message, quote, now, editRequest = 0, onReview, 
 const supply = (value: number | null, symbol: string, missing: string) => value === null ? missing : `${value.toLocaleString('en-US', { notation: 'compact' })} ${symbol}`;
 /** One asset's price and facts, answering "Explain Bitcoin" inside the chat. */
 export function AssetChatCard({ symbol }: { symbol: string }) {
+  const c = useColors();
+  const shared = useShared();
   const { data, currency, loading } = useMarket();
   const coin = COINS.find(item => item.symbol === symbol);
   const asset = data?.assets.find(item => item.symbol === symbol);
@@ -100,6 +111,8 @@ export function CurrencyChoice() {
   return <Group title="Currency">{CURRENCIES.map(code => <Row key={code} title={CURRENCY_NAMES[code]} value={code} selected={preferences.currency === code} onPress={() => updatePreferences({ currency: code })} />)}</Group>;
 }
 export function InlineChatTool({ tool, onRetry, onManual, onAsk }: { tool: ChatTool; onRetry: () => void; onManual: (recipient?: string, amount?: string) => void; onAsk: (text: string) => void }) {
+  const c = useColors();
+  const shared = useShared();
   const { state } = useDemo();
   const { data: market } = useMarket();
   const { preferences } = usePreferences();
@@ -120,5 +133,6 @@ export function InlineChatTool({ tool, onRetry, onManual, onAsk }: { tool: ChatT
 
 /** Wallet tools behind the composer's + button. */
 export function WalletToolsModal({ visible, onClose, onManual }: { visible: boolean; onClose: () => void; onManual: () => void }) {
-  return <Modal transparent visible={visible} animationType="fade" onRequestClose={onClose}><View style={{ flex: 1, backgroundColor: '#0000003D', justifyContent: 'center', alignItems: 'center', padding: 24 }}><Pressable accessibilityRole="button" accessibilityLabel="Dismiss wallet tools" onPress={onClose} style={StyleSheet.absoluteFill} /><Card style={{ width: '100%', maxWidth: 384 }}><Label size={18} weight="bold">Wallet tools</Label><Button secondary label="Manual send" onPress={() => { onClose(); onManual(); }} /><Button secondary label="Receive address" onPress={() => { onClose(); router.push('/receive'); }} /><Button secondary label="Close" onPress={onClose} /></Card></View></Modal>;
+  const c = useColors();
+  return <Modal transparent visible={visible} animationType="fade" onRequestClose={onClose}><View style={{ flex: 1, backgroundColor: c.overlay, justifyContent: 'center', alignItems: 'center', padding: 24 }}><Pressable accessibilityRole="button" accessibilityLabel="Dismiss wallet tools" onPress={onClose} style={StyleSheet.absoluteFill} /><Card style={{ width: '100%', maxWidth: 384 }}><Label size={18} weight="bold">Wallet tools</Label><Button secondary label="Manual send" onPress={() => { onClose(); onManual(); }} /><Button secondary label="Receive address" onPress={() => { onClose(); router.push('/receive'); }} /><Button secondary label="Close" onPress={onClose} /></Card></View></Modal>;
 }

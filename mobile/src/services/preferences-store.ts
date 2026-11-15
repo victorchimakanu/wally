@@ -17,7 +17,10 @@
  */
 
 export type Recipient = { id: string; name: string; address: string; network: 'Arbitrum' | 'Ethereum' };
-export type Preferences = { name: string; currency: string; saved: string[]; recipients: Recipient[] };
+export const APPEARANCES = ['system', 'light', 'dark'] as const;
+export type Appearance = (typeof APPEARANCES)[number];
+/** `appearance` is optional so records written before it existed read back unchanged; absent means system. */
+export type Preferences = { name: string; currency: string; saved: string[]; recipients: Recipient[]; appearance?: Appearance };
 
 /** Bumped only when a change cannot be absorbed per-field below. */
 export const PREFERENCES_VERSION = 1;
@@ -85,7 +88,11 @@ export function parsePreferences(raw: unknown, defaults: Preferences): LoadResul
     dropped.push('your saved recipients');
   }
 
-  return { preferences: { name, currency, saved, recipients }, dropped };
+  let appearance = defaults.appearance;
+  if (typeof data.appearance === 'string' && (APPEARANCES as readonly string[]).includes(data.appearance)) appearance = data.appearance as Appearance;
+  else if (data.appearance !== undefined) dropped.push('your appearance setting');
+
+  return { preferences: { name, currency, saved, recipients, ...(appearance ? { appearance } : {}) }, dropped };
 }
 
 /** What to show when something was lost. Null when nothing was. */

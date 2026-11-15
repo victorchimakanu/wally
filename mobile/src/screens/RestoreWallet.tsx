@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
 import { router } from 'expo-router';
 import { TextInput, View } from 'react-native';
-import { Button, Card, Label, Note, Screen, shared } from '../components/ui';
+import { Button, Card, Label, Note, Screen, useShared } from '../components/ui';
 import { phraseShape } from '../services/recovery';
 import { getKeystore, keystoreAvailable, keystoreUnavailableReason } from '../services/wallet-worklet';
 import { useScreenPrivacy } from '../services/screen-privacy';
-import { colors as c, fonts } from '../theme';
+import { fonts, useColors } from '../theme';
 
 /**
  * Bring an existing wallet in from its recovery phrase.
@@ -19,6 +19,8 @@ import { colors as c, fonts } from '../theme';
  * still the worklet's job.
  */
 export function RestoreWalletScreen() {
+  const c = useColors();
+  const shared = useShared();
   useScreenPrivacy('wally.restore-wallet');
 
   const [text, setText] = useState('');

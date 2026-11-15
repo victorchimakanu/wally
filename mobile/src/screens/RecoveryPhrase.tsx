@@ -1,13 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
 import { TextInput, View } from 'react-native';
-import { Button, Card, Label, Note, Pill, Screen, shared } from '../components/ui';
+import { Button, Card, Label, Note, Pill, Screen, useShared } from '../components/ui';
 import { backupPositions, checkBackup, phraseWords } from '../services/recovery';
 import { getKeystore } from '../services/wallet-worklet';
 // Extensionless: Metro picks the native implementation on a phone and the no-op on web.
 import { useScreenPrivacy } from '../services/screen-privacy';
 import { requireUnlock } from '../services/unlock';
-import { colors as c, fonts } from '../theme';
+import { fonts, useColors } from '../theme';
 
 /**
  * The twelve words, and the check that the user really wrote them down.
@@ -29,6 +29,8 @@ import { colors as c, fonts } from '../theme';
  * can reach this.
  */
 export function RecoveryPhraseScreen() {
+  const c = useColors();
+  const shared = useShared();
   const { screenshotted } = useScreenPrivacy('wally.recovery-phrase');
 
   const { mode } = useLocalSearchParams<{ mode?: string }>();

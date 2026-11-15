@@ -4,6 +4,8 @@ import { Platform, StyleSheet } from 'react-native';
 import { Button, Card, Divider, Group, Label, Note, Pill, Row, Screen } from '../components/ui';
 import { SettingsToggle as Toggle } from '../components/SettingsToggle';
 import { useDemo } from '../demo/store';
+import { usePreferences } from '../demo/preferences';
+import { APPEARANCES, type Appearance } from '../services/preferences-store';
 import { useWallet } from '../data/wallet';
 import { WalletStatus } from '../components/WalletData';
 import { PHONE_MODELS, type PhoneModel, type PhoneBackend } from '../services/phone-models';
@@ -34,9 +36,13 @@ function settingsBuildLine(): string {
  * Settings is a list of places, each row saying where it goes and, when there is one, its
  * current value. Explanations live on the screen a row opens, never under the row.
  */
+const APPEARANCE_LABELS: Record<Appearance, string> = { system: 'System', light: 'Light', dark: 'Dark' };
+
 export function SettingsScreen() {
   const wallet = useWallet();
   const { state, ai, phone } = useDemo();
+  const { preferences, updatePreferences } = usePreferences();
+  const appearance = preferences.appearance ?? 'system';
   const open = (panel: Panel) => router.push({ pathname: '/preferences', params: { panel } });
   const network = wallet.enabled ? 'Testnet' : state.offline ? 'Offline' : 'Demo';
   const assistant = state.aiPaused ? 'Paused' : phone?.phase === 'loading' ? 'Loading' : ai.mode !== 'qvac' ? 'Scripted' : ai.location === 'phone' ? 'This phone' : 'Your computer';
@@ -46,6 +52,9 @@ export function SettingsScreen() {
       <Row title="Assistant" value={assistant} onPress={() => open('model')} />
       <Row title="Address book" onPress={() => router.push('/address-book')} />
       <Row title="Security" onPress={() => open('security')} />
+    </Group>
+    <Group title="Appearance">
+      {APPEARANCES.map(value => <Row key={value} title={APPEARANCE_LABELS[value]} selected={appearance === value} onPress={() => updatePreferences({ appearance: value })} />)}
     </Group>
     <Group>
       {/* FEATURE-AUDIT §11.2–11.3: people need transaction records for tax and the app

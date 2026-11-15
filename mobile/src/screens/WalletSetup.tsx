@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { router } from 'expo-router';
 import { View } from 'react-native';
 import { Button, Card, Label, Note, Screen } from '../components/ui';
-import { colors as c } from '../theme';
+import { useColors } from '../theme';
 // Extensionless on purpose: this is how Metro picks wallet-worklet.native.ts on a phone and
 // wallet-worklet.ts (which refuses) on web. Naming the extension would force the web stub.
 import { getKeystore, keystoreAvailable, keystoreUnavailableReason } from '../services/wallet-worklet';
@@ -18,6 +18,7 @@ import { getKeystore, keystoreAvailable, keystoreUnavailableReason } from '../se
  * browser stays the quickest way to check a layout and none of the demo flow changes.
  */
 export function WalletSetupScreen() {
+  const c = useColors();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 

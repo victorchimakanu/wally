@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { View } from 'react-native';
 import Animated, { FadeIn, FadeInDown, useAnimatedStyle, useReducedMotion, useSharedValue, withDelay, withRepeat, withSequence, withTiming } from 'react-native-reanimated';
 import { Label } from './ui';
-import { colors as c, fonts } from '../theme';
+import { fonts, useColors } from '../theme';
 
 /** The local model runs without reasoning output, so these steps describe the app's own progress. */
 const STEPS: [number, (location: string) => string][] = [
@@ -13,6 +13,7 @@ const STEPS: [number, (location: string) => string][] = [
 ];
 
 function Dot({ index, still }: { index: number; still: boolean }) {
+  const c = useColors();
   const level = useSharedValue(still ? 1 : .3);
   useEffect(() => {
     if (still) { level.value = 1; return; }
@@ -24,6 +25,7 @@ function Dot({ index, still }: { index: number; still: boolean }) {
 
 /** Replaces the reply while Wally works: one animated status line, then the reply as it streams in. */
 export function ThinkingIndicator({ location, preview }: { location: string; preview: string }) {
+  const c = useColors();
   const still = useReducedMotion();
   const [step, setStep] = useState(0);
   const [caret, setCaret] = useState(true);

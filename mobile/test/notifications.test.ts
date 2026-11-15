@@ -26,15 +26,15 @@ function fixture(width: number) {
     react: { useState: (initial: Value) => { const index = cursor++; if (!(index in hooks)) hooks[index] = initial; return [hooks[index], (next: Value) => { hooks[index] = typeof next === 'function' ? next(hooks[index]) : next; }]; } },
     'react-native': { Pressable: 'Pressable', View: 'View', useWindowDimensions: () => ({ width }), StyleSheet: { create: (value: Value) => value } },
     'expo-router': { router }, 'expo-image': { Image: 'Image' },
-    './WallyAsset': { WallyAsset: 'WallyAsset', Avatar: 'Avatar' },
-    './ui': { Label: 'Label', Button: 'Button', Card: 'Card', Detail: 'Detail', shared: {} },
+    './WallyAsset': { WallyAsset: 'WallyAsset', Avatar: 'Avatar', Lockup: 'Lockup' },
+    './ui': { Label: 'Label', Button: 'Button', Card: 'Card', Detail: 'Detail', useShared: () => ({}) },
     '../demo/store': { useDemo: () => ({ state }) },
     '../data/wallet': { useWallet: () => ({ enabled: false }) },
     '../demo/preferences': {}, 'react-native-safe-area-context': {},
     './shell': { useShell: () => ({ wide: false, topLevel: false }) },
     'react-native-reanimated': { __esModule: true, default: { View: 'Animated.View' }, FadeIn: { duration: () => ({}) } },
     '../demo/model': { money: (amount: number) => String(amount) },
-    '../theme': { colors: {}, fonts: {}, radius: {} },
+    '../theme': { useColors: () => ({}), useTheme: () => ({ palette: {}, dark: false }), makeStyles: (factory: (c: Value) => Value) => () => factory({}), fonts: {}, radius: {} },
     './WalletData': { LiveWalletOverview: 'LiveWalletOverview' },
   };
   function load(relative: string): Value {

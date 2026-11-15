@@ -1,8 +1,7 @@
 import React, { useEffect } from 'react';
 import { router, Stack } from 'expo-router';
-import { StatusBar } from 'expo-status-bar';
 import { useFonts } from 'expo-font';
-import { ActivityIndicator, Platform, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Platform, StyleSheet, Text, useColorScheme, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import Constants from 'expo-constants';
 import * as Linking from 'expo-linking';
@@ -14,17 +13,21 @@ import { DemoProvider, useDemo } from '../demo/store';
 import { PreferencesProvider } from '../demo/preferences';
 import { MarketProvider } from '../data/market';
 import { AppShell } from '../components/AppShell';
+import { ThemeProvider } from '../components/ThemeProvider';
 import { WalletProvider } from '../data/wallet';
 import { Label } from '../components/ui';
-import { colors as c } from '../theme';
+import { palettes, useColors } from '../theme';
 
 function AppContent() {
+  const c = useColors();
   const { ready } = useDemo();
-  if (!ready) return <View style={styles.loading}><ActivityIndicator color={c.brand} /><Label color={c.muted}>Opening your wallet…</Label></View>;
+  if (!ready) return <View style={[styles.loading, { backgroundColor: c.background }]}><ActivityIndicator color={c.brand} /><Label color={c.muted}>Opening your wallet…</Label></View>;
   return <AppShell><Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: c.background }, animation: 'slide_from_right' }} /></AppShell>;
 }
 
 export default function RootLayout() {
+  // Before saved preferences load there is no chosen appearance yet, so the system's stands in.
+  const c = palettes[useColorScheme() === 'dark' ? 'dark' : 'light'];
   const [loaded, error] = useFonts({
     Inter_400Regular: require('@expo-google-fonts/inter/400Regular/Inter_400Regular.ttf'),
     Inter_500Medium: require('@expo-google-fonts/inter/500Medium/Inter_500Medium.ttf'),
@@ -54,14 +57,13 @@ export default function RootLayout() {
     appVersion: Constants.expoConfig?.version, os: Platform.OS, isDevelopment: __DEV__,
   }))), []);
 
-  if (error) return <View style={styles.loading}><Text>Wally could not load its bundled fonts. Reload the preview to try again.</Text></View>;
-  if (!loaded) return <View style={styles.loading}><ActivityIndicator color={c.brand} /></View>;
+  if (error) return <View style={[styles.loading, { backgroundColor: c.background }]}><Text style={{ color: c.ink }}>Wally could not load its bundled fonts. Reload the preview to try again.</Text></View>;
+  if (!loaded) return <View style={[styles.loading, { backgroundColor: c.background }]}><ActivityIndicator color={c.brand} /></View>;
   // The boundary is outermost on purpose: a provider that throws while mounting would
   // otherwise take the whole tree with it and leave a white screen, which on a wallet is
   // indistinguishable from a transfer that went through.
-  return <CrashBoundary><SafeAreaProvider><StatusBar style="dark" /><WalletProvider><DemoProvider><PreferencesProvider><MarketProvider><AppContent /></MarketProvider></PreferencesProvider></DemoProvider></WalletProvider></SafeAreaProvider></CrashBoundary>;
+  return <CrashBoundary><SafeAreaProvider><WalletProvider><DemoProvider><PreferencesProvider><ThemeProvider><MarketProvider><AppContent /></MarketProvider></ThemeProvider></PreferencesProvider></DemoProvider></WalletProvider></SafeAreaProvider></CrashBoundary>;
 }
 const styles = StyleSheet.create({
-  loading: { flex: 1, backgroundColor: c.background, justifyContent: 'center', alignItems: 'center', gap: 16, padding: 24 },
+  loading: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 16, padding: 24 },
 });
-

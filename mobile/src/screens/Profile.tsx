@@ -2,14 +2,16 @@ import React, { useState } from 'react';
 import { router } from 'expo-router';
 import { TextInput, View } from 'react-native';
 import { Avatar, WallyAsset } from '../components/WallyAsset';
-import { Address, Button, Card, Group, Label, Note, Row, Screen, shared } from '../components/ui';
+import { Address, Button, Card, Group, Label, Note, Row, Screen, useShared } from '../components/ui';
 import { CurrencyChoice } from '../components/ChatCards';
 import { usePreferences } from '../demo/preferences';
 import { useDemo } from '../demo/store';
-import { colors as c, fonts } from '../theme';
+import { fonts, useColors } from '../theme';
 import { useWallet } from '../data/wallet';
 
 export function ProfileScreen() {
+  const c = useColors();
+  const shared = useShared();
   const { preferences, updatePreferences, error } = usePreferences();
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(preferences.name);
@@ -27,6 +29,8 @@ export function ProfileScreen() {
 const short = (address: string) => `${address.slice(0, 6)}…${address.slice(-4)}`;
 
 export function AddressBookScreen() {
+  const c = useColors();
+  const shared = useShared();
   const wallet = useWallet();
   const { preferences, updatePreferences, error: storageError } = usePreferences();
   const { setDraft, draft } = useDemo();

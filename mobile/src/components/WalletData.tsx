@@ -4,12 +4,12 @@ import { router } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
 import { createClipboardSafety, copyNotice } from '../services/clipboard-safety.ts';
 import { Pressable, Share, View } from 'react-native';
-import { Button, Card, Group, Label, LinkButton, Note, Pill, QrTile, ReceiveAddress, shared } from './ui';
+import { Button, Card, Group, Label, LinkButton, Note, Pill, QrTile, ReceiveAddress, useShared } from './ui';
 import { useWallet } from '../data/wallet';
 import { custodyNotice } from '../services/custody';
 import { receiveAdvice } from '../services/receive-advice';
 import { CHAINS, formatEth, type Chain } from '../services/wallet-api';
-import { colors as c } from '../theme';
+import { useColors } from '../theme';
 
 /** Figma network/receive-selector: one pill with the selected network on an amber segment. */
 /**
@@ -19,6 +19,7 @@ import { colors as c } from '../theme';
  * the Send screen gains a row rather than a new idea.
  */
 export function AssetChoice({ value, options, onChange }: { value: string; options: readonly string[]; onChange: (value: string) => void }) {
+  const c = useColors();
   if (options.length < 2) return null;
   return <View accessibilityRole="radiogroup" style={{ flexDirection: 'row', padding: 4, borderRadius: 29, borderWidth: 1, borderColor: c.line, backgroundColor: c.surface }}>
     {options.map(option => <Pressable key={option} accessibilityRole="radio" accessibilityState={{ selected: value === option }} onPress={() => onChange(option)}
@@ -29,6 +30,7 @@ export function AssetChoice({ value, options, onChange }: { value: string; optio
 }
 
 export function NetworkChoice({ value, onChange }: { value: Chain; onChange: (value: Chain) => void }) {
+  const c = useColors();
   return <View accessibilityRole="radiogroup" style={{ flexDirection: 'row', padding: 4, borderRadius: 29, borderWidth: 1, borderColor: c.line, backgroundColor: c.surface }}>{(Object.keys(CHAINS) as Chain[]).map(chain => { const selected = value === chain; return <Pressable key={chain} accessibilityRole="radio" aria-checked={selected} accessibilityState={{ checked: selected }} accessibilityLabel={CHAINS[chain].name} onPress={() => onChange(chain)} style={{ flex: 1, minHeight: 46, paddingHorizontal: 8, borderRadius: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: selected ? c.amber : 'transparent' }}><Label size={15} weight={selected ? 'semibold' : 'medium'} numberOfLines={1}>{CHAINS[chain].name.replace(/ Sepolia$/, '')}</Label></Pressable>; })}</View>;
 }
 /**
@@ -41,6 +43,7 @@ export function NetworkChoice({ value, onChange }: { value: Chain; onChange: (va
  * Returns null in the two safe states, so a screen can render it unconditionally.
  */
 export function CustodyGuard() {
+  const c = useColors();
   const wallet = useWallet();
 
   if (wallet.blocked) return <Card>
@@ -56,16 +59,20 @@ export function CustodyGuard() {
 }
 
 export function WalletStatus() {
+  const shared = useShared();
   const wallet = useWallet();
   return <View style={{ gap: 4 }}><View style={shared.between}><Note>{wallet.loading ? 'Updating balances…' : wallet.snapshot ? `${wallet.stale ? 'Saved' : 'Updated'} ${new Date(wallet.snapshot.fetchedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Connecting to the wallet…'}</Note><LinkButton label="Refresh" accessibilityLabel="Refresh balances" disabled={wallet.loading || wallet.offline} onPress={() => { void wallet.refresh(); }} /></View>{!!wallet.error && <Note error>{wallet.error}</Note>}</View>;
 }
 /** Figma network/icon-fallback: a tinted letter mark per network. */
 function NetworkMark({ chain }: { chain: Chain }) {
+  const c = useColors();
   return <View style={{ width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: chain === 'arbitrum' ? c.amber : c.tint }}><Label size={17} weight="semibold">{chain === 'arbitrum' ? 'A' : 'E'}</Label></View>;
 }
 /** Figma home/wallet-overview + wallet/network-balances: one total, then each network's balance. */
 /** `onActivity` adds an Activity button, for chat; on the Wallet screen Activity is its own tab. */
 export function LiveWalletOverview({ onActivity }: { onActivity?: () => void } = {}) {
+  const c = useColors();
+  const shared = useShared();
   const wallet = useWallet();
   const balances = wallet.snapshot?.balances ?? [];
   // ETH only, and the filter is the whole point: `balanceWei` holds base units at the asset's
@@ -97,6 +104,7 @@ export function LiveWalletOverview({ onActivity }: { onActivity?: () => void } =
   </View>;
 }
 export function LiveReceiveCard() {
+  const shared = useShared();
   const wallet = useWallet();
   const [chain, setChain] = useState<Chain>('arbitrum'), [notice, setNotice] = useState(''), [copied, setCopied] = useState(false);
   // `symbol` is named explicitly: a chain now has more than one balance, and finding by chain
@@ -128,6 +136,8 @@ export function LiveReceiveCard() {
   </Card>;
 }
 export function LiveActivityCard({ compact = false, search = '', filter = 'All' }: { compact?: boolean; search?: string; filter?: string }) {
+  const c = useColors();
+  const shared = useShared();
   const wallet = useWallet();
   const { refreshHistory } = wallet;
   useEffect(() => { void refreshHistory(); }, [refreshHistory]);

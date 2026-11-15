@@ -3,10 +3,10 @@ import { router } from 'expo-router';
 import { Pressable, View } from 'react-native';
 import { Image } from 'expo-image';
 import { WallyAsset } from './WallyAsset';
-import { Group, Label, shared } from './ui';
+import { Group, Label, useShared } from './ui';
 import { formatPrice, formatChange, type MarketAsset } from '../services/market-api';
 import { useMarket } from '../data/market';
-import { colors as c } from '../theme';
+import { useColors } from '../theme';
 import { usePreferences } from '../demo/preferences';
 export function AssetLogo({ symbol }: { symbol: string }) {
   if (symbol === 'USDT') return <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: '#26A17B', justifyContent: 'center', alignItems: 'center' }}><Label size={24} color="#FFFFFF" weight="bold">₮</Label></View>;
@@ -17,6 +17,8 @@ export function AssetLogo({ symbol }: { symbol: string }) {
 }
 /** Opens the asset screen unless a caller, such as a chat card, handles the press. */
 export function AssetRow({ asset, onPress }: { asset: MarketAsset; onPress?: () => void }) {
+  const c = useColors();
+  const shared = useShared();
   return <Pressable accessibilityRole="button" accessibilityLabel={`View ${asset.name}`} onPress={onPress ?? (() => router.push({ pathname: '/asset', params: { symbol: asset.symbol } }))} style={({ pressed }) => [shared.row, { minHeight: 64, paddingHorizontal: 16, paddingVertical: 10 }, pressed && { backgroundColor: c.toggle }]}>
     <AssetLogo symbol={asset.symbol} /><Label size={16} style={shared.flex}>{asset.name}</Label><View style={{ alignItems: 'flex-end', flexShrink: 1 }}><Label size={16}>{formatPrice(asset.price, asset.currency)}</Label><Label size={12} color={asset.change === null ? c.muted : asset.change < 0 ? c.error : c.success}>{formatChange(asset.change)}</Label></View>
   </Pressable>;

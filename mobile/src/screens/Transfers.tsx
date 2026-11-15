@@ -4,10 +4,10 @@ import { router, useLocalSearchParams } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
 import { Share, TextInput, View } from 'react-native';
 import { WallyAsset } from '../components/WallyAsset';
-import { Address, Button, Card, Detail, Divider, Group, Icon, Label, LinkButton, Note, Pill, QrTile, ReceiveAddress, Row, Screen, shared } from '../components/ui';
+import { Address, Button, Card, Detail, Divider, Group, Icon, Label, LinkButton, Note, Pill, QrTile, ReceiveAddress, Row, Screen, useShared } from '../components/ui';
 import { DEMO_ADDRESS, DEMO_RECIPIENT, FEE, money, units } from '../demo/model';
 import { useDemo } from '../demo/store';
-import { colors as c, fonts } from '../theme';
+import { fonts, useColors } from '../theme';
 import { useWallet } from '../data/wallet';
 import { LiveReceiveScreen, LiveReviewScreen, LiveSendScreen, LiveTransactionScreen } from './LiveWallet';
 
@@ -19,6 +19,8 @@ export function SendScreen() {
   return wallet.enabled ? <LiveSendScreen /> : <DemoSendScreen />;
 }
 function DemoSendScreen() {
+  const c = useColors();
+  const shared = useShared();
   const { state, draft, setDraft, prepare } = useDemo();
   const [error, setError] = useState('');
   function review() {
@@ -46,6 +48,8 @@ function DemoSendScreen() {
 
 export function ReviewScreen() { return useWallet().enabled ? <LiveReviewScreen /> : <DemoReviewScreen />; }
 function DemoReviewScreen() {
+  const c = useColors();
+  const shared = useShared();
   const { quote, draft, state, prepare, confirm, cancel } = useDemo();
   const [now, setNow] = useState(() => Date.now());
   const [error, setError] = useState('');
@@ -92,6 +96,8 @@ function DemoReviewScreen() {
 
 export function TransactionScreen() { const params = useLocalSearchParams<{ hash?: string }>(); return useWallet().enabled && params.hash ? <LiveTransactionScreen /> : <DemoTransactionScreen />; }
 function DemoTransactionScreen() {
+  const c = useColors();
+  const shared = useShared();
   const { id } = useLocalSearchParams<{ id: string }>();
   const { state, setDraft } = useDemo();
   const tx = state.transactions.find(t => t.id === id);
@@ -126,6 +132,7 @@ export function ReceiveScreen() {
   return wallet.enabled ? <LiveReceiveScreen /> : <DemoReceiveScreen />;
 }
 function DemoReceiveScreen() {
+  const shared = useShared();
   const [message, setMessage] = useState('');
   const [copied, setCopied] = useState(false);
   async function copy() {
@@ -136,7 +143,7 @@ function DemoReceiveScreen() {
   return <Screen title="Receive">
     <Card>
       <View style={shared.between}><Label size={18} weight="bold">USDt · Arbitrum</Label><Pill tone="warning">Demo · do not fund</Pill></View>
-      <QrTile><WallyAsset name="eab8b.svg" /></QrTile>
+      <QrTile><WallyAsset name="eab8b.svg" tint={false} /></QrTile>
       <ReceiveAddress value={DEMO_ADDRESS} onCopy={() => { void copy(); }} />
       <View style={shared.row}><Button label={copied ? 'Copied' : 'Copy address'} onPress={copy} style={shared.flex} /><Button accent label="Share" style={shared.flex} onPress={() => { void Share.share({ message: `Wally preview address (fictional; do not fund): ${DEMO_ADDRESS}` }).catch(() => setMessage('Sharing is unavailable on this device.')); }} /></View>
     </Card>

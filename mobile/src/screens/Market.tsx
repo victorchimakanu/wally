@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Keyboard, Pressable, View } from 'react-native';
-import { Button, Card, Group, Label, Note, Row, Screen, shared } from '../components/ui';
+import { Button, Card, Group, Label, Note, Row, Screen, useShared } from '../components/ui';
 import { AssetLogo, AssetRow, Watchlist } from '../components/MarketRows';
 import { ChatComposer } from '../components/ChatComposer';
 import { WalletToolsModal } from '../components/ChatCards';
@@ -10,7 +10,7 @@ import { useMarket } from '../data/market';
 import { MarketStatus, PriceChart } from '../components/MarketData';
 import { usePreferences } from '../demo/preferences';
 import { useDemo } from '../demo/store';
-import { colors as c } from '../theme';
+import { useColors } from '../theme';
 
 function AskDock({ topic }: { topic?: string }) {
   const { state, ai, newChat, sendMessage } = useDemo();
@@ -32,6 +32,7 @@ function AskDock({ topic }: { topic?: string }) {
 }
 /** Four tracked assets fit on one screen, so there is nothing to search or filter. */
 export function MarketScreen() {
+  const c = useColors();
   const { data, loading, error } = useMarket();
   const { preferences } = usePreferences();
   const assets = data?.assets ?? [];
@@ -44,6 +45,8 @@ export function MarketScreen() {
   </Screen>;
 }
 export function AssetScreen() {
+  const c = useColors();
+  const shared = useShared();
   const { symbol } = useLocalSearchParams<{ symbol: string }>();
   const { preferences, updatePreferences, error } = usePreferences();
   const [timeframe, setTimeframe] = useState('1D');

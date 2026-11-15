@@ -1,24 +1,26 @@
 import { CustodyGuard } from '../components/WalletData';
 import React, { useState } from 'react';
 import { Redirect, router } from 'expo-router';
-import { Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { Pressable, TextInput, View } from 'react-native';
 import { WalletOverview } from '../components/WalletOverview';
 import { Watchlist } from '../components/MarketRows';
-import { WallyAsset } from '../components/WallyAsset';
-import { Button, Card, Group, Label, Row, Screen, shared } from '../components/ui';
+import { Lockup, WallyAsset } from '../components/WallyAsset';
+import { Button, Card, Group, Label, Row, Screen, useShared } from '../components/ui';
 import { useDemo } from '../demo/store';
-import { colors as c, fonts } from '../theme';
+import { fonts, makeStyles, useColors } from '../theme';
 import { useWallet } from '../data/wallet';
 import { LiveHistoryScreen } from './LiveWallet';
 
 export function WelcomeScreen() {
+  const c = useColors();
+  const s = useStyles();
   const wallet = useWallet();
   const { state, update } = useDemo();
   if (state.welcomed) return <Redirect href="/wallet" />;
   return <Screen contentStyle={{ paddingTop: 10 }} footer={<Button label={wallet.enabled ? 'Open testnet wallet' : 'Try the demo'} onPress={() => { update({ welcomed: true }); router.replace('/wallet'); }} />}>
-    <WallyAsset name="wally-lockup-light.svg" size={118} style={{ alignSelf: 'flex-start' }} />
+    <Lockup size={118} style={{ alignSelf: 'flex-start' }} />
     <View style={s.illustration} accessibilityLabel="Wallet with a Send 25 USDT conversation bubble">
-      <View style={s.illustratedWallet}><WallyAsset name="wally-lockup-dark.svg" size={84} style={{ alignSelf: 'flex-start' }} /><Label size={40} color={c.surface} weight="semibold" style={{ marginTop: 12 }}>₮</Label></View>
+      <View style={s.illustratedWallet}><Lockup onBrand size={84} style={{ alignSelf: 'flex-start' }} /><Label size={40} color={c.onBrand} weight="semibold" style={{ marginTop: 12 }}>₮</Label></View>
       <View style={s.bubble}><Label size={16} weight="medium">“Send 25 USDT”</Label></View>
     </View>
     <Label size={32} weight="semibold" accessibilityRole="header">Your money.{'\n'}Just ask Wally.</Label>
@@ -26,6 +28,7 @@ export function WelcomeScreen() {
 }
 
 export function WalletScreen() {
+  const shared = useShared();
   const { setDraft } = useDemo();
   // Two actions, not a grid of shortcuts: Market and Chat already have their own tabs.
   return <Screen tab="wallet" contentStyle={{ gap: 24 }}>
@@ -57,6 +60,9 @@ export function HistoryScreen() {
 }
 /** Demo transfers are all outgoing, so there is nothing to filter: search and the list. */
 function DemoHistoryScreen() {
+  const c = useColors();
+  const s = useStyles();
+  const shared = useShared();
   const { state } = useDemo();
   const [search, setSearch] = useState('');
   const transactions = state.transactions.filter(tx => `${tx.recipient} ${tx.amount} ${tx.status}`.toLowerCase().includes(search.toLowerCase()));
@@ -70,9 +76,9 @@ function DemoHistoryScreen() {
   </Screen>;
 }
 
-const s = StyleSheet.create({
+const useStyles = makeStyles(c => ({
   illustration: { width: 300, maxWidth: '100%', height: 244, borderRadius: 40, backgroundColor: c.tint, alignSelf: 'center', marginTop: 26, marginBottom: 12 },
   illustratedWallet: { position: 'absolute', top: 39, left: 32, width: 228, height: 146, borderRadius: 24, backgroundColor: c.brand, paddingHorizontal: 20, paddingTop: 15 },
   bubble: { position: 'absolute', right: 15, bottom: 32, width: 202, minHeight: 70, borderRadius: 22, backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center' },
   activity: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 64, paddingHorizontal: 16, paddingVertical: 10 },
-});
+}));

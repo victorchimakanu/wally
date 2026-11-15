@@ -1,16 +1,16 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Keyboard, Pressable, View } from 'react-native';
-import { Button, Card, Label, LinkButton, Note, Screen, shared } from '../components/ui';
+import { Button, Card, Label, LinkButton, Note, Screen, useShared } from '../components/ui';
 import { useShell } from '../components/shell';
 import { ChatComposer, type ChatSuggestion } from '../components/ChatComposer';
 import { DraftChatCard, InlineChatTool, ToolStateCard, WalletToolsModal } from '../components/ChatCards';
 import { ChatHistoryPanel } from '../components/ChatHistoryPanel';
 import { ThinkingIndicator } from '../components/ThinkingIndicator';
-import { WallyAsset } from '../components/WallyAsset';
+import { Lockup, WallyAsset } from '../components/WallyAsset';
 import { draftStatus, type Message } from '../demo/model';
 import { useDemo } from '../demo/store';
-import { colors as c } from '../theme';
+import { useColors } from '../theme';
 import { useWallet } from '../data/wallet';
 import { useMarket } from '../data/market';
 import { chatSuggestions, primarySuggestion, type Suggestion, type SuggestionAction } from '../services/chat-suggestions';
@@ -23,6 +23,8 @@ export function ChatScreen() {
   return <Conversation key={id} id={id} prompt={prompt} topic={topic} />;
 }
 function Conversation({ id, prompt, topic }: { id: string; prompt?: string; topic?: string }) {
+  const c = useColors();
+  const shared = useShared();
   const wallet = useWallet();
   const { wide } = useShell();
   const { data: market } = useMarket();
@@ -93,7 +95,7 @@ function Conversation({ id, prompt, topic }: { id: string; prompt?: string; topi
   </>}>
     {state.offline && <Card style={{ backgroundColor: c.warningTint }}><Label weight="semibold">You’re offline</Label><Note>Drafts are available. Reconnect before reviewing a transfer.</Note></Card>}
     {!chat && <><Label>This conversation is no longer available.</Label><Button label="Start a new chat" onPress={() => router.replace({ pathname: '/chat', params: { id: newChat() } })} /></>}
-    {chat?.messages.length === 0 && <View style={{ flex: 1, justifyContent: 'center', gap: 20 }}><WallyAsset name="wally-lockup-light.svg" size={150} style={{ alignSelf: 'center' }} /><Label size={28} weight="semibold" style={shared.center}>What can I help with?</Label><Label size={16} color={c.muted} style={shared.center}>Ask about your wallet or prepare a transfer. You review every send.</Label></View>}
+    {chat?.messages.length === 0 && <View style={{ flex: 1, justifyContent: 'center', gap: 20 }}><Lockup size={150} style={{ alignSelf: 'center' }} /><Label size={28} weight="semibold" style={shared.center}>What can I help with?</Label></View>}
     {turns.map((turn, index) => <View key={turn[0].id} style={{ gap: 12 }}>{turn.map(message => message.role === 'user' ? <View key={message.id} accessibilityLabel="Your request" style={{ alignSelf: 'flex-end', maxWidth: '83%', backgroundColor: c.tint, borderRadius: 24, paddingHorizontal: 16, paddingVertical: 14 }}><Label size={16} style={{ lineHeight: 22, overflowWrap: 'anywhere' } as never}>{message.text}</Label></View> : <View key={message.id} style={{ gap: 12 }}>
       <Label size={16} style={{ lineHeight: 22 }}>{message.text}</Label>
       {message.draft && (wallet.enabled ? <Card><Label weight="semibold">Saved demo draft</Label><Note>This fictional USDt draft cannot be submitted to the connected testnet wallet.</Note><Button secondary label="Open testnet Send" onPress={() => manual()} /></Card> : <DraftChatCard message={message} quote={quote?.origin?.chatId === id && quote.origin.messageId === message.id ? quote : null} now={now} editRequest={editRequest.id === message.id ? editRequest.sequence : 0} onReview={() => review(message)} onCancelReview={cancel} onConfirm={sendTransfer} onEdit={draft => updateChatDraft({ chatId: id, messageId: message.id }, draft)} />)}

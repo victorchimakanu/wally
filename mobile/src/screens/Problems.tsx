@@ -4,7 +4,7 @@ import * as Clipboard from 'expo-clipboard';
 import { Button, Card, Label, Note, Screen } from '../components/ui';
 import { readCrashes, clearCrashes } from '../services/crash-log-device';
 import { reportText, type CrashRecord } from '../services/crash-log';
-import { colors as c } from '../theme';
+import { useColors } from '../theme';
 
 /**
  * The problem reports this device has recorded, and the choice to hand them over.
@@ -18,6 +18,7 @@ import { colors as c } from '../theme';
  * the way out, so a recovery phrase or a key cannot reach the clipboard from here.
  */
 export function ProblemsScreen() {
+  const c = useColors();
   const [records, setRecords] = useState<CrashRecord[] | null>(null);
   const [copied, setCopied] = useState(false);
   const [cleared, setCleared] = useState(false);

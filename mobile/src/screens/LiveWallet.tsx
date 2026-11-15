@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as Linking from 'expo-linking';
 import { Pressable, TextInput, View } from 'react-native';
-import { Address, Button, Card, Detail, Divider, Label, LinkButton, Note, Pill, Screen, shared } from '../components/ui';
+import { Address, Button, Card, Detail, Divider, Label, LinkButton, Note, Pill, Screen, useShared } from '../components/ui';
 import { tokensFor } from '../services/tokens';
 import { AssetChoice, LiveActivityCard, LiveReceiveCard, NetworkChoice, WalletStatus } from '../components/WalletData';
 import { useWallet } from '../data/wallet';
@@ -11,9 +11,11 @@ import { CHAINS, fetchGasPrice, formatUnits, isAddress, parseSendAmount, sendabl
 import { monotonicNow, quoteExpired, secondsLeft } from '../services/quote-clock';
 import { addressTrust, trustWarning } from '../services/address-safety.ts';
 import { usePreferences } from '../demo/preferences';
-import { colors as c } from '../theme';
+import { useColors } from '../theme';
 
 export function LiveSendScreen() {
+  const c = useColors();
+  const shared = useShared();
   const wallet = useWallet(), { state } = useDemo();
   const params = useLocalSearchParams<{ chain?: string; recipient?: string; amount?: string; scannedChain?: string; scannedAmountIgnored?: string }>();
   const [chain, setChain] = useState<Chain>(params.chain === 'ethereum' ? 'ethereum' : 'arbitrum');
@@ -119,6 +121,8 @@ export function LiveSendScreen() {
   </Screen>;
 }
 export function LiveReviewScreen() {
+  const c = useColors();
+  const shared = useShared();
   const wallet = useWallet(), { state } = useDemo();
   const [now, setNow] = useState(monotonicNow), [busy, setBusy] = useState(false), [error, setError] = useState('');
   const q = wallet.quote;
@@ -160,6 +164,8 @@ export function LiveReviewScreen() {
 }
 export function LiveReceiveScreen() { return <Screen title="Receive"><LiveReceiveCard /></Screen>; }
 export function LiveHistoryScreen() {
+  const c = useColors();
+  const shared = useShared();
   const [search, setSearch] = useState(''), [filter, setFilter] = useState('All');
   return <Screen title="Activity"><TextInput accessibilityLabel="Search activity" style={shared.input} placeholder="Search" placeholderTextColor={c.muted} value={search} onChangeText={setSearch} /><View style={shared.row}>{['All', 'Sent', 'Received'].map(value => <Pressable key={value} accessibilityRole="tab" accessibilityState={{ selected: filter === value }} onPress={() => setFilter(value)} style={{ flex: 1, alignItems: 'center', paddingVertical: 12, backgroundColor: filter === value ? c.tint : c.surface, borderRadius: 18 }}><Label>{value}</Label></Pressable>)}</View><LiveActivityCard search={search} filter={filter} /></Screen>;
 }
@@ -206,6 +212,7 @@ export function LiveTransactionScreen() {
   return valid ? <Receipt key={`${params.chain}:${params.hash}`} chain={params.chain as Chain} hash={params.hash} /> : <Screen title="Transaction"><Note error>Invalid transaction link.</Note><Button label="View Activity" onPress={() => router.replace('/history')} /></Screen>;
 }
 function Receipt({ chain, hash }: { chain: Chain; hash: string }) {
+  const c = useColors();
   const wallet = useWallet();
   const [tx, setTx] = useState<LiveTransaction | null>(wallet.history?.items.find(item => item.hash === hash && item.chain === chain) ?? null), [error, setError] = useState('');
   const [checking, setChecking] = useState(false), [attempt, setAttempt] = useState(0);
