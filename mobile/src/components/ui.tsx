@@ -1,14 +1,13 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
-import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View, type StyleProp, type TextProps, type TextStyle, type ViewStyle } from 'react-native';
-import { Avatar, WallyAsset } from './WallyAsset';
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View, type StyleProp, type TextProps, type TextStyle, type ViewStyle } from 'react-native';
+import { WallyAsset, type AssetName } from './WallyAsset';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Animated, { FadeIn } from 'react-native-reanimated';
+import { useShell } from './shell';
 import { colors as c, fonts, radius } from '../theme';
 import { useDemo } from '../demo/store';
 import { useWallet } from '../data/wallet';
-import { usePreferences } from '../demo/preferences';
 
 const icons = {
   back: require('../../assets/figma/22421.svg'), spark: require('../../assets/figma/2c6cd.svg'),
@@ -37,6 +36,13 @@ export function Button({ label, onPress, secondary = false, accent = false, disa
     <Label size={16} weight="semibold" color={secondary || accent ? c.ink : c.surface} style={s.center}>{label}</Label>
   </Pressable>;
 }
+/** An inline action beside a label or a status line: text only, so it never outweighs the screen's main button. */
+export function LinkButton({ label, onPress, disabled = false, accessibilityLabel }: { label: string; onPress: () => void; disabled?: boolean; accessibilityLabel?: string }) {
+  return <Pressable accessibilityRole="button" accessibilityLabel={accessibilityLabel ?? label} accessibilityState={{ disabled }} disabled={disabled} onPress={onPress} hitSlop={10}
+    style={({ pressed }) => ({ minHeight: 44, justifyContent: 'center', opacity: disabled ? .4 : pressed ? .6 : 1 })}>
+    <Label size={14} weight="semibold" color={c.brand}>{label}</Label>
+  </Pressable>;
+}
 export function Card({ children, style }: React.PropsWithChildren<{ style?: StyleProp<ViewStyle> }>) { return <View style={[s.card, style]}>{children}</View>; }
 export function Pill({ children, tone = 'brand' }: React.PropsWithChildren<{ tone?: 'brand' | 'warning' | 'success' }>) {
   return <View style={[s.pill, { backgroundColor: tone === 'warning' ? c.warningTint : tone === 'success' ? c.successTint : c.tint }]}>
@@ -46,50 +52,32 @@ export function Pill({ children, tone = 'brand' }: React.PropsWithChildren<{ ton
 export function Note({ children, error = false }: React.PropsWithChildren<{ error?: boolean }>) {
   return <Label size={12} color={error ? c.error : c.muted} accessibilityLiveRegion={error ? 'polite' : 'none'} style={error ? s.error : undefined}>{children}</Label>;
 }
-export function Header({ title, subtitle, back = true }: { title: string; subtitle?: string; back?: boolean }) {
+/** Title bar for pushed screens: a back button and one centred title, nothing under it. */
+export function Header({ title, back = true }: { title: string; back?: boolean }) {
   return <View style={s.header}>
     {back && <Pressable accessibilityLabel="Go back" accessibilityRole="button" onPress={() => router.canGoBack() ? router.back() : router.replace('/wallet')} style={s.back}><View style={{ transform: [{ rotate: '180deg' }] }}><WallyAsset name="afc43.svg" /></View></Pressable>}
-    <View style={{ flex: 1, alignItems: 'center', paddingRight: back ? 50 : 0 }}><Label weight="semibold" size={16} accessibilityRole="header">{title}</Label>{subtitle && <Label size={11} color={c.muted} style={shared.center}>{subtitle}</Label>}</View>
+    <View style={{ flex: 1, alignItems: 'center', paddingRight: back ? 50 : 0 }}><Label weight="semibold" size={16} accessibilityRole="header" numberOfLines={1}>{title}</Label></View>
   </View>;
 }
-/** `floating` drops the Wallet/Chat switch and keeps only the menu button, floating over the content. */
-export function AppNavigation({ surface, floating = false }: { surface: 'wallet' | 'chat'; floating?: boolean }) {
-  const [open, setOpen] = useState(false);
-  const { state, newChat } = useDemo();
-  const { preferences } = usePreferences();
-  const insets = useSafeAreaInsets();
-  function chat(fresh = false) { const id = fresh ? newChat() : state.chats[0]?.id ?? newChat(); setOpen(false); router.replace({ pathname: '/chat', params: { id } }); }
-  function go(path: '/wallet' | '/chats' | '/history' | '/market' | '/settings' | '/profile' | '/address-book') { setOpen(false); router.push(path); }
-  const menu = <Pressable accessibilityRole="button" accessibilityLabel="Open app menu" onPress={() => setOpen(true)} style={[s.menu, floating && s.floatingShadow]}><WallyAsset name="f3b34.svg" /></Pressable>;
-  return <>
-    {floating ? <Animated.View entering={FadeIn.duration(200)} style={s.floatingMenu}>{menu}</Animated.View> : <View style={s.navigation}>
-      {menu}
-      <View style={s.segment}>{(['wallet', 'chat'] as const).map(value => <Pressable key={value} accessibilityRole="tab" accessibilityLabel={value === 'wallet' ? 'Wallet' : 'Chat'} accessibilityState={{ selected: surface === value }} onPress={() => value === 'wallet' ? router.replace('/wallet') : chat()} style={[s.segmentButton, surface === value && { backgroundColor: c.surface }]}><Label size={17} weight={surface === value ? 'semibold' : 'regular'}>{value === 'wallet' ? 'Wallet' : 'Chat'}</Label></Pressable>)}</View>
-    </View>}
-    <Modal transparent visible={open} animationType="fade" onRequestClose={() => setOpen(false)}>
-      <View style={s.modal}>
-        <Pressable accessibilityRole="button" accessibilityLabel="Dismiss app menu" onPress={() => setOpen(false)} style={StyleSheet.absoluteFill} />
-        <View accessibilityViewIsModal style={[s.drawer, { paddingTop: Math.max(insets.top, 24) + 32, paddingBottom: Math.max(insets.bottom, 20) }]}>
-          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 16 }}>
-            <View style={shared.between}><WallyAsset name="wally-lockup-light.svg" size={120} /><Pressable accessibilityRole="button" accessibilityLabel="Close app menu" onPress={() => setOpen(false)} style={s.iconButton}><WallyAsset name="9e528.svg" /></Pressable></View>
-            <Button label="New chat" onPress={() => chat(true)} />
-            <View>{([['Wallet', 'bfa3b.svg', '/wallet'], ['Chats', '49ec3.svg', '/chats'], ['Activity', 'b1b14.svg', '/history'], ['Market', '56a25.svg', '/market']] as const).map(([label, icon, path]) => <Pressable key={path} accessibilityRole="button" onPress={() => go(path)} style={s.drawerRow}><WallyAsset name={icon} size={24} /><Label size={16} weight="medium">{label}</Label></Pressable>)}</View>
-            <Label size={12} color={c.muted}>Recent chats</Label>
-            {state.chats.slice(0, 3).map(item => <Pressable key={item.id} accessibilityRole="button" onPress={() => { setOpen(false); router.push({ pathname: '/chat', params: { id: item.id } }); }} style={{ paddingVertical: 8, gap: 4 }}><Label numberOfLines={1}>{item.title}</Label><Label size={12} color={c.muted}>{item.messages.length} messages · Saved locally</Label></Pressable>)}
-            <Divider />
-            <Pressable accessibilityRole="button" onPress={() => go('/address-book')} style={s.drawerRow}><WallyAsset name="9a2cd.svg" /><Label>Address book</Label></Pressable>
-            <Pressable accessibilityRole="button" onPress={() => go('/settings')} style={s.drawerRow}><WallyAsset name="f2470.svg" /><Label>Settings</Label></Pressable>
-            <Pressable accessibilityRole="button" accessibilityLabel="View profile" onPress={() => go('/profile')} style={[s.drawerRow, { backgroundColor: c.tint, borderRadius: 22, padding: 16 }]}><Avatar size={44} /><View><Label weight="semibold">{preferences.name}</Label><Label size={12} color={c.muted}>View profile</Label></View></Pressable>
-          </ScrollView>
-        </View>
-      </View>
-    </Modal>
-  </>;
+/** Testnet or demo, said once in the header instead of on a strip under every screen. */
+export function NetworkBadge() {
+  const wallet = useWallet();
+  return <View accessible accessibilityLabel={wallet.enabled ? 'Testnet: tokens have no monetary value' : 'Demo: fictional funds, no transactions sent'}>
+    <Pill tone="warning">{wallet.enabled ? 'Testnet' : 'Demo'}</Pill>
+  </View>;
 }
-/** Messages fade out under the floating menu instead of sliding beneath a hard edge. */
+/** Title bar for the five main sections: no back button, the network badge on the right. */
+export function TopBar({ title, brand = false }: { title: string; brand?: boolean }) {
+  const { wide } = useShell();
+  return <View style={[s.topBar, wide && { paddingTop: 32 }]}>
+    {brand ? <WallyAsset name="wally-lockup-light.svg" size={108} /> : <Label size={26} weight="semibold" accessibilityRole="header" style={{ lineHeight: 32 }}>{title}</Label>}
+    {!wide && <NetworkBadge />}
+  </View>;
+}
+/** Messages fade out under the chat's title bar instead of sliding beneath a hard edge. */
 // Stepped bands rather than a gradient style, which is still experimental on native.
 const FADE_STEPS = [1, .86, .7, .54, .38, .24, .12, .04];
-export function Screen({ children, title, subtitle, tab, surface, immersive = false, footer, back = true, contentStyle, autoScroll = false, fixedHeader, scrollRequest, onScrollActivity, onNearBottomChange, onViewportHeightChange }: React.PropsWithChildren<{ title?: string; subtitle?: string; tab?: 'wallet' | 'chats' | 'settings'; surface?: 'wallet' | 'chat'; immersive?: boolean; footer?: React.ReactNode; back?: boolean; contentStyle?: StyleProp<ViewStyle>; autoScroll?: boolean; fixedHeader?: React.ReactNode; scrollRequest?: string | number; onScrollActivity?: () => void; onNearBottomChange?: (near: boolean) => void; onViewportHeightChange?: (height: number) => void }>) {
+export function Screen({ children, title, tab, surface, immersive = false, footer, back = true, contentStyle, autoScroll = false, fixedHeader, scrollRequest, onScrollActivity, onNearBottomChange, onViewportHeightChange }: React.PropsWithChildren<{ title?: string; tab?: 'wallet' | 'chats' | 'settings'; surface?: 'wallet' | 'chat'; immersive?: boolean; footer?: React.ReactNode; back?: boolean; contentStyle?: StyleProp<ViewStyle>; autoScroll?: boolean; fixedHeader?: React.ReactNode; scrollRequest?: string | number; onScrollActivity?: () => void; onNearBottomChange?: (near: boolean) => void; onViewportHeightChange?: (height: number) => void }>) {
   const scroll = useRef<ScrollView>(null);
   // autoScroll keeps the newest content locked to the bottom, as in a chat, until the user scrolls away.
   const following = useRef(true);
@@ -110,11 +98,12 @@ export function Screen({ children, title, subtitle, tab, surface, immersive = fa
   }, [scrollRequest, autoScroll]);
   const insets = useSafeAreaInsets();
   const { state, storageError } = useDemo();
-  const wallet = useWallet();
-  return <View style={[s.screen, surface === 'chat' && { width: '100%', maxWidth: 928, alignSelf: 'center' }, { paddingTop: Platform.OS === 'web' ? 0 : insets.top }]}>
-    {Platform.OS === 'web' && <View style={s.status}><Text style={{ fontWeight: '600', fontSize: 15, color: '#333' }}>9:41</Text><Icon name="system" /></View>}
+  const { wide, topLevel, tabBar } = useShell();
+  // Main sections get a title bar; pushed screens keep their back button; chat draws its own bar.
+  const header = surface === 'chat' ? null : topLevel || tab === 'wallet' ? <TopBar title={title ?? 'Wallet'} brand={tab === 'wallet' && !wide} /> : title ? <Header title={title} back={back} /> : null;
+  return <View style={[s.screen, (wide || surface === 'chat') && { width: '100%', maxWidth: surface === 'chat' ? 928 : 760, alignSelf: 'center' }, { paddingTop: Platform.OS === 'web' ? 0 : insets.top }]}>
     <KeyboardAvoidingView style={[s.flex, { minHeight: 0 }]} onLayout={event => onViewportHeightChange?.(event.nativeEvent.layout.height)} behavior={Platform.OS === 'ios' ? 'padding' : Platform.OS === 'android' ? 'height' : undefined}>
-      {(surface || tab === 'wallet') ? <AppNavigation surface={surface ?? 'wallet'} floating={immersive} /> : title && <Header title={title} subtitle={subtitle} back={back} />}
+      {header}
       {fixedHeader}
       <ScrollView ref={scroll} style={{ flex: 1, minHeight: 0 }} scrollEventThrottle={32} onScroll={event => {
         onScrollActivity?.();
@@ -126,19 +115,45 @@ export function Screen({ children, title, subtitle, tab, surface, immersive = fa
         if (near !== following.current) { following.current = near; onNearBottomChange?.(near); }
       }} onContentSizeChange={() => { if (autoScroll && following.current) toLatest(); }} onLayout={() => { if (autoScroll && following.current) toLatest(false); }} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" showsVerticalScrollIndicator={false} contentContainerStyle={[s.content, contentStyle]}>
         {storageError ? <Note error>{storageError}</Note> : null}
-        {state.offline && tab && <Pill tone="warning">Offline preview · cached balances</Pill>}
+        {state.offline && tab && <Pill tone="warning">Offline</Pill>}
         {children}
       </ScrollView>
       {immersive && <View style={s.fade}>{FADE_STEPS.map(opacity => <View key={opacity} style={{ flex: 1, backgroundColor: c.background, opacity }} />)}</View>}
       {footer && <View style={s.footer}>{footer}</View>}
     </KeyboardAvoidingView>
-    <View style={s.demoBar}><Label size={10} color={c.muted}>{wallet.enabled ? 'TESTNET · Real chain data · Tokens have no monetary value' : 'DEMO · Fictional funds · No transactions sent'}</Label></View>
-    {Platform.OS === 'web' ? <View style={[s.gestureArea, { backgroundColor: tab ? c.surface : c.background }]}><View style={s.gesture} /></View> : <View style={{ height: insets.bottom, backgroundColor: tab ? c.surface : c.background }} />}
+    {/* The tab bar already clears the home indicator; otherwise the screen does. */}
+    {!tabBar && Platform.OS !== 'web' && <View style={{ height: insets.bottom }} />}
   </View>;
 }
-export function Item({ icon, title, subtitle, onPress, right }: { icon: IconName; title: string; subtitle?: string; onPress?: () => void; right?: React.ReactNode }) {
-  const content = <><View style={s.iconWell}><Icon name={icon} /></View><View style={s.flex}><Label weight="medium">{title}</Label>{subtitle && <Label size={11} color={c.muted}>{subtitle}</Label>}</View>{right}</>;
-  return onPress ? <Pressable accessibilityRole="button" onPress={onPress} style={({ pressed }) => [s.item, { opacity: pressed ? .7 : 1 }]}>{content}</Pressable> : <View style={s.item}>{content}</View>;
+/**
+ * Rows that belong together, on one surface with hairlines between them, as in iOS Settings.
+ * A group carries its own meaning through its rows; `title` is only for when a screen has several.
+ */
+export function Group({ title, children }: React.PropsWithChildren<{ title?: string }>) {
+  const rows = React.Children.toArray(children);
+  if (!rows.length) return null;
+  return <View style={{ gap: 8 }}>
+    {title && <Label size={13} weight="medium" color={c.muted} accessibilityRole="header" style={{ paddingHorizontal: 16 }}>{title}</Label>}
+    <View style={s.group}>{rows.map((row, index) => <React.Fragment key={index}>{index > 0 && <View style={s.separator} />}{row}</React.Fragment>)}</View>
+  </View>;
+}
+/**
+ * One line of a list: what it is, and its current value on the right. No second line: a row
+ * that needs explaining is the wrong row. A chevron means it opens something; `danger` is for
+ * the one row on a screen that removes something.
+ */
+export function Row({ icon, title, value, onPress, danger = false, selected }: { icon?: AssetName; title: string; value?: string; onPress?: () => void; danger?: boolean; selected?: boolean }) {
+  const content = <>
+    {icon && <WallyAsset name={icon} size={22} />}
+    <Label size={16} color={danger ? c.error : c.ink} numberOfLines={1} style={s.flex}>{title}</Label>
+    {!!value && <Label size={15} color={c.muted} numberOfLines={1} style={{ flexShrink: 1, textAlign: 'right' }}>{value}</Label>}
+    {selected && <Icon name="check" />}
+    {onPress && selected === undefined && <View style={{ opacity: .35 }}><WallyAsset name="afc43.svg" size={14} /></View>}
+  </>;
+  const label = value ? `${title}, ${value}` : title;
+  return onPress
+    ? <Pressable accessibilityRole={selected === undefined ? 'button' : 'radio'} accessibilityState={selected === undefined ? undefined : { checked: selected }} accessibilityLabel={label} onPress={onPress} style={({ pressed }) => [s.row, pressed && { backgroundColor: c.toggle }]}>{content}</Pressable>
+    : <View accessible accessibilityLabel={label} style={s.row}>{content}</View>;
 }
 export function Detail({ label, value, emphasis = false }: { label: string; value: string; emphasis?: boolean }) {
   return <View style={s.detail}><Label size={emphasis ? 14 : 12} color={emphasis ? c.ink : c.muted} style={{ flex: 1 }}>{label}</Label><Label size={emphasis ? 16 : 13} weight={emphasis ? 'semibold' : 'medium'} style={{ flexShrink: 1, textAlign: 'right' }}>{value}</Label></View>;
@@ -164,29 +179,21 @@ export const shared = StyleSheet.create({
   orb: { width: 104, height: 104, borderRadius: 52, backgroundColor: c.tint, alignItems: 'center', justifyContent: 'center', alignSelf: 'center' },
 });
 const s = StyleSheet.create({
-  flex: { flex: 1 }, screen: { flex: 1, backgroundColor: c.background }, content: { flexGrow: 1, paddingHorizontal: 28, paddingTop: 28, paddingBottom: 24, gap: 24 },
-  status: { height: 44, paddingHorizontal: 24, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 28, paddingTop: 24, paddingBottom: 8, minHeight: 96 },
+  flex: { flex: 1 }, screen: { flex: 1, backgroundColor: c.background }, content: { flexGrow: 1, paddingHorizontal: 28, paddingTop: 16, paddingBottom: 24, gap: 24 },
+  topBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingHorizontal: 28, paddingTop: 20, paddingBottom: 4, minHeight: 64 },
+  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 28, paddingTop: 12, paddingBottom: 4, minHeight: 64 },
   back: { width: 50, minHeight: 50, alignItems: 'center', justifyContent: 'center' },
   button: { minHeight: 56, borderRadius: radius.button, paddingHorizontal: 20, paddingVertical: 15, alignItems: 'center', justifyContent: 'center' }, center: { textAlign: 'center' },
   card: { backgroundColor: c.surface, borderRadius: radius.card, borderWidth: 1, borderColor: c.line, padding: 20, gap: 14 },
   pill: { borderRadius: 14, paddingHorizontal: 10, paddingVertical: 5, alignSelf: 'flex-start' },
   footer: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 8, gap: 10 },
-  demoBar: { minHeight: 22, alignItems: 'center', justifyContent: 'center', paddingVertical: 3 },
-  tabs: { flexDirection: 'row', backgroundColor: c.surface, minHeight: 72 }, tab: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 5, paddingVertical: 10 },
-  gestureArea: { height: 20, alignItems: 'center', justifyContent: 'center' }, gesture: { width: 132, height: 4, borderRadius: 2, backgroundColor: c.ink },
   qrTile: { alignSelf: 'center', padding: 8, borderRadius: 20, borderWidth: 1, borderColor: c.line, backgroundColor: c.surface },
   addressWell: { alignItems: 'center', gap: 2, paddingVertical: 12, paddingHorizontal: 16, borderRadius: 18, borderWidth: 1, borderColor: c.line, backgroundColor: c.background },
   addressLine: { textAlign: 'center', lineHeight: 22, letterSpacing: .4 },
-  iconWell: { height: 44, width: 44, borderRadius: radius.button, backgroundColor: c.background, alignItems: 'center', justifyContent: 'center' },
-  item: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16, backgroundColor: c.surface, borderRadius: radius.card, minHeight: 76 },
+  group: { backgroundColor: c.surface, borderRadius: radius.card, overflow: 'hidden' },
+  separator: { height: 1, backgroundColor: c.line, marginLeft: 16 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 14, minHeight: 54, paddingHorizontal: 16, paddingVertical: 12 },
   divider: { height: 1, backgroundColor: c.line, marginVertical: 3 }, detail: { flexDirection: 'row', gap: 8, alignItems: 'center', minHeight: 28 },
   error: { backgroundColor: c.errorTint, padding: 12, borderRadius: 12 },
-  navigation: { paddingHorizontal: 24, paddingTop: 28, paddingBottom: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 24 },
-  menu: { width: 58, height: 58, borderRadius: 29, backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center' },
-  floatingMenu: { position: 'absolute', top: 8, left: 16, zIndex: 10 }, fade: { position: 'absolute', top: 0, left: 0, right: 0, height: 72, zIndex: 5, pointerEvents: 'none' }, floatingShadow: { borderWidth: 1, borderColor: c.line, boxShadow: '0 6px 18px #1F292424', elevation: 6 },
-  segment: { flexDirection: 'row', backgroundColor: c.toggle, borderRadius: 29, padding: 5, width: 250, maxWidth: '75%' },
-  segmentButton: { flex: 1, minHeight: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center' },
-  modal: { flex: 1, backgroundColor: '#0000003D' }, drawer: { width: '82%', maxWidth: 358, flex: 1, paddingHorizontal: 28, backgroundColor: c.background, borderTopRightRadius: 28, borderBottomRightRadius: 28 },
-  drawerRow: { flexDirection: 'row', alignItems: 'center', gap: 20, minHeight: 52, paddingHorizontal: 8 }, iconButton: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  fade: { position: 'absolute', top: 0, left: 0, right: 0, height: 40, zIndex: 5, pointerEvents: 'none' },
 });

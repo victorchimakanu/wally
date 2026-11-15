@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Keyboard, Pressable, View } from 'react-native';
-import { Button, Card, Label, Note, Screen, shared } from '../components/ui';
+import { Button, Card, Label, LinkButton, NetworkBadge, Note, Screen, shared } from '../components/ui';
+import { useShell } from '../components/shell';
 import { ChatComposer, type ChatSuggestion } from '../components/ChatComposer';
 import { DraftChatCard, InlineChatTool, ToolStateCard, WalletToolsModal } from '../components/ChatCards';
 import { ChatHistoryPanel } from '../components/ChatHistoryPanel';
@@ -23,8 +24,9 @@ export function ChatScreen() {
 }
 function Conversation({ id, prompt, topic }: { id: string; prompt?: string; topic?: string }) {
   const wallet = useWallet();
+  const { wide } = useShell();
   const { data: market } = useMarket();
-  const { state, ai, quote, cancelAi, sendMessage, prepare, cancel, confirm, setDraft, newChat, discardDraft, updateChatDraft } = useDemo();
+  const { state, ai, quote, cancelAi, sendMessage, prepare, cancel, confirm, setDraft, newChat, discardDraft, updateChatDraft, update } = useDemo();
   const busy = ai.status === 'working' && ai.busyChatId === id;
   const requestBlocked = ai.status === 'working';
   const [input, setInput] = useState(prompt ?? '');
@@ -80,13 +82,13 @@ function Conversation({ id, prompt, topic }: { id: string; prompt?: string; topi
   else if (kind === 'unavailable' || state.aiPaused) suggestions = [ask('Show my balances', 'What is my balance?'), ask('View my activity', 'Show my transaction history'), ask('Show receive address', 'What is my Arbitrum address?')];
   else if (currentDraft) suggestions = [{ label: 'Explain the network fee', action: () => send('Explain the network fee for this transfer') }, { label: 'Change this transfer', action: () => { cancel(); setEditRequest(value => ({ id: currentDraft.id, sequence: value.sequence + 1 })); } }, { label: 'Cancel this draft', action: () => discardDraft(id, currentDraft.id) }];
   const privacy = ai.mode === 'qvac' ? ai.location === 'phone' ? 'ON THIS PHONE' : 'ON YOUR COMPUTER' : 'SCRIPTED PREVIEW';
-  // Once a conversation starts, the header gives way to the chat and only a floating menu button stays.
+  // Once a conversation starts, older messages fade out under the title bar.
   const immersive = messages.length > 0;
-  const toolbar = <><View style={[shared.between, { paddingHorizontal: 28, minHeight: 44 }]}><Label size={12} color={c.muted}>Chat with Wally</Label><View style={shared.row}><Pressable accessibilityRole="button" accessibilityLabel="Open chat history" accessibilityState={{ expanded: history }} onPress={() => { Keyboard.dismiss(); setHistory(!history); }} style={{ padding: 8 }}><WallyAsset name="49ec3.svg" /></Pressable><Pressable accessibilityRole="button" accessibilityLabel="Start a new chat" onPress={() => router.replace({ pathname: '/chat', params: { id: newChat() } })} style={{ padding: 8 }}><WallyAsset name="b64e9.svg" /></Pressable></View></View>{history && <ChatHistoryPanel height={viewportHeight * .5} onClose={() => setHistory(false)} />}</>;
-  return <Screen surface="chat" immersive={immersive} autoScroll fixedHeader={immersive ? undefined : toolbar} scrollRequest={`${id}:${lastRequest?.id ?? 'empty'}:${jump}`} onScrollActivity={wake} onNearBottomChange={setNearLatest} onViewportHeightChange={setViewportHeight} contentStyle={{ justifyContent: 'flex-end', paddingTop: immersive ? 76 : 8, paddingBottom: 16, gap: 24 }} footer={<>
+  const toolbar = <><View style={[shared.between, { paddingLeft: 28, paddingRight: 18, paddingTop: wide ? 28 : 12, minHeight: 60 }]}><Label size={wide ? 26 : 22} weight="semibold" accessibilityRole="header" style={{ lineHeight: 30 }}>Chat</Label><View style={shared.row}>{!wide && <NetworkBadge />}<Pressable accessibilityRole="button" accessibilityLabel="Open chat history" accessibilityState={{ expanded: history }} onPress={() => { Keyboard.dismiss(); setHistory(!history); }} style={{ padding: 8 }}><WallyAsset name="49ec3.svg" /></Pressable><Pressable accessibilityRole="button" accessibilityLabel="Start a new chat" onPress={() => router.replace({ pathname: '/chat', params: { id: newChat() } })} style={{ padding: 8 }}><WallyAsset name="b64e9.svg" /></Pressable></View></View>{history && <ChatHistoryPanel height={viewportHeight * .5} onClose={() => setHistory(false)} />}</>;
+  return <Screen surface="chat" immersive={immersive} autoScroll fixedHeader={toolbar} scrollRequest={`${id}:${lastRequest?.id ?? 'empty'}:${jump}`} onScrollActivity={wake} onNearBottomChange={setNearLatest} onViewportHeightChange={setViewportHeight} contentStyle={{ justifyContent: 'flex-end', paddingTop: 8, paddingBottom: 16, gap: 24 }} footer={<>
     {!nearLatest && <Pressable accessibilityRole="button" accessibilityLabel="Jump to latest request" onPress={() => setJump(value => value + 1)} style={{ alignSelf: 'center', paddingHorizontal: 16, paddingVertical: 8, backgroundColor: c.tint, borderRadius: 20 }}><Label size={12}>Latest request ↓</Label></Pressable>}
     <ChatComposer value={input} onChange={setInput} onSend={() => send()} onStop={cancelAi} onTools={() => { Keyboard.dismiss(); setTools(true); }} onPrivacy={() => router.push({ pathname: '/preferences', params: { page: 'model' } })} busy={busy} paused={state.aiPaused || !chat || (requestBlocked && !busy)} privacy={privacy} suggestions={history ? [] : suggestions} idle={idle} compact={viewportHeight < 520} />
-    <Label size={10} color={c.muted} style={shared.center}>{state.aiPaused ? 'Chat paused · Resume in Settings → Assistant model' : wallet.enabled ? 'Testnet ETH · Every send needs your approval' : 'Fictional funds · Nothing moves until you confirm'}</Label>
+    {state.aiPaused && <View style={[shared.row, { justifyContent: 'center', gap: 16 }]}><Label size={13} color={c.muted}>Chat is paused</Label><LinkButton label="Resume" onPress={() => update({ aiPaused: false })} /></View>}
   </>}>
     {state.offline && <Card style={{ backgroundColor: c.warningTint }}><Label weight="semibold">You’re offline</Label><Note>Drafts are available. Reconnect before reviewing a transfer.</Note></Card>}
     {!chat && <><Label>This conversation is no longer available.</Label><Button label="Start a new chat" onPress={() => router.replace({ pathname: '/chat', params: { id: newChat() } })} /></>}

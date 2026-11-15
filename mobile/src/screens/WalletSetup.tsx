@@ -38,7 +38,7 @@ export function WalletSetupScreen() {
     }
   }
 
-  return <Screen title="Set up your wallet" subtitle="Your keys stay on this phone">
+  return <Screen title="Set up your wallet">
     <Card>
       <Label size={18} weight="semibold">A wallet only you control</Label>
       <Note>Wally holds your keys on this phone and nowhere else. No account, no password, no email — which also means nobody can unlock it for you if you lose it.</Note>

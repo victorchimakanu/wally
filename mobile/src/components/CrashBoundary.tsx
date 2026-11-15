@@ -36,17 +36,14 @@ export class CrashBoundary extends React.Component<Props, State> {
 
   override render() {
     if (!this.state.crashed) return this.props.children;
-    return <Screen title="Something broke" subtitle="Your money is untouched" back={false}>
+    return <Screen title="Something broke" back={false}>
       <Card>
         <Label size={16} weight="medium">Nothing was sent</Label>
-        <Note>This screen failed to load. No transfer was submitted and nothing was changed —
-        a problem here cannot move money.</Note>
+        <Note>A problem on this screen cannot move money.</Note>
       </Card>
       <Card>
-        <Label size={12} weight="semibold">WHAT HAPPENED</Label>
         <Label size={13} selectable>{this.state.message}</Label>
-        <Note>A record was saved on this phone. Settings → Problem reports has it, with
-        anything sensitive removed, and you choose whether to send it to anyone.</Note>
+        <Note>Saved to Settings → Problem reports.</Note>
       </Card>
       <Button label="Try again" onPress={() => this.setState({ crashed: false, message: '' })} />
     </Screen>;

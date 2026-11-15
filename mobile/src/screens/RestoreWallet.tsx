@@ -46,7 +46,7 @@ export function RestoreWalletScreen() {
     }
   }
 
-  return <Screen title="Restore your wallet" subtitle="Enter your recovery phrase">
+  return <Screen title="Restore your wallet">
     <Card>
       <Note>Type or paste your twelve or twenty-four words, separated by spaces. Numbering and capitals do not matter.</Note>
     </Card>

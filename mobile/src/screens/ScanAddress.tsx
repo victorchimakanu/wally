@@ -64,7 +64,7 @@ export function ScanAddressScreen() {
     </Screen>;
   }
 
-  return <Screen title="Scan an address" subtitle="Point at the recipient’s QR code">
+  return <Screen title="Scan an address">
     <Card style={{ padding: 0, overflow: 'hidden' }}>
       <View style={{ aspectRatio: 1, backgroundColor: c.ink }}>
         <CameraView

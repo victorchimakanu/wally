@@ -46,9 +46,9 @@ function DemoWalletOverview({ balance, transactionId, snapshot = false }: { bala
       </View>
     </View>
     <Pressable accessibilityRole="button" accessibilityLabel={mobile ? 'View notifications' : 'Toggle recent activity'} accessibilityState={mobile ? undefined : { expanded: activity }} onPress={() => mobile ? router.navigate('/notifications') : setActivity(value => !value)} style={{ marginTop: -16, marginHorizontal: 26 * scale, backgroundColor: c.tint, borderBottomLeftRadius: 20, borderBottomRightRadius: 20, padding: 16, paddingTop: 20, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-      <View style={shared.flex}><Label size={13} numberOfLines={1}>{latest ? `${latest.status === 'pending' ? 'Sending' : latest.status === 'failed' ? 'Failed' : 'Sent'} ${latest.amount} USDt` : 'Your recent activity'}</Label><Label size={11} color={c.muted}>{latest ? `${latest.status} · Arbitrum · Demo` : 'No transfers yet · Demo wallet'}</Label></View><WallyAsset name="7da25.svg" />
+      <Label size={13} numberOfLines={1} style={shared.flex}>{latest ? `${latest.status === 'pending' ? 'Sending' : latest.status === 'failed' ? 'Failed' : 'Sent'} ${latest.amount} USDt` : 'No activity yet'}</Label><WallyAsset name="7da25.svg" />
     </Pressable>
-    {expanded && <Card><Detail label="Arbitrum" value={`${money(displayedBalance)} USDt`} /><Detail label="Ethereum" value="0.042 ETH" /><Detail label="Bitcoin" value="0.0012 BTC" /><Label size={12} color={c.muted}>Fictional balances. Arbitrum USDt is the only simulated send asset.</Label></Card>}
-    {!mobile && activity && <Card><Label weight="semibold">Recent activity</Label>{latest ? <Label size={13}>{latest.amount} USDt · {latest.status}</Label> : <Label size={13} color={c.muted}>Approved demo transfers appear here.</Label>}<Button label="View activity" secondary onPress={() => router.push('/history')} /></Card>}
+    {expanded && <Card><Detail label="Arbitrum" value={`${money(displayedBalance)} USDt`} /><Detail label="Ethereum" value="0.042 ETH" /><Detail label="Bitcoin" value="0.0012 BTC" /></Card>}
+    {!mobile && activity && <Card><Label weight="semibold">Recent activity</Label>{latest ? <Label size={13}>{latest.amount} USDt · {latest.status}</Label> : <Label size={13} color={c.muted}>No activity yet</Label>}<Button label="View activity" secondary onPress={() => router.push('/history')} /></Card>}
   </View>;
 }

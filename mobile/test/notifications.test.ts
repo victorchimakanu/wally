@@ -31,7 +31,7 @@ function fixture(width: number) {
     '../demo/store': { useDemo: () => ({ state }) },
     '../data/wallet': { useWallet: () => ({ enabled: false }) },
     '../demo/preferences': {}, 'react-native-safe-area-context': {},
-    'react-native-reanimated': { __esModule: true, default: { View: 'Animated.View' }, FadeIn: { duration: () => ({}) } },
+    './shell': { useShell: () => ({ wide: false, topLevel: false, tabBar: false }) },
     '../demo/model': { money: (amount: number) => String(amount) },
     '../theme': { colors: {}, fonts: {}, radius: {} },
     './WalletData': { LiveWalletOverview: 'LiveWalletOverview' },

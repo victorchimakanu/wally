@@ -66,10 +66,9 @@ export function LicencesScreen() {
     setOpen(null);
   }
 
-  return <Screen title="Open source licences" subtitle={`${total} packages`}>
+  return <Screen title="Licences">
     <Card>
       <Label size={16}>Wally is built on {total} open source packages.</Label>
-      <Note>Their licences require that we carry this notice. Nothing here is about you or your wallet — it is a list of the software the app is made of.</Note>
       <Label size={11} color={c.muted}>{summary.slice(0, 5).map(s => `${s.license} ${s.count}`).join(' · ')}</Label>
     </Card>
 
