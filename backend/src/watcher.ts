@@ -40,6 +40,14 @@ export type Receipt = { status?: string; blockNumber?: string } | null;
 
 export type WatcherDeps = {
   fetchReceipt(chain: Chain, hash: string): Promise<Receipt>;
+  /**
+   * The chain's latest block number.
+   *
+   * Required rather than optional, deliberately. An optional head would mean "no depth check
+   * unless you remember to pass one", and forgetting is exactly how this service came to call
+   * a one-block receipt final. Every construction site has to decide.
+   */
+  fetchHead(chain: Chain): Promise<number>;
   now?: () => number;
   /** Beyond this, a watch is dropped whatever its state. */
   ttlMs?: number;
@@ -49,6 +57,45 @@ export type WatcherDeps = {
 
 export const DEFAULT_TTL_MS = 30 * 60_000;
 export const DEFAULT_MAX_WATCHES = 500;
+
+/**
+ * How deep a receipt must be before this calls a transfer confirmed.
+ *
+ * **A receipt is not finality.** A chain reorganisation can remove a block that already had
+ * one. The loopback wallet server learned this on 5 November 2026 — until then it said
+ * "confirmed" the instant a receipt appeared, so Wally could tell someone their money had
+ * arrived and never correct itself when it had not — and it has required depth ever since.
+ * This service, which is what will feed push notifications, did not. The same bug, in the
+ * half nobody had looked at.
+ *
+ * The numbers match `CONFIRMATIONS` in `mobile/scripts/wallet-api-core.mjs` and for the same
+ * reasons: Ethereum Sepolia reorgs a block or two routinely, so three; Arbitrum's sequencer
+ * makes single-block reorgs the realistic case, so two — still more than one, because the
+ * point is not to trust the first answer.
+ *
+ * A push that says "your transfer confirmed" cannot be taken back, which is why this matters
+ * more here than anywhere else it could have been missed.
+ */
+export const CONFIRMATIONS: Record<Chain, number> = { ethereum: 3, arbitrum: 2 };
+
+/** Blocks required on this chain, defaulting to the stricter number for anything unknown. */
+export function confirmationsFor(chain: Chain): number {
+  return CONFIRMATIONS[chain] ?? 3;
+}
+
+/**
+ * Whether a mined transfer is deep enough to be called confirmed.
+ *
+ * The block holding it counts as the first confirmation, so a receipt in the head block has
+ * depth 1. Anything unknown — no block number, no head, a node that would not answer — is
+ * **not** deep enough. Not being able to ask is not the same as "yes", and the failure this
+ * guards against is saying yes too early.
+ */
+export function deepEnough(chain: Chain, blockNumber: number | undefined, head: number | undefined): boolean {
+  if (blockNumber === undefined || head === undefined) return false;
+  if (!Number.isFinite(blockNumber) || !Number.isFinite(head)) return false;
+  return head - blockNumber + 1 >= confirmationsFor(chain);
+}
 
 const SETTLED: WatchState[] = ["confirmed", "failed", "expired"];
 export const isSettled = (state: WatchState): boolean => SETTLED.includes(state);
@@ -74,6 +121,7 @@ export function stateFromReceipt(receipt: Receipt): { state: WatchState; blockNu
 
 export function createWatcher({
   fetchReceipt,
+  fetchHead,
   now = Date.now,
   ttlMs = DEFAULT_TTL_MS,
   maxWatches = DEFAULT_MAX_WATCHES,
@@ -121,21 +169,44 @@ export function createWatcher({
      *
      * Failures are swallowed per watch. A node that is down leaves a transfer pending, which is
      * true, rather than marking it failed, which would not be — and the next round asks again.
+     *
+     * A successful receipt is held at pending until it is `CONFIRMATIONS` deep. The head is
+     * read once per chain per round rather than once per watch: fifty transfers settling in
+     * the same block are one question about the chain, not fifty.
+     *
+     * **A failure is reported immediately, without waiting for depth.** A reorg cannot turn a
+     * failure into a success without also changing the hash, so there is nothing to be wrong
+     * about — and making someone wait three blocks to learn their transfer did not go through
+     * is a cost with no safety behind it.
      */
     async tick(): Promise<void> {
       const at = now();
       drop(at);
       const open = [...watches.values()].filter(watch => !isSettled(watch.state));
-      await Promise.all(open.map(async watch => {
-        try {
-          const read = stateFromReceipt(await fetchReceipt(watch.chain, watch.hash));
-          watch.checkedAt = now();
-          watch.state = read.state;
-          if (read.blockNumber !== undefined) watch.blockNumber = read.blockNumber;
-        } catch {
-          watch.checkedAt = now();
-        }
+
+      const reads = await Promise.all(open.map(async watch => {
+        try { return { watch, read: stateFromReceipt(await fetchReceipt(watch.chain, watch.hash)) }; }
+        catch { return { watch, read: null }; }
       }));
+
+      // Only chains with something that looks confirmed need a head.
+      const heads = new Map<Chain, number>();
+      await Promise.all([...new Set(reads.filter(entry => entry.read?.state === "confirmed").map(entry => entry.watch.chain))]
+        .map(async chain => {
+          // Left absent on failure, which `deepEnough` reads as not deep enough. The transfer
+          // stays pending and the next round asks again.
+          try { heads.set(chain, await fetchHead(chain)); } catch { /* not knowing is not yes */ }
+        }));
+
+      for (const { watch, read } of reads) {
+        watch.checkedAt = now();
+        if (!read) continue;
+        // Recorded even while still pending: it is on chain, it is simply not safe to say so.
+        if (read.blockNumber !== undefined) watch.blockNumber = read.blockNumber;
+        watch.state = read.state === "confirmed" && !deepEnough(watch.chain, read.blockNumber, heads.get(watch.chain))
+          ? "pending"
+          : read.state;
+      }
     },
 
     /** Marks everything past its time as expired rather than deleting silently. Testing aid. */

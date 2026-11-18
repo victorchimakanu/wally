@@ -10,6 +10,29 @@ const HASH = /^0x[0-9a-fA-F]{64}$/;
 /** How often the open watches are checked. Slow on purpose: a block is not instant either. */
 export const POLL_MS = 15_000;
 
+/**
+ * The chain's latest block number, for the confirmation-depth check in `watcher.ts`.
+ *
+ * Asked through the same provider as the receipt, so a transfer and the head it is measured
+ * against cannot come from two nodes at different heights.
+ */
+async function headFor(chain: Chain): Promise<number> {
+  const answer = await fetchJson<{ result?: string }>(
+    rpcUrl(chain),
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_blockNumber", params: [] }),
+    },
+    `watch head ${chain}`,
+  );
+  const raw = answer?.result;
+  // Throwing rather than returning 0: a zero head would make every receipt look deep enough,
+  // which is the one direction this must never fail in.
+  if (typeof raw !== "string" || !/^0x[\da-f]+$/i.test(raw)) throw new Error(`Unreadable block height from ${chain}.`);
+  return Number(BigInt(raw));
+}
+
 async function receiptFor(chain: Chain, hash: string): Promise<Receipt> {
   const answer = await fetchJson<{ result?: Receipt }>(
     rpcUrl(chain),
@@ -36,7 +59,7 @@ async function receiptFor(chain: Chain, hash: string): Promise<Receipt> {
  * expires; see `watcher.ts` for why that matters on a service that otherwise holds nothing.
  */
 export async function watchRoutes(app: FastifyInstance, options?: { watcher?: Watcher }): Promise<void> {
-  const watcher = options?.watcher ?? createWatcher({ fetchReceipt: receiptFor });
+  const watcher = options?.watcher ?? createWatcher({ fetchReceipt: receiptFor, fetchHead: headFor });
 
   // A single interval for the whole process. Unref'd so it never holds the process open —
   // a proxy that will not shut down because it is waiting on a poll is a worse problem than
