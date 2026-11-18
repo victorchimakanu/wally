@@ -12,6 +12,7 @@ import { backendOrigin, backendHeaders } from '../services/backend';
 // Extensionless: Metro picks the native vault reader on a phone, the no-keystore stub on web.
 import { currentCustody } from '../services/wallet-worklet';
 import { custodyNotice, moneySource, type Custody } from '../services/custody';
+import { watchTransfer } from '../services/transfer-watch';
 
 const endpoint = process.env.EXPO_PUBLIC_WALLY_API_URL ?? '';
 export const liveWalletEnabled = !!endpoint;
@@ -229,7 +230,14 @@ export function WalletProvider({ children }: React.PropsWithChildren) {
       if (!gate.allowed) throw new Error(gate.reason);
 
       submitting.current = true; clearQuote();
-      try { const tx = await client.confirm(q); void refresh(); void refreshHistory(); return tx; }
+      try {
+        const tx = await client.confirm(q);
+        // Hand the hash to the backend so the chain keeps being asked while this phone sleeps.
+        // Advisory and unawaited: the transfer is already broadcast, so nothing here can fail
+        // in a way that should reach the person who just sent it.
+        void watchTransfer(tx.chain, tx.hash);
+        void refresh(); void refreshHistory(); return tx;
+      }
       catch (failure) { void refreshHistory(); throw failure; }
       finally { submitting.current = false; }
     },
