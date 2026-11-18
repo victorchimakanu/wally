@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { historyProvenance } from '../src/services/history-source.ts';
-import { mergeHistory, type LiveHistory } from '../src/services/wallet-api.ts';
+import { asLiveHistory, withLocalSubmissions } from '../src/services/history-pager.ts';
+import type { LiveHistory } from '../src/services/wallet-api.ts';
 
 /**
  * The Activity screen used to name its source with a fixed string: "Blockscout and local
@@ -39,10 +40,13 @@ test('the token-transfer caveat appears only where it is true', () => {
 });
 
 test('what the merge stamps is what the screen reports', () => {
-  // The coupling that matters: mergeHistory composes the source, the screen renders it. If
-  // either side changes its wording independently, this fails rather than the screen quietly
-  // crediting the wrong provider again.
-  const merged = mergeHistory(history({ source: 'etherscan' }), history({ source: 'Blockscout and local submission receipts' }));
+  // The coupling that matters: withLocalSubmissions composes the source, the screen renders
+  // it. If either side changes its wording independently, this fails rather than the screen
+  // quietly crediting the wrong provider again.
+  const merged = asLiveHistory(withLocalSubmissions(
+    { items: [], cursors: [], errors: [], fetchedAt: 1_700_000_000_000, source: 'etherscan' },
+    history({ source: 'Blockscout and local submission receipts' }),
+  ));
   assert.equal(merged.source, "etherscan and this device's submissions");
 
   const shown = historyProvenance(merged.source);
