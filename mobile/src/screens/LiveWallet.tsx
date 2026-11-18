@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as Linking from 'expo-linking';
 import { Pressable, TextInput, View } from 'react-native';
-import { Address, Button, Card, Detail, Label, Note, Pill, Screen, shared } from '../components/ui';
+import { Address, Button, Card, Detail, Divider, Label, LinkButton, Note, Pill, Screen, useShared } from '../components/ui';
 import { tokensFor } from '../services/tokens';
 import { AssetChoice, LiveActivityCard, LiveReceiveCard, NetworkChoice, WalletStatus } from '../components/WalletData';
 import { useWallet } from '../data/wallet';
@@ -14,9 +14,11 @@ import { addressTrust, trustWarning } from '../services/address-safety.ts';
 import { chainOfNetwork, crossChainWarning, type ChainUse } from '../services/chain-safety.ts';
 import { readWatch, watchStatus, watchTransfer } from '../services/transfer-watch.ts';
 import { usePreferences } from '../demo/preferences';
-import { colors as c } from '../theme';
+import { useColors } from '../theme';
 
 export function LiveSendScreen() {
+  const c = useColors();
+  const shared = useShared();
   const wallet = useWallet(), { state } = useDemo();
   const params = useLocalSearchParams<{ chain?: string; recipient?: string; amount?: string; scannedChain?: string; scannedAmountIgnored?: string }>();
   const [chain, setChain] = useState<Chain>(params.chain === 'ethereum' ? 'ethereum' : 'arbitrum');
@@ -145,9 +147,35 @@ export function LiveSendScreen() {
     } catch (failure) { setError(failure instanceof Error ? failure.message : 'Could not prepare the transfer.'); }
     finally { setBusy(false); }
   }
-  return <Screen title={`Send testnet ${sending}`} subtitle="A real testnet transfer" footer={<Button label={busy ? 'Checking network fee…' : 'Review transfer'} disabled={busy || wallet.offline || state.offline || !balance || balance.balance === null} onPress={() => { void review(); }} />}><Pill>TESTNET ONLY</Pill><NetworkChoice value={chain} onChange={next => { wallet.clearQuote(); setChain(next); setAsset('ETH'); setError(''); }} /><AssetChoice value={sending} options={assets} onChange={next => { wallet.clearQuote(); setAsset(next); setAmount(''); setError(''); }} /><Note>Available on {CHAINS[chain].name}: {availableText} {sending}</Note>{available.pending && <Note>{available.base === null ? `A transfer of ${sending} is still being confirmed and Wally cannot say exactly how much that leaves. The balance above includes it.` : `${formatUnits(available.committed, decimals)} ${sending} is held back for a transfer still being confirmed. Your balance is ${balance?.balance ?? '—'} ${sending}.`}</Note>}{!!token && <Note>The network fee is paid in ETH, not {sending}. You need a little ETH on this network as well.</Note>}<View style={shared.row}><View style={shared.flex}><Label weight="medium">Recipient address</Label></View><Button secondary label="Scan a code" onPress={() => router.push('/scan')} /></View>{!!scannedChain && <Note>Switched to {CHAINS[scannedChain].name}, which the scanned code asked for.</Note>}{params.scannedAmountIgnored === '1' && <Note>That code also contained an amount. Wally does not fill it in — type the amount you mean to send.</Note>}<TextInput accessibilityLabel="Recipient address" value={recipient} editable={!busy} autoCapitalize="none" autoCorrect={false} placeholder="0x…" placeholderTextColor={c.muted} onChangeText={value => { wallet.clearQuote(); setRecipient(value); }} style={shared.input} /><Button secondary label="Choose saved recipient" disabled={busy} onPress={() => router.push('/address-book')} /><View style={shared.row}><View style={shared.flex}><Label weight="medium">Amount in {sending}</Label></View><Button secondary label={maxBusy ? 'Working…' : 'Send max'} disabled={busy || maxBusy || !balance?.balanceWei || balance.balanceWei === '0'} onPress={() => { void fillMax(); }} /></View><TextInput accessibilityLabel={`Amount in ${sending}`} value={amount} editable={!busy} keyboardType="decimal-pad" placeholder={token ? "25" : "0.001"} placeholderTextColor={c.muted} onChangeText={value => { wallet.clearQuote(); setAmount(value); }} style={shared.input} /><Note>Only ordinary wallet addresses can receive this transfer. Fees are estimated from the selected network and always paid in ETH. Nothing is sent until you approve the next screen.</Note>{balance?.balance === '0' && <Card style={{ backgroundColor: c.warningTint }}><Label weight="semibold">Fund your testnet wallet first</Label><Note>Request ETH from a {CHAINS[chain].name} faucet for your Receive address. Testnet tokens have no monetary value.</Note><Button secondary label="Open receive address" onPress={() => router.push('/receive')} /></Card>}{!!lookalike && <Card style={{ backgroundColor: c.warningTint }}><Label weight="semibold">Check this address carefully</Label><Note>{lookalike}</Note></Card>}{!!wrongChain && <Card style={{ backgroundColor: c.warningTint }}><Label weight="semibold">You have not used this address on this network</Label><Note>{wrongChain}</Note></Card>}{!!error && <Note error>{error}</Note>}<WalletStatus /></Screen>;
+  // Each warning sits beside the field it is about: the lookalike check under the address, the
+  // fee currency beside the balance. Nothing explains the flow; the review screen is the check.
+  return <Screen title={`Send ${sending}`} footer={<Button label={busy ? 'Checking network fee…' : 'Review transfer'} disabled={busy || wallet.offline || state.offline || !balance || balance.balance === null} onPress={() => { void review(); }} />}>
+    <NetworkChoice value={chain} onChange={next => { wallet.clearQuote(); setChain(next); setAsset('ETH'); setError(''); }} />
+    {!!scannedChain && <Note>Switched to {CHAINS[scannedChain].name}, the network the scanned code asked for.</Note>}
+    <AssetChoice value={sending} options={assets} onChange={next => { wallet.clearQuote(); setAsset(next); setAmount(''); setError(''); }} />
+    <View style={{ gap: 8 }}>
+      <View style={[shared.row, { gap: 20 }]}><Label size={13} weight="medium" color={c.muted} style={shared.flex}>To</Label><LinkButton label="Saved" accessibilityLabel="Choose saved recipient" disabled={busy} onPress={() => router.push('/address-book')} /><LinkButton label="Scan" accessibilityLabel="Scan a QR code" disabled={busy} onPress={() => router.push('/scan')} /></View>
+      <TextInput accessibilityLabel="Recipient address" value={recipient} editable={!busy} autoCapitalize="none" autoCorrect={false} placeholder="0x…" placeholderTextColor={c.muted} onChangeText={value => { wallet.clearQuote(); setRecipient(value); }} style={shared.input} />
+      {!!lookalike && <Card style={{ backgroundColor: c.warningTint, borderColor: c.warningTint }}><Label weight="semibold">Check this address carefully</Label><Note>{lookalike}</Note></Card>}
+      {!!wrongChain && <Card style={{ backgroundColor: c.warningTint, borderColor: c.warningTint }}><Label weight="semibold">Not used on this network</Label><Note>{wrongChain}</Note></Card>}
+    </View>
+    <View style={{ gap: 8 }}>
+      <View style={shared.row}><Label size={13} weight="medium" color={c.muted} style={shared.flex}>Amount</Label><LinkButton label={maxBusy ? 'Working…' : 'Max'} accessibilityLabel="Send max" disabled={busy || maxBusy || !balance?.balanceWei || balance.balanceWei === '0'} onPress={() => { void fillMax(); }} /></View>
+      <TextInput accessibilityLabel={`Amount in ${sending}`} value={amount} editable={!busy} keyboardType="decimal-pad" placeholder={token ? '25' : '0.001'} placeholderTextColor={c.muted} onChangeText={value => { wallet.clearQuote(); setAmount(value); }} style={shared.input} />
+      <Label size={13} color={c.muted}>{availableText} {sending} available{token ? ' · fee paid in ETH' : ''}</Label>
+      {available.pending && <Note>{available.base === null
+        ? `A ${sending} transfer is still confirming, so this figure still includes it.`
+        : `${formatUnits(available.committed, decimals)} ${sending} is held for a transfer still confirming. Your balance is ${balance?.balance ?? '—'}.`}</Note>}
+    </View>
+    {params.scannedAmountIgnored === '1' && <Note>The scanned code had an amount. Wally leaves it out: type the amount you mean.</Note>}
+    {balance?.balance === '0' && <Card style={{ backgroundColor: c.warningTint, borderColor: c.warningTint }}><Label weight="semibold">No {sending} on {CHAINS[chain].name} yet</Label><Button secondary label="Receive" onPress={() => router.push('/receive')} /></Card>}
+    {!!error && <Note error>{error}</Note>}
+    {!balance && <WalletStatus />}
+  </Screen>;
 }
 export function LiveReviewScreen() {
+  const c = useColors();
+  const shared = useShared();
   const wallet = useWallet(), { state } = useDemo();
   const [now, setNow] = useState(monotonicNow), [busy, setBusy] = useState(false), [error, setError] = useState('');
   const q = wallet.quote;
@@ -162,12 +190,37 @@ export function LiveReviewScreen() {
     finally { setBusy(false); }
   }
   const expired = !q || quoteExpired(q.deadline, now);
-  return <Screen title="Review testnet transfer" footer={<><Button label={busy ? 'Submitting to the testnet…' : 'Confirm and send ETH'} disabled={busy || expired || state.offline || wallet.offline} onPress={() => { void confirm(); }} /><Button secondary label="Cancel" disabled={busy} onPress={() => { wallet.clearQuote(); router.replace('/send'); }} /></>}>{q ? <><Pill>Only {CHAINS[q.chain].name} · Chain {q.chainId}</Pill><Label size={30} weight="semibold">{q.amount} ETH</Label><Card><Note>From</Note><Address value={q.from} /><Note>To</Note><Address value={q.recipient} /><Detail label="Network" value={q.network} /><Detail label="Maximum network fee" value={`${q.fee} ETH`} /><Detail label="Amount + fee" value={`${q.total} ETH`} /><Note>{expired ? 'This review expired. Open Send for a fresh network fee.' : `Review expires in ${secondsLeft(q.deadline, now)} seconds.`}</Note></Card><Note>Your approval signs and broadcasts this exact testnet transaction through WDK. Wallet keys stay on your computer in this development setup.</Note></> : <Card><Label weight="semibold">A fresh review is required</Label><Note>{busy ? 'Submission is in progress.' : 'The review expired, was cancelled, or was already submitted. Check Activity before creating another transfer.'}</Note>{!busy && <Button secondary label="Check Activity" onPress={() => router.push('/history')} />}</Card>}{!!error && <Note error>{error}</Note>}{expired && !busy && <Button secondary label="Open Send" onPress={() => router.replace('/send')} />}</Screen>;
+  // The confirm button names the exact amount and asset, and the network carries its chain id:
+  // the details that decide an irreversible transfer are on the button and the card, not in prose.
+  return <Screen title="Review" footer={<>
+    <Button label={busy ? 'Sending…' : q ? `Send ${q.amount} ${q.symbol}` : 'Send'} disabled={busy || expired || state.offline || wallet.offline} onPress={() => { void confirm(); }} />
+    <Button secondary label="Cancel" disabled={busy} onPress={() => { wallet.clearQuote(); router.replace('/send'); }} />
+  </>}>
+    {q ? <>
+      <View style={shared.between}>
+        <Label size={30} weight="semibold" adjustsFontSizeToFit numberOfLines={1} style={{ flexShrink: 1, lineHeight: 38 }}>{q.amount} {q.symbol}</Label>
+        <Pill tone="warning">{expired ? 'Expired' : `Expires in ${secondsLeft(q.deadline, now)} s`}</Pill>
+      </View>
+      <Card>
+        <Label size={13} color={c.muted}>From</Label><Address value={q.from} />
+        <Label size={13} color={c.muted}>To</Label><Address value={q.recipient} />
+        <Divider />
+        <Detail label="Network" value={`${q.network} · Chain ${q.chainId}`} />
+        <Detail label="Max fee" value={`${q.fee} ETH`} />
+        {/* A token total is already "25 USDt + 0.0001 ETH"; only an ETH total is a bare number. */}
+        <Detail label="Total" value={q.symbol === 'ETH' ? `${q.total} ETH` : q.total} emphasis />
+      </Card>
+    </> : <Card><Label weight="semibold">This review has ended</Label><Note>{busy ? 'Sending…' : 'Check Activity before sending again.'}</Note>{!busy && <Button secondary label="Check Activity" onPress={() => router.push('/history')} />}</Card>}
+    {!!error && <Note error>{error}</Note>}
+    {expired && !busy && <Button secondary label="Back to Send" onPress={() => router.replace('/send')} />}
+  </Screen>;
 }
-export function LiveReceiveScreen() { return <Screen title="Receive" subtitle="Your real testnet wallet"><LiveReceiveCard /><WalletStatus /></Screen>; }
+export function LiveReceiveScreen() { return <Screen title="Receive"><LiveReceiveCard /></Screen>; }
 export function LiveHistoryScreen() {
+  const c = useColors();
+  const shared = useShared();
   const [search, setSearch] = useState(''), [filter, setFilter] = useState('All');
-  return <Screen title="Activity" subtitle="Real testnet transactions"><TextInput accessibilityLabel="Search activity" style={shared.input} placeholder="Search address, amount or network" placeholderTextColor={c.muted} value={search} onChangeText={setSearch} /><View style={shared.row}>{['All', 'Sent', 'Received'].map(value => <Pressable key={value} accessibilityRole="tab" accessibilityState={{ selected: filter === value }} onPress={() => setFilter(value)} style={{ flex: 1, alignItems: 'center', paddingVertical: 12, backgroundColor: filter === value ? c.tint : c.surface, borderRadius: 18 }}><Label>{value}</Label></Pressable>)}</View><LiveActivityCard search={search} filter={filter} /></Screen>;
+  return <Screen title="Activity"><TextInput accessibilityLabel="Search activity" style={shared.input} placeholder="Search" placeholderTextColor={c.muted} value={search} onChangeText={setSearch} /><View style={shared.row}>{['All', 'Sent', 'Received'].map(value => <Pressable key={value} accessibilityRole="tab" accessibilityState={{ selected: filter === value }} onPress={() => setFilter(value)} style={{ flex: 1, alignItems: 'center', paddingVertical: 12, backgroundColor: filter === value ? c.tint : c.surface, borderRadius: 18 }}><Label>{value}</Label></Pressable>)}</View><LiveActivityCard search={search} filter={filter} /></Screen>;
 }
 /**
  * "It never arrived" — the deliberate way out of a transfer the chain cannot settle.
@@ -189,7 +242,7 @@ function NeverArrived({ chain, hash, onResolved }: { chain: Chain; hash: string;
 
   return <Card>
     <Label weight="semibold">Mark this as never arrived?</Label>
-    <Note>Only do this if the block explorer shows no such transaction. Wally cannot prove what happened to this one, and marking it lets you send on this network again.</Note>
+    <Note>Only if the block explorer shows no such transaction. Marking it lets you send on this network again.</Note>
     {!!problem && <Note error>{problem}</Note>}
     <Button
       label={busy ? 'Checking…' : 'Yes, it never arrived'}
@@ -212,6 +265,7 @@ export function LiveTransactionScreen() {
   return valid ? <Receipt key={`${params.chain}:${params.hash}`} chain={params.chain as Chain} hash={params.hash} /> : <Screen title="Transaction"><Note error>Invalid transaction link.</Note><Button label="View Activity" onPress={() => router.replace('/history')} /></Screen>;
 }
 function Receipt({ chain, hash }: { chain: Chain; hash: string }) {
+  const c = useColors();
   const wallet = useWallet();
   const [tx, setTx] = useState<LiveTransaction | null>(wallet.history?.items.find(item => item.hash === hash && item.chain === chain) ?? null), [error, setError] = useState('');
   const [checking, setChecking] = useState(false), [attempt, setAttempt] = useState(0);
@@ -259,5 +313,24 @@ function Receipt({ chain, hash }: { chain: Chain; hash: string }) {
     const timer = !terminal && !wallet.offline ? setInterval(() => { void check(); }, 10000) : null;
     return () => { stopped = true; if (timer) clearInterval(timer); };
   }, [chain, hash, terminal, attempt, wallet.offline]);
-  return <Screen title="Testnet receipt"><Pill tone={tx?.status === 'confirmed' ? 'success' : 'warning'}>{CHAINS[chain].name}</Pill><Label size={26} weight="semibold">{tx?.status === 'confirmed' ? 'Confirmed on the network' : tx?.status === 'failed' ? 'The network rejected this transfer' : tx?.status === 'superseded' ? 'This transfer never went through' : tx?.status === 'unknown' ? 'Submission needs a network check' : 'Waiting for a network receipt'}</Label>{tx?.status === 'superseded' && <Note>Another transfer from this wallet used the same slot in the queue, so this one can never arrive. Your money did not move and no fee was charged. If you still want to send it, start again.</Note>}{!terminal && <Note>Confirmation comes from the blockchain receipt. There is no simulated confirmation timer. Do not submit another transfer just because a response is slow.</Note>}<Card>{tx?.amount !== undefined && <Detail label="Amount" value={`${tx.amount} ${tx.symbol ?? 'ETH'}`} />}{tx?.recipient && <><Note>Recipient</Note><Address value={tx.recipient} /></>}{tx?.fee && <Detail label="Approved fee limit" value={`${tx.fee} ETH`} />}<Note>Transaction hash</Note><Label selectable size={12}>{hash}</Label>{tx?.blockNumber !== null && tx?.blockNumber !== undefined && <Detail label="Block" value={String(tx.blockNumber)} />}{tx?.checkedAt && <Note>Receipt checked {new Date(tx.checkedAt).toLocaleTimeString()}</Note>}</Card>{!!error && <Note error>{error}</Note>}{!terminal && <NeverArrived chain={chain} hash={hash} onResolved={setTx} />}<Button secondary label={checking ? 'Checking receipt…' : 'Check receipt'} disabled={checking || wallet.offline} onPress={() => setAttempt(value => value + 1)} /><Button secondary label="Open block explorer" onPress={() => { void Linking.openURL(`${CHAINS[chain].explorer}/tx/${hash}`).catch(() => setError('Could not open the explorer.')); }} /><Button label="Back to wallet" onPress={() => router.replace('/wallet')} /></Screen>;
+  const status = tx?.status;
+  const headline = status === 'confirmed' ? 'Confirmed' : status === 'failed' ? 'Rejected by the network' : status === 'superseded' ? 'Never went through' : status === 'unknown' ? 'Needs a network check' : 'Waiting for the network';
+  return <Screen title="Transfer">
+    <Pill tone={status === 'confirmed' ? 'success' : 'warning'}>{CHAINS[chain].name}</Pill>
+    <Label size={26} weight="semibold">{headline}</Label>
+    {status === 'superseded' && <Note>Another transfer took its place in the queue, so this one can never arrive. Your money did not move and no fee was charged.</Note>}
+    {!terminal && <Note>Don’t send it again while it’s waiting.</Note>}
+    <Card>
+      {tx?.amount !== undefined && <Detail label="Amount" value={`${tx.amount} ${tx.symbol ?? 'ETH'}`} />}
+      {tx?.recipient && <><Label size={13} color={c.muted}>To</Label><Address value={tx.recipient} /></>}
+      {tx?.fee && <Detail label="Fee limit" value={`${tx.fee} ETH`} />}
+      <Label size={13} color={c.muted}>Hash</Label><Label selectable size={12}>{hash}</Label>
+      {tx?.blockNumber !== null && tx?.blockNumber !== undefined && <Detail label="Block" value={String(tx.blockNumber)} />}
+    </Card>
+    {!!error && <Note error>{error}</Note>}
+    {!terminal && <NeverArrived chain={chain} hash={hash} onResolved={setTx} />}
+    {!terminal && <Button secondary label={checking ? 'Checking…' : 'Check again'} disabled={checking || wallet.offline} onPress={() => setAttempt(value => value + 1)} />}
+    <Button secondary label="View in explorer" onPress={() => { void Linking.openURL(`${CHAINS[chain].explorer}/tx/${hash}`).catch(() => setError('Could not open the explorer.')); }} />
+    <Button label="Done" onPress={() => router.replace('/wallet')} />
+  </Screen>;
 }

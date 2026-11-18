@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Button, Card, Label, Note, Pill, Screen } from '../components/ui';
+import { Button, Card, Label, Note, Screen } from '../components/ui';
 import { useDemo } from '../demo/store';
 import { phoneCompatibility, phoneSnapshot } from '../services/phone-adapter';
 import { PHONE_MODELS, type PhoneBackend } from '../services/phone-models';
@@ -39,15 +39,14 @@ export function PhonePerformanceScreen() {
     } catch (failure) { setError(failure instanceof Error ? failure.message : 'Phone test failed.'); }
     finally { running.current = null; setBusy(false); }
   }
-  return <Screen title="Phone performance" subtitle="Measure the model on this device">
-    <Card><Pill>{compatibility.supported ? 'PHONE-LOCAL TEST' : 'DEVICE CHECK'}</Pill><Label>{compatibility.supported ? 'Compare the smaller and larger models using the same 40 test messages. No transfer is sent.' : compatibility.reason}</Label><Note>The first setup downloads about 382 MB + 1.06 GB. Keep Wally open. Replies, memory and backend details are saved locally.</Note></Card>
+  return <Screen title="Phone performance">
+    <Card><Label>{compatibility.supported ? 'Runs both models on the same 40 messages.' : compatibility.reason}</Label><Note>Downloads about 1.4 GB the first time. Keep Wally open.</Note></Card>
     <Button label="Compare models on phone CPU" onPress={() => { void start('cpu'); }} disabled={!compatibility.supported || busy || ai.status === 'working' || state.aiPaused || state.offline} />
     <Button label="Compare using phone GPU" secondary onPress={() => { void start('gpu'); }} disabled={!compatibility.supported || busy || ai.status === 'working' || state.aiPaused || state.offline} />
-    <Note>GPU support varies by phone. Results record the backend reported by QVAC; choosing GPU does not prove it was used. For battery comparison, unplug after downloading the models.</Note>
     {!!progress && <Card><Label>{progress}</Label>{phone?.phase === 'loading' && phone.progress !== null && <Note>Model download: {phone.progress}%</Note>}{busy && <Button label="Stop test" secondary onPress={() => { running.current?.abort(); }} />}</Card>}
     {!!error && <Note error>{error}</Note>}
     {report && <>
-      <Note>Recorded {report.finishedAt ?? report.startedAt}. These results belong to that device and run.</Note>
+      <Note>Recorded {report.finishedAt ?? report.startedAt}</Note>
       {report.models.map(entry => {
         const measured = entry.cases.flatMap(test => test.metrics ? [test.metrics] : []);
         const first = measured.flatMap(metrics => metrics.firstReplyMs === null ? [] : [metrics.firstReplyMs]);

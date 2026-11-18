@@ -1,13 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
 import { TextInput, View } from 'react-native';
-import { Button, Card, Label, Note, Pill, Screen, shared } from '../components/ui';
+import { Button, Card, Label, Note, Pill, Screen, useShared } from '../components/ui';
 import { backupPositions, checkBackup, phraseWords } from '../services/recovery';
 import { getKeystore } from '../services/wallet-worklet';
 // Extensionless: Metro picks the native implementation on a phone and the no-op on web.
 import { useScreenPrivacy } from '../services/screen-privacy';
 import { requireUnlock } from '../services/unlock';
-import { colors as c, fonts } from '../theme';
+import { fonts, useColors } from '../theme';
 
 /**
  * The twelve words, and the check that the user really wrote them down.
@@ -29,6 +29,8 @@ import { colors as c, fonts } from '../theme';
  * can reach this.
  */
 export function RecoveryPhraseScreen() {
+  const c = useColors();
+  const shared = useShared();
   const { screenshotted } = useScreenPrivacy('wally.recovery-phrase');
 
   const { mode } = useLocalSearchParams<{ mode?: string }>();
@@ -112,12 +114,10 @@ export function RecoveryPhraseScreen() {
   }
 
   if (setup && stage === 'confirm') {
-    return <Screen title="Check your backup" subtitle="So we know it is written down correctly">
-      <Card>
-        <Note>Type the words at these positions from the list you wrote down. Do not read them off this phone.</Note>
-      </Card>
+    return <Screen title="Check your backup">
+      <Note>Type these words from your paper, not from this phone.</Note>
       {positions.map(position => <Card key={position}>
-        <Label size={12} weight="semibold" color={c.orange}>WORD {position + 1}</Label>
+        <Label size={13} weight="medium" color={c.muted}>Word {position + 1}</Label>
         <View style={[shared.row, shared.input, wrong.includes(position) ? { borderColor: c.orange } : null]}>
           <TextInput
             accessibilityLabel={`Word ${position + 1} of your recovery phrase`}
@@ -133,16 +133,16 @@ export function RecoveryPhraseScreen() {
           />
         </View>
       </Card>)}
-      {!!wrong.length && <Card><Label weight="semibold">That does not match</Label><Note error>{wrong.length === 1 ? 'One word is wrong.' : `${wrong.length} words are wrong.`} Check the list you wrote down — it is worth getting this right now rather than later.</Note></Card>}
+      {!!wrong.length && <Card><Label weight="semibold">That does not match</Label><Note error>{wrong.length === 1 ? 'One word is wrong.' : `${wrong.length} words are wrong.`} Check your paper.</Note></Card>}
       <Button label={busy ? 'Saving…' : 'Confirm'} onPress={() => { void confirm(); }} disabled={busy} />
       <Button secondary label="Show me the words again" onPress={() => { setStage('show'); setWrong([]); setAnswers({}); }} />
     </Screen>;
   }
 
-  return <Screen title="Your recovery phrase" subtitle={setup ? 'Write these down before you go on' : 'Keep these words private'}>
+  return <Screen title="Recovery phrase">
     <Card style={{ backgroundColor: c.surface }}>
       <Pill tone="warning">Anyone with these words can spend your money</Pill>
-      <Note>Write them on paper and keep them somewhere safe. Do not photograph them, do not put them in notes or a password manager you share, and never type them into anything that asks for them.</Note>
+      <Note>Write them on paper. Don’t photograph them or type them anywhere.</Note>
     </Card>
 
     <Card>
@@ -158,12 +158,7 @@ export function RecoveryPhraseScreen() {
 
     {screenshotted && <Card>
       <Label weight="semibold">You took a screenshot</Label>
-      <Note error>Photos are usually backed up to the cloud automatically, which puts your phrase on someone else’s computer. Delete it and write the words on paper instead.</Note>
-    </Card>}
-
-    {!setup && <Card>
-      <Label size={12} weight="semibold" color={c.orange}>WORTH KNOWING</Label>
-      <Note>Wally cannot yet lock this screen behind a PIN or fingerprint, so anyone holding this phone unlocked can reach it. That is being built.</Note>
+      <Note error>Photos usually back up to the cloud. Delete it and use paper instead.</Note>
     </Card>}
 
     {setup
