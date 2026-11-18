@@ -8,6 +8,7 @@ import { AssetChoice, LiveActivityCard, LiveReceiveCard, NetworkChoice, WalletSt
 import { useWallet } from '../data/wallet';
 import { useDemo } from '../demo/store';
 import { CHAINS, fetchGasPrice, formatUnits, isAddress, parseSendAmount, sendableMax, type Chain, type LiveTransaction } from '../services/wallet-api';
+import { availableBase, committedBase } from '../services/committed-balance.ts';
 import { monotonicNow, quoteExpired, secondsLeft } from '../services/quote-clock';
 import { addressTrust, trustWarning } from '../services/address-safety.ts';
 import { readWatch, watchStatus, watchTransfer } from '../services/transfer-watch.ts';
@@ -55,6 +56,26 @@ export function LiveSendScreen() {
   ));
 
   /**
+   * What is actually spendable, which is not what the node reports.
+   *
+   * `eth_getBalance` answers for the latest block, so a transfer already broadcast and not yet
+   * mined is not deducted from it. The line below this used to print that raw figure under the
+   * word "Available", which is untrue for as long as anything is in flight — and someone who
+   * sends twice in quick succession types an amount against money they have already spent.
+   */
+  const committed = committedBase({
+    chain,
+    symbol: sending,
+    decimals,
+    owned: (wallet.snapshot?.balances ?? []).map(item => item.address),
+    history: wallet.history?.items ?? [],
+  });
+  const available = availableBase(balance?.balanceWei === undefined || balance?.balanceWei === null ? null : BigInt(balance.balanceWei), committed);
+  const availableText = available.base === null
+    ? balance?.balance ?? 'Unavailable'
+    : formatUnits(available.base, decimals);
+
+  /**
    * Fill the amount with everything that can actually be sent.
    *
    * For a token that is the whole balance — the fee comes out of ETH. For the coin the fee
@@ -67,7 +88,10 @@ export function LiveSendScreen() {
     setMaxBusy(true); setError('');
     try {
       const gasPriceWei = token ? undefined : (await fetchGasPrice(chain)) ?? undefined;
-      const most = sendableMax({ balanceBase: BigInt(balance.balanceWei), native: !token, ...(gasPriceWei === undefined ? {} : { gasPriceWei }) });
+      // Against what is spendable, not what the node reports: offering a maximum that
+      // includes a transfer already in flight produces a quote the chain will refuse.
+      const spendable = available.base ?? BigInt(balance.balanceWei);
+      const most = sendableMax({ balanceBase: spendable, native: !token, ...(gasPriceWei === undefined ? {} : { gasPriceWei }) });
       if (most <= 0n) {
         throw new Error(token
           ? `There is no ${sending} here to send.`
@@ -97,7 +121,7 @@ export function LiveSendScreen() {
     } catch (failure) { setError(failure instanceof Error ? failure.message : 'Could not prepare the transfer.'); }
     finally { setBusy(false); }
   }
-  return <Screen title={`Send testnet ${sending}`} subtitle="A real testnet transfer" footer={<Button label={busy ? 'Checking network fee…' : 'Review transfer'} disabled={busy || wallet.offline || state.offline || !balance || balance.balance === null} onPress={() => { void review(); }} />}><Pill>TESTNET ONLY</Pill><NetworkChoice value={chain} onChange={next => { wallet.clearQuote(); setChain(next); setAsset('ETH'); setError(''); }} /><AssetChoice value={sending} options={assets} onChange={next => { wallet.clearQuote(); setAsset(next); setAmount(''); setError(''); }} /><Note>Available on {CHAINS[chain].name}: {balance?.balance ?? 'Unavailable'} {sending}</Note>{!!token && <Note>The network fee is paid in ETH, not {sending}. You need a little ETH on this network as well.</Note>}<View style={shared.row}><View style={shared.flex}><Label weight="medium">Recipient address</Label></View><Button secondary label="Scan a code" onPress={() => router.push('/scan')} /></View>{!!scannedChain && <Note>Switched to {CHAINS[scannedChain].name}, which the scanned code asked for.</Note>}{params.scannedAmountIgnored === '1' && <Note>That code also contained an amount. Wally does not fill it in — type the amount you mean to send.</Note>}<TextInput accessibilityLabel="Recipient address" value={recipient} editable={!busy} autoCapitalize="none" autoCorrect={false} placeholder="0x…" placeholderTextColor={c.muted} onChangeText={value => { wallet.clearQuote(); setRecipient(value); }} style={shared.input} /><Button secondary label="Choose saved recipient" disabled={busy} onPress={() => router.push('/address-book')} /><View style={shared.row}><View style={shared.flex}><Label weight="medium">Amount in {sending}</Label></View><Button secondary label={maxBusy ? 'Working…' : 'Send max'} disabled={busy || maxBusy || !balance?.balanceWei || balance.balanceWei === '0'} onPress={() => { void fillMax(); }} /></View><TextInput accessibilityLabel={`Amount in ${sending}`} value={amount} editable={!busy} keyboardType="decimal-pad" placeholder={token ? "25" : "0.001"} placeholderTextColor={c.muted} onChangeText={value => { wallet.clearQuote(); setAmount(value); }} style={shared.input} /><Note>Only ordinary wallet addresses can receive this transfer. Fees are estimated from the selected network and always paid in ETH. Nothing is sent until you approve the next screen.</Note>{balance?.balance === '0' && <Card style={{ backgroundColor: c.warningTint }}><Label weight="semibold">Fund your testnet wallet first</Label><Note>Request ETH from a {CHAINS[chain].name} faucet for your Receive address. Testnet tokens have no monetary value.</Note><Button secondary label="Open receive address" onPress={() => router.push('/receive')} /></Card>}{!!lookalike && <Card style={{ backgroundColor: c.warningTint }}><Label weight="semibold">Check this address carefully</Label><Note>{lookalike}</Note></Card>}{!!error && <Note error>{error}</Note>}<WalletStatus /></Screen>;
+  return <Screen title={`Send testnet ${sending}`} subtitle="A real testnet transfer" footer={<Button label={busy ? 'Checking network fee…' : 'Review transfer'} disabled={busy || wallet.offline || state.offline || !balance || balance.balance === null} onPress={() => { void review(); }} />}><Pill>TESTNET ONLY</Pill><NetworkChoice value={chain} onChange={next => { wallet.clearQuote(); setChain(next); setAsset('ETH'); setError(''); }} /><AssetChoice value={sending} options={assets} onChange={next => { wallet.clearQuote(); setAsset(next); setAmount(''); setError(''); }} /><Note>Available on {CHAINS[chain].name}: {availableText} {sending}</Note>{available.pending && <Note>{available.base === null ? `A transfer of ${sending} is still being confirmed and Wally cannot say exactly how much that leaves. The balance above includes it.` : `${formatUnits(available.committed, decimals)} ${sending} is held back for a transfer still being confirmed. Your balance is ${balance?.balance ?? '—'} ${sending}.`}</Note>}{!!token && <Note>The network fee is paid in ETH, not {sending}. You need a little ETH on this network as well.</Note>}<View style={shared.row}><View style={shared.flex}><Label weight="medium">Recipient address</Label></View><Button secondary label="Scan a code" onPress={() => router.push('/scan')} /></View>{!!scannedChain && <Note>Switched to {CHAINS[scannedChain].name}, which the scanned code asked for.</Note>}{params.scannedAmountIgnored === '1' && <Note>That code also contained an amount. Wally does not fill it in — type the amount you mean to send.</Note>}<TextInput accessibilityLabel="Recipient address" value={recipient} editable={!busy} autoCapitalize="none" autoCorrect={false} placeholder="0x…" placeholderTextColor={c.muted} onChangeText={value => { wallet.clearQuote(); setRecipient(value); }} style={shared.input} /><Button secondary label="Choose saved recipient" disabled={busy} onPress={() => router.push('/address-book')} /><View style={shared.row}><View style={shared.flex}><Label weight="medium">Amount in {sending}</Label></View><Button secondary label={maxBusy ? 'Working…' : 'Send max'} disabled={busy || maxBusy || !balance?.balanceWei || balance.balanceWei === '0'} onPress={() => { void fillMax(); }} /></View><TextInput accessibilityLabel={`Amount in ${sending}`} value={amount} editable={!busy} keyboardType="decimal-pad" placeholder={token ? "25" : "0.001"} placeholderTextColor={c.muted} onChangeText={value => { wallet.clearQuote(); setAmount(value); }} style={shared.input} /><Note>Only ordinary wallet addresses can receive this transfer. Fees are estimated from the selected network and always paid in ETH. Nothing is sent until you approve the next screen.</Note>{balance?.balance === '0' && <Card style={{ backgroundColor: c.warningTint }}><Label weight="semibold">Fund your testnet wallet first</Label><Note>Request ETH from a {CHAINS[chain].name} faucet for your Receive address. Testnet tokens have no monetary value.</Note><Button secondary label="Open receive address" onPress={() => router.push('/receive')} /></Card>}{!!lookalike && <Card style={{ backgroundColor: c.warningTint }}><Label weight="semibold">Check this address carefully</Label><Note>{lookalike}</Note></Card>}{!!error && <Note error>{error}</Note>}<WalletStatus /></Screen>;
 }
 export function LiveReviewScreen() {
   const wallet = useWallet(), { state } = useDemo();
