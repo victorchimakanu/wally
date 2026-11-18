@@ -12,7 +12,7 @@ const HASH = "0x" + "a".repeat(64);
 
 async function serve(answer: () => Receipt) {
   const app = Fastify();
-  const watcher = createWatcher({ fetchReceipt: async () => answer() });
+  const watcher = createWatcher({ fetchReceipt: async () => answer(), fetchHead: async () => 1_000_000 });
   await app.register(watchRoutes, { watcher });
   return { app, watcher };
 }
