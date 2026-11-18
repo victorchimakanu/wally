@@ -10,6 +10,9 @@ import { historyProvenance } from '../services/history-source';
 import { custodyNotice } from '../services/custody';
 import { receiveAdvice } from '../services/receive-advice';
 import { CHAINS, formatEth, type Chain } from '../services/wallet-api';
+import { useMarket } from '../data/market';
+import { formatPrice } from '../services/market-api';
+import { fiatDisplayable, fiatTotal, fiatValue } from '../services/fiat-value';
 import { colors as c } from '../theme';
 
 /** Figma network/receive-selector: one pill with the selected network on an amber segment. */
@@ -61,6 +64,39 @@ export function WalletStatus() {
   const wallet = useWallet();
   return <View style={{ gap: 8 }}><Note>{wallet.loading ? 'Refreshing testnet balances…' : wallet.snapshot ? `${wallet.stale ? 'Saved' : 'Fetched'} balances · ${new Date(wallet.snapshot.fetchedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Connecting to the local wallet…'}</Note>{!!wallet.error && <Note error>{wallet.error}</Note>}<Note>WDK wallet on your computer · Testnet ETH has no monetary value.</Note><Button secondary label="Refresh wallet" disabled={wallet.loading || wallet.offline} onPress={() => { void wallet.refresh(); }} /></View>;
 }
+/**
+ * A balance in the money someone actually thinks in — when that can be said honestly.
+ *
+ * `fiat-value.ts` was written on 8 November and until now nothing imported it, so the gate it
+ * carries was not gating anything: there was no call site to refuse. These two components are
+ * that call site. They render nothing today, because `fiatDisplayable` requires a mainnet and
+ * `parseWallet` refuses any snapshot whose network is not `testnet` — the type is the literal
+ * `'testnet'`, so this is enforced by the parser rather than by remembering.
+ *
+ * That is the point. Turning fiat on later is a change to what the wallet reports, not a
+ * feature to build, and the arithmetic has tests that run today against a mainnet snapshot.
+ *
+ * A figure that cannot be known renders nothing at all, never "—" or a zero. The market
+ * snapshot is fetched per currency, and `fiatValue` refuses a price in the wrong one, so a
+ * dollar figure can never be printed with a naira sign in front of it.
+ */
+function FiatLine({ amount, symbol }: { amount: string | null; symbol: string }) {
+  const wallet = useWallet();
+  const { data: market, currency } = useMarket();
+  if (!fiatDisplayable({ network: wallet.snapshot?.network })) return null;
+  const value = fiatValue(amount, symbol, market?.assets ?? [], currency);
+  if (value.amount === null) return null;
+  return <Label size={12} color={c.muted}>{formatPrice(value.amount, value.currency)}</Label>;
+}
+/** The same, for a total. Null if any part of it could not be priced — see `fiatTotal`. */
+function FiatTotalLine({ balances }: { balances: readonly { amount: string | null; symbol: string }[] }) {
+  const wallet = useWallet();
+  const { data: market, currency } = useMarket();
+  if (!fiatDisplayable({ network: wallet.snapshot?.network })) return null;
+  const value = fiatTotal(balances, market?.assets ?? [], currency);
+  if (value.amount === null) return null;
+  return <Label size={16} weight="medium">{formatPrice(value.amount, value.currency)}</Label>;
+}
 /** Figma network/icon-fallback: a tinted letter mark per network. */
 function NetworkMark({ chain }: { chain: Chain }) {
   return <View style={{ width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: chain === 'arbitrum' ? c.amber : c.tint }}><Label size={17} weight="semibold">{chain === 'arbitrum' ? 'A' : 'E'}</Label></View>;
@@ -80,14 +116,14 @@ export function LiveWalletOverview({ onActivity = () => router.push('/history') 
   return <View style={{ gap: 12 }}>
     <Card style={{ backgroundColor: c.tint, borderColor: c.tint, alignItems: 'center', gap: 4, paddingVertical: 24 }}>
       <Label size={16} weight="medium">Personal wallet</Label>
-      <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 6 }}><Label size={40} weight="semibold" style={{ lineHeight: 48 }}>{total ?? '—'}</Label><Label size={16} weight="semibold">ETH</Label></View>
+      <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 6 }}><Label size={40} weight="semibold" style={{ lineHeight: 48 }}>{total ?? '—'}</Label><Label size={16} weight="semibold">ETH</Label></View><FiatTotalLine balances={nativeKnown.map(item => ({ amount: item.balance, symbol: item.symbol }))} />
       <Label size={13} color={c.muted}>{wallet.loading ? 'Refreshing balances…' : `${Object.keys(CHAINS).length} test networks · ${synced}`}</Label>
       {nativeKnown.length < balances.filter(item => item.symbol === 'ETH').length && <Label size={12} color={c.error}>Total excludes a network that could not refresh</Label>}
     </Card>
     <Card style={{ gap: 0, paddingVertical: 12 }}>
       <Label size={16} weight="bold" style={{ paddingBottom: 4 }}>By network</Label>
       {balances.filter(item => item.symbol === 'ETH').map(item => <View key={`${item.chain}:${item.symbol}`} style={{ paddingVertical: 12, gap: 6, borderTopWidth: 1, borderColor: c.line }}>
-        <View style={shared.row}><NetworkMark chain={item.chain} /><View style={shared.flex}><Label size={16} weight="medium">{item.chain === 'arbitrum' ? 'Arbitrum' : 'Ethereum'}</Label><Label size={12} color={c.muted}>Sepolia · Testnet</Label></View><View style={{ alignItems: 'flex-end', flexShrink: 1 }}><Label size={16} weight="semibold">{item.balance === null ? 'Unavailable' : `${item.balance} ETH`}</Label><Label size={12} color={item.error ? c.error : c.muted}>{item.error ? 'Could not refresh' : 'Available balance'}</Label></View></View>
+        <View style={shared.row}><NetworkMark chain={item.chain} /><View style={shared.flex}><Label size={16} weight="medium">{item.chain === 'arbitrum' ? 'Arbitrum' : 'Ethereum'}</Label><Label size={12} color={c.muted}>Sepolia · Testnet</Label></View><View style={{ alignItems: 'flex-end', flexShrink: 1 }}><Label size={16} weight="semibold">{item.balance === null ? 'Unavailable' : `${item.balance} ETH`}</Label><Label size={12} color={item.error ? c.error : c.muted}>{item.error ? 'Could not refresh' : 'Available balance'}</Label><FiatLine amount={item.balance} symbol={item.symbol} /></View></View>
         {!!item.error && <Note error>{item.error}</Note>}
       </View>)}
       {!wallet.snapshot && <Note>Balances appear after the wallet API responds.</Note>}
@@ -98,7 +134,7 @@ export function LiveWalletOverview({ onActivity = () => router.push('/history') 
     {tokenBalances.length > 0 && <Card style={{ gap: 0, paddingVertical: 12 }}>
       <Label size={16} weight="bold" style={{ paddingBottom: 4 }}>Tokens</Label>
       {tokenBalances.map(item => <View key={`${item.chain}:${item.symbol}`} style={{ paddingVertical: 12, gap: 6, borderTopWidth: 1, borderColor: c.line }}>
-        <View style={shared.row}><NetworkMark chain={item.chain} /><View style={shared.flex}><Label size={16} weight="medium">{item.symbol}</Label><Label size={12} color={c.muted}>{item.chain === 'arbitrum' ? 'Arbitrum' : 'Ethereum'} Sepolia · Testnet</Label></View><View style={{ alignItems: 'flex-end', flexShrink: 1 }}><Label size={16} weight="semibold">{item.balance === null ? 'Unavailable' : `${item.balance} ${item.symbol}`}</Label><Label size={12} color={item.error ? c.error : c.muted}>{item.error ? 'Could not refresh' : 'Available balance'}</Label></View></View>
+        <View style={shared.row}><NetworkMark chain={item.chain} /><View style={shared.flex}><Label size={16} weight="medium">{item.symbol}</Label><Label size={12} color={c.muted}>{item.chain === 'arbitrum' ? 'Arbitrum' : 'Ethereum'} Sepolia · Testnet</Label></View><View style={{ alignItems: 'flex-end', flexShrink: 1 }}><Label size={16} weight="semibold">{item.balance === null ? 'Unavailable' : `${item.balance} ${item.symbol}`}</Label><Label size={12} color={item.error ? c.error : c.muted}>{item.error ? 'Could not refresh' : 'Available balance'}</Label><FiatLine amount={item.balance} symbol={item.symbol} /></View></View>
         {!!item.error && <Note error>{item.error}</Note>}
       </View>)}
     </Card>}
