@@ -1,12 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer, type Server } from 'node:http';
-import { mergeHistory, type LiveHistory, type LiveTransaction } from '../src/services/wallet-api.ts';
+import type { LiveHistory, LiveTransaction } from '../src/services/wallet-api.ts';
 
 /**
- * Activity reads indexed history from the Wally backend when one is configured, and merges it
- * with transfers this device submitted. These cases cover the merge rules and the request the
- * app actually sends, without reaching a real indexer.
+ * Activity reads indexed history from the Wally backend when one is configured. These cases
+ * cover the request the app actually sends, without reaching a real indexer.
+ *
+ * The merge rules used to live here too, against a `mergeHistory` that merged one indexed
+ * response with this device's submissions. Activity now reads the backend one chain and one
+ * page at a time, so the merge is `withLocalSubmissions` in `history-pager.ts` and its rules
+ * are tested beside it, over a list that pages rather than one response that could not.
  */
 
 const HASH = (char: string) => '0x' + char.repeat(64);
@@ -27,72 +31,6 @@ function history(items: LiveTransaction[], errors: string[] = [], over: Partial<
   return { version: 1, fetchedAt: 1_700_000_000_000, source: 'test', items, errors, ...over };
 }
 
-test('a transfer this device just sent is not dropped by the indexed list', () => {
-  // The backend cannot see a submission that has no receipt yet. If indexed history simply
-  // replaced the local list, a just-sent transfer would vanish from Activity.
-  const pending = tx(HASH('a'), { status: 'pending', submittedAt: 1_700_000_500_000 });
-  const merged = mergeHistory(history([tx(HASH('b'))]), history([pending]));
-
-  assert.equal(merged.items.length, 2);
-  assert.equal(merged.items[0].hash, HASH('a'), 'newest first');
-  assert.equal(merged.items[0].status, 'pending');
-});
-
-test('the indexed record wins a duplicate, because only it knows what confirmed', () => {
-  const hash = HASH('c');
-  const merged = mergeHistory(
-    history([tx(hash, { status: 'confirmed', blockNumber: 500 })]),
-    history([tx(hash, { status: 'pending', blockNumber: null })]),
-  );
-
-  assert.equal(merged.items.length, 1, 'the same transaction must not appear twice');
-  assert.equal(merged.items[0].status, 'confirmed');
-  assert.equal(merged.items[0].blockNumber, 500);
-});
-
-test('duplicates are matched regardless of hash case', () => {
-  const merged = mergeHistory(
-    history([tx('0x' + 'a'.repeat(64))]),
-    history([tx('0x' + 'A'.repeat(64))]),
-  );
-  assert.equal(merged.items.length, 1);
-});
-
-test('the same hash on two chains is two transactions, not one', () => {
-  const hash = HASH('d');
-  const merged = mergeHistory(
-    history([tx(hash, { chain: 'arbitrum' })]),
-    history([tx(hash, { chain: 'ethereum', explorerUrl: `https://sepolia.etherscan.io/tx/${hash}` })]),
-  );
-  assert.equal(merged.items.length, 2);
-});
-
-test('the local indexer errors are dropped, and the backend errors kept', () => {
-  // The local errors describe the loopback server's own Blockscout attempt, which Activity is
-  // no longer built from. Repeating them would tell the user something untrue.
-  const merged = mergeHistory(
-    history([tx(HASH('e'))], ['Ethereum Sepolia history is unavailable right now.']),
-    history([], ['Arbitrum Sepolia history is unavailable. Showing locally tracked submissions where available.']),
-  );
-  assert.deepEqual(merged.errors, ['Ethereum Sepolia history is unavailable right now.']);
-});
-
-test('the merged list never exceeds the 50 that parseHistory accepts', () => {
-  const remote = Array.from({ length: 40 }, (_, i) => tx('0x' + `r${i}`.padStart(64, '0'), { submittedAt: 2_000_000 + i }));
-  const local = Array.from({ length: 30 }, (_, i) => tx('0x' + `1${i}`.padStart(64, '0'), { submittedAt: 1_000_000 + i }));
-  const merged = mergeHistory(history(remote), history(local));
-
-  assert.equal(merged.items.length, 50);
-  // The newest survive the cap, so the cap never hides a recent transfer.
-  assert.equal(merged.items[0].submittedAt, 2_000_039);
-});
-
-test('the merged source names both origins, and keeps the backend fetch time', () => {
-  const merged = mergeHistory(history([], [], { source: 'etherscan', fetchedAt: 1_700_000_900_000 }), history([]));
-  assert.match(merged.source, /etherscan/);
-  assert.match(merged.source, /this device/);
-  assert.equal(merged.fetchedAt, 1_700_000_900_000);
-});
 
 test('the backend is asked for each chain by its own address', async () => {
   const requested: string[] = [];

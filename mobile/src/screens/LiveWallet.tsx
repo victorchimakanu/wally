@@ -10,6 +10,7 @@ import { useDemo } from '../demo/store';
 import { CHAINS, fetchGasPrice, formatUnits, isAddress, parseSendAmount, sendableMax, type Chain, type LiveTransaction } from '../services/wallet-api';
 import { monotonicNow, quoteExpired, secondsLeft } from '../services/quote-clock';
 import { addressTrust, trustWarning } from '../services/address-safety.ts';
+import { readWatch, watchStatus, watchTransfer } from '../services/transfer-watch.ts';
 import { usePreferences } from '../demo/preferences';
 import { useColors } from '../theme';
 
@@ -220,9 +221,42 @@ function Receipt({ chain, hash }: { chain: Chain; hash: string }) {
   // this hash can ever exist and polling would continue forever.
   const terminal = tx?.status === 'confirmed' || tx?.status === 'failed' || tx?.status === 'superseded';
   const receipt = useRef(wallet.receipt); useEffect(() => { receipt.current = wallet.receipt; }, [wallet.receipt]);
+  // Which transfer the backend has been asked to watch. Once per hash: the route is
+  // idempotent, but a POST on every poll would be noise for no answer.
+  const registered = useRef('');
   useEffect(() => {
-    let stopped = false, active = false;
-    async function check() { if (active || stopped) return; active = true; setChecking(true); try { const result = await receipt.current(chain, hash); if (!stopped) { setTx(result); setError(''); } } catch (failure) { if (!stopped) setError(failure instanceof Error ? failure.message : 'Receipt unavailable.'); } finally { active = false; if (!stopped) setChecking(false); } }
+    let stopped = false, active = false, first = true;
+    async function check() {
+      if (active || stopped) return;
+      active = true; setChecking(true);
+      try {
+        // Keep the chain being asked once this screen is closed and the phone is asleep.
+        // Advisory: it never gates the authoritative read below, and never throws.
+        const key = `${chain}:${hash}`;
+        if (registered.current !== key) { registered.current = key; void watchTransfer(chain, hash); }
+
+        // Cheap first. The backend holds the last receipt it read, so this usually answers
+        // from memory, while the real read below goes to a public Sepolia node measured at
+        // 11 to 12 seconds a call on 8 November 2026.
+        const watched = watchStatus(await readWatch(chain, hash));
+        // Skip the expensive call only when the backend affirmatively says the chain has not
+        // decided. No opinion — no backend configured, not watched, expired, unreadable —
+        // falls through to asking properly, which is what this screen did before the watcher
+        // existed. A watcher that cannot answer must never look like a stalled transfer.
+        //
+        // Never skipped on the first pass of a mount, or on an explicit Check receipt, both
+        // of which re-run this effect: somebody waiting deserves the real answer, not a
+        // cached one that is up to a poll interval old.
+        if (!first && watched === 'pending') return;
+
+        const result = await receipt.current(chain, hash);
+        if (!stopped) { setTx(result); setError(''); }
+      } catch (failure) {
+        if (!stopped) setError(failure instanceof Error ? failure.message : 'Receipt unavailable.');
+      } finally {
+        first = false; active = false; if (!stopped) setChecking(false);
+      }
+    }
     if (!wallet.offline) void check();
     const timer = !terminal && !wallet.offline ? setInterval(() => { void check(); }, 10000) : null;
     return () => { stopped = true; if (timer) clearInterval(timer); };

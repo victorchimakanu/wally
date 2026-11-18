@@ -123,6 +123,13 @@ different claims and the app has to be able to tell them apart.
 never been made. This is what will feed that; today it makes the answer ready before the app
 asks.
 
+The app has called it since 18 November 2026 (`mobile/src/services/transfer-watch.ts`): a hash
+is registered the moment a transfer is submitted, and the receipt screen reads the watch before
+spending a slow call on the chain. One rule governs that client and it is worth repeating here,
+because it is the mirror of the rule below — **a watcher that cannot answer must never look
+like a failed transfer.** Not watched, not reachable, not configured, a shape that does not
+parse: each is no opinion, and the app falls through to asking the chain properly.
+
 Two rules worth keeping:
 
 - **A missing receipt is pending, never failure.** It is the ordinary answer for a transaction
@@ -380,8 +387,9 @@ instance, and `/health` reports `broadcastEnabled: false`.
 
 ## What belongs here later, and what never does
 
-Planned: a receipt watcher with push notifications (the only piece a phone genuinely cannot do
-for itself, because it sleeps mid-confirmation), then the conversion-partner proxy, then the
-bills aggregator.
+Planned: push notifications on top of the receipt watcher above — the watcher itself is built
+and the app now registers every transfer it submits, but nothing is delivered to a phone,
+because push needs a device token and therefore a development build that has never been made.
+Then the conversion-partner proxy, then the bills aggregator.
 
 Never: private keys, seed phrases, or any ability to move funds.
