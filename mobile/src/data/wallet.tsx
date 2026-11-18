@@ -1,7 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { AppState, Platform } from 'react-native';
-import { createWalletClient, parseWallet, type Chain, type LiveHistory, type LiveQuote, type LiveTransaction, type WalletSnapshot } from '../services/wallet-api';
+import { createWalletClient, fetchProxyHistory, parseWallet, type Chain, type LiveHistory, type LiveQuote, type LiveTransaction, type WalletSnapshot } from '../services/wallet-api';
+import { asLiveHistory, hasMore, loadFirstPage, loadNextPage, withLocalSubmissions, type PageFetcher, type PagedHistory } from '../services/history-pager';
 // Extensionless: Metro picks the native biometric path on a phone, the no-op on web.
 import { requireUnlock } from '../services/unlock';
 import { quoteExpired } from '../services/quote-clock';
@@ -16,11 +17,12 @@ const endpoint = process.env.EXPO_PUBLIC_WALLY_API_URL ?? '';
 export const liveWalletEnabled = !!endpoint;
 const client = endpoint ? createWalletClient(endpoint) : null;
 const cacheKey = `wally.testnet.wallet.v1.${endpoint}`;
-type WalletContext = { enabled: boolean; custody: Custody | null; blocked: string | null; snapshot: WalletSnapshot | null; history: LiveHistory | null; loading: boolean; historyLoading: boolean; error: string; historyError: string; stale: boolean; offline: boolean; quote: LiveQuote | null; refresh: () => Promise<void>; refreshHistory: () => Promise<void>; prepare: (input: { chain: Chain; recipient: string; amount: string; token?: string }) => Promise<void>; clearQuote: () => void; confirm: () => Promise<LiveTransaction>; receipt: (chain: Chain, hash: string) => Promise<LiveTransaction>; resolve: (chain: Chain, hash: string) => Promise<LiveTransaction> };
+type WalletContext = { enabled: boolean; custody: Custody | null; blocked: string | null; snapshot: WalletSnapshot | null; history: LiveHistory | null; loading: boolean; historyLoading: boolean; error: string; historyError: string; stale: boolean; offline: boolean; quote: LiveQuote | null; refresh: () => Promise<void>; refreshHistory: () => Promise<void>; historyHasMore: boolean; historyLoadingMore: boolean; loadMoreHistory: () => Promise<void>; prepare: (input: { chain: Chain; recipient: string; amount: string; token?: string }) => Promise<void>; clearQuote: () => void; confirm: () => Promise<LiveTransaction>; receipt: (chain: Chain, hash: string) => Promise<LiveTransaction>; resolve: (chain: Chain, hash: string) => Promise<LiveTransaction> };
 const Context = createContext<WalletContext | null>(null);
 export function WalletProvider({ children }: React.PropsWithChildren) {
   const [snapshot, setSnapshot] = useState<WalletSnapshot | null>(null), [history, setHistory] = useState<LiveHistory | null>(null);
   const [loading, setLoading] = useState(false), [historyLoading, setHistoryLoading] = useState(false);
+  const [historyLoadingMore, setHistoryLoadingMore] = useState(false);
   const [error, setError] = useState(''), [historyError, setHistoryError] = useState('');
   const [quote, setQuote] = useState<LiveQuote | null>(null), activeQuote = useRef<LiveQuote | null>(null);
   const [offline, setOffline] = useState(() => Platform.OS === 'web' && typeof navigator !== 'undefined' && !navigator.onLine);
@@ -40,6 +42,21 @@ export function WalletProvider({ children }: React.PropsWithChildren) {
   // fetch re-reads it when it finishes, so a request made while one is running is honoured
   // rather than dropped. See refreshHistory.
   const wantedAddresses = useRef('');
+  // Everything Activity has read so far, with a page cursor per chain. A ref rather than
+  // state: `loadMoreHistory` must read the latest cursors at the moment it is pressed, and a
+  // stale closure over state would re-request a page already held.
+  const paged = useRef<PagedHistory | null>(null), loadingMore = useRef(false);
+  /**
+   * One page of one chain.
+   *
+   * Per chain is not a convenience. The route merges both chains into one fifty-item page, so
+   * asking for both drops records that no later page returns — see `history-pager.ts`.
+   */
+  const pageFetcher = useCallback((addresses: Partial<Record<Chain, string>>): PageFetcher => (chain, page) => {
+    const address = addresses[chain];
+    if (!address) throw new Error('No wallet address is known yet.');
+    return fetchProxyHistory({ [chain]: address }, fetch, { chain, page });
+  }, []);
   const alive = useRef(true), current = useRef<WalletSnapshot | null>(null), offlineNow = useRef(offline);
   const clearQuote = useCallback(() => { quoteGeneration.current++; activeQuote.current = null; setQuote(null); }, []);
   const refresh = useCallback(async () => {
@@ -47,7 +64,7 @@ export function WalletProvider({ children }: React.PropsWithChildren) {
     fetching.current = true; setLoading(true); setError('');
     try {
       const data = await client.wallet(); if (!alive.current) return;
-      if (current.current && current.current.balances.some(item => item.address !== data.balances.find(next => next.chain === item.chain)?.address)) { setHistory(null); clearQuote(); }
+      if (current.current && current.current.balances.some(item => item.address !== data.balances.find(next => next.chain === item.chain)?.address)) { setHistory(null); paged.current = null; clearQuote(); }
       current.current = data; setSnapshot(data); setSaved(false);
       await AsyncStorage.setItem(cacheKey, JSON.stringify(data)).catch(() => { if (alive.current) setError('Balances refreshed but could not be saved offline.'); });
     } catch (failure) { if (alive.current) { setSaved(true); setError(failure instanceof Error ? failure.message : 'Wallet unavailable.'); } }
@@ -73,14 +90,47 @@ export function WalletProvider({ children }: React.PropsWithChildren) {
       let used = '';
       while (used !== wantedAddresses.current) {
         used = wantedAddresses.current;
-        const data = await client.history(JSON.parse(used) as Partial<Record<Chain, string>>);
+        const addresses = JSON.parse(used) as Partial<Record<Chain, string>>;
+        const local = await client.localHistory();
         if (!alive.current) return;
-        setHistory(data);
+        const chains = (Object.keys(addresses) as Chain[]).filter(chain => !!addresses[chain]);
+        let next: LiveHistory;
+        if (!backendOrigin() || !chains.length) {
+          // No proxy configured, or no addresses known yet. The loopback list is the whole
+          // list and it does not page, so drop the cursors: a Load more that cannot load
+          // anything is worse than no button at all.
+          paged.current = null; next = local;
+        } else {
+          const first = withLocalSubmissions(await loadFirstPage(chains, pageFetcher(addresses)), local);
+          paged.current = first; next = asLiveHistory(first);
+        }
+        if (!alive.current) return;
+        setHistory(next);
       }
     }
     catch (failure) { if (alive.current) setHistoryError(failure instanceof Error ? failure.message : 'Activity unavailable.'); }
     finally { fetchingHistory.current = false; if (alive.current) setHistoryLoading(false); }
-  }, []);
+  }, [pageFetcher]);
+  /**
+   * Read the next page of every chain that still has one, and append.
+   *
+   * Appending rather than replacing is the whole point: the reader keeps what they were
+   * looking at and gets more below it. A chain that fails keeps its cursor, so pressing again
+   * retries it instead of writing off the rest of its history — see `history-pager.ts`.
+   */
+  const loadMoreHistory = useCallback(async () => {
+    const base = paged.current;
+    if (!base || !hasMore(base) || loadingMore.current || !allowed.current || offlineNow.current) return;
+    const addresses = JSON.parse(wantedAddresses.current || '{}') as Partial<Record<Chain, string>>;
+    loadingMore.current = true; setHistoryLoadingMore(true); setHistoryError('');
+    try {
+      const next = await loadNextPage(base, pageFetcher(addresses));
+      if (!alive.current) return;
+      paged.current = next; setHistory(asLiveHistory(next));
+    }
+    catch (failure) { if (alive.current) setHistoryError(failure instanceof Error ? failure.message : 'Older activity could not be loaded.'); }
+    finally { loadingMore.current = false; if (alive.current) setHistoryLoadingMore(false); }
+  }, [pageFetcher]);
   /**
    * Re-fetch history the moment the wallet's addresses first appear, or change.
    *
@@ -127,6 +177,9 @@ export function WalletProvider({ children }: React.PropsWithChildren) {
     custody,
     blocked: custody && moneySource(custody) === 'blocked' ? custodyNotice(custody) : null,
     snapshot, history, loading, historyLoading, error, historyError, stale: saved || offline || !!snapshot?.balances.some(item => item.error), offline, quote, refresh, refreshHistory, clearQuote,
+    // Derived, not stored. `asLiveHistory` already stamps hasMore onto the list it hands
+    // over, and a second copy in state is a second thing that can disagree with it.
+    historyHasMore: history?.hasMore === true, historyLoadingMore, loadMoreHistory,
     async prepare(input) {
       if (!allowed.current) throw new Error('This build cannot open the wallet stored on this phone. Nothing can be sent until it can.');
       if (!client || offlineNow.current) throw new Error('Reconnect to the local wallet API for a fresh review.');

@@ -412,36 +412,6 @@ export async function fetchProxyHistory(
 }
 
 /**
- * Combine indexed history with this device's own submissions.
- *
- * The backend cannot see a transaction a phone submitted but never got a receipt for, so a
- * just-sent transfer would vanish from Activity if the indexed list simply replaced the local
- * one. Indexed records win on a duplicate, because the indexer is authoritative about whether
- * something confirmed; a local record only ever knows what this device last checked.
- *
- * `local.errors` is dropped: those describe the loopback server's own indexer attempt, which
- * is no longer what Activity is built from, so repeating them would say something untrue.
- */
-export function mergeHistory(remote: LiveHistory, local: LiveHistory): LiveHistory {
-  const seen = new Set(remote.items.map(item => `${item.chain}:${item.hash.toLowerCase()}`));
-  const items = [...remote.items];
-  for (const item of local.items) {
-    const id = `${item.chain}:${item.hash.toLowerCase()}`;
-    if (seen.has(id)) continue;
-    seen.add(id);
-    items.push(item);
-  }
-  return {
-    version: 1,
-    fetchedAt: remote.fetchedAt,
-    source: `${remote.source} and this device's submissions`,
-    // parseHistory refuses more than 50, so the cap is a contract and not a preference.
-    items: items.sort((a, b) => (b.submittedAt ?? 0) - (a.submittedAt ?? 0)).slice(0, 50),
-    errors: remote.errors,
-  };
-}
-
-/**
  * Address the wallet API by the same hostname the page was opened with.
  *
  * The session cookie is `SameSite=Strict`, which is right for a server holding a seed. But
@@ -490,20 +460,16 @@ export function createWalletClient(rawEndpoint: string, transport: typeof fetch 
   return {
     async wallet() { await connect(); return parseWallet(await request('/api/wallet')); },
     /**
-     * Activity. With a backend configured and addresses known, the backend is the source of
-     * indexed history and the loopback server contributes only this device's submissions.
-     * A backend failure is not fatal: the local list is returned with the reason appended.
+     * This device's own submissions, and nothing else.
+     *
+     * The loopback server is Activity's source only when no backend is configured. Otherwise
+     * it contributes the transfers this phone sent that no indexer has seen yet, and
+     * `history-pager.ts` folds them into the indexed list — which it reads one chain and one
+     * page at a time, so there is no single call here that could return the whole thing.
      */
-    async history(addresses?: Partial<Record<Chain, string>>) {
+    async localHistory() {
       await connect();
-      const local = parseHistory(await request('/api/wallet/history'));
-      if (!backendOrigin() || !addresses || !Object.keys(addresses).length) return local;
-      try {
-        return mergeHistory(await fetchProxyHistory(addresses, transport), local);
-      } catch (failure) {
-        const reason = failure instanceof Error ? failure.message : 'Activity could not be read from the Wally backend.';
-        return { ...local, errors: [...local.errors, reason] };
-      }
+      return parseHistory(await request('/api/wallet/history'));
     },
     async quote(input: { chain: Chain; recipient: string; amount: string; token?: string }) {
       await connect();

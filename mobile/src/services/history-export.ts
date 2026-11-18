@@ -1,4 +1,5 @@
 import type { Chain, LiveHistory, LiveTransaction } from './wallet-api.ts';
+import { newestFirst } from './history-pager.ts';
 
 /**
  * Turn Activity into a file a person can keep.
@@ -156,10 +157,7 @@ export function rowValues(row: ExportRow): string[] {
  * diffing two downloads.
  */
 export function sortForExport(items: readonly LiveTransaction[]): LiveTransaction[] {
-  return [...items].sort((a, b) =>
-    (b.submittedAt ?? 0) - (a.submittedAt ?? 0) ||
-    a.chain.localeCompare(b.chain) ||
-    a.hash.localeCompare(b.hash));
+  return [...items].sort(newestFirst);
 }
 
 export function historyCsv(items: readonly LiveTransaction[], owned: Partial<Record<Chain, string>>): string {
