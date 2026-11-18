@@ -26,14 +26,18 @@ function fixture(width: number) {
     react: { useState: (initial: Value) => { const index = cursor++; if (!(index in hooks)) hooks[index] = initial; return [hooks[index], (next: Value) => { hooks[index] = typeof next === 'function' ? next(hooks[index]) : next; }]; } },
     'react-native': { Pressable: 'Pressable', View: 'View', useWindowDimensions: () => ({ width }), StyleSheet: { create: (value: Value) => value } },
     'expo-router': { router }, 'expo-image': { Image: 'Image' },
-    './WallyAsset': { WallyAsset: 'WallyAsset', Avatar: 'Avatar' },
-    './ui': { Label: 'Label', Button: 'Button', Card: 'Card', Detail: 'Detail', shared: {} },
+    './WallyAsset': { WallyAsset: 'WallyAsset', Avatar: 'Avatar', Lockup: 'Lockup' },
+    './ui': { Label: 'Label', Button: 'Button', Card: 'Card', Detail: 'Detail', useShared: () => ({}) },
     '../demo/store': { useDemo: () => ({ state }) },
     '../data/wallet': { useWallet: () => ({ enabled: false }) },
     '../demo/preferences': {}, 'react-native-safe-area-context': {},
+    './shell': { useShell: () => ({ wide: false, topLevel: false }) },
+    '../data/market': { useMarket: () => ({ data: { assets: [{ symbol: 'USDT', price: 1, currency: 'USD' }] }, currency: 'USD' }) },
+    '../services/fiat-value': { fiatValue: (amount: string, symbol: string, assets: Value[], currency: string) => ({ amount: Number(amount) * assets[0].price, currency }) },
+    '../services/market-api': { formatPrice: (amount: number, currency: string) => `${currency} ${amount}` },
     'react-native-reanimated': { __esModule: true, default: { View: 'Animated.View' }, FadeIn: { duration: () => ({}) } },
     '../demo/model': { money: (amount: number) => String(amount) },
-    '../theme': { colors: {}, fonts: {}, radius: {} },
+    '../theme': { useColors: () => ({}), useTheme: () => ({ palette: {}, dark: false }), makeStyles: (factory: (c: Value) => Value) => () => factory({}), fonts: {}, radius: {} },
     './WalletData': { LiveWalletOverview: 'LiveWalletOverview' },
   };
   function load(relative: string): Value {
@@ -95,4 +99,10 @@ test('shared Back handles a directly opened notification route with no prior scr
   f.stack[0] = '/notifications';
   find(f.load('../src/components/ui.tsx').Header({ title: 'Notifications' }), 'Go back').props.onPress();
   assert.deepEqual(f.stack, ['/wallet']);
+});
+
+test('the demo card says what the fictional balance is worth in the chosen currency', () => {
+  const f = fixture(767);
+  // 2,090,000,000 base units is 2,090 USDt, priced at 1 USD each by the market mock above.
+  assert.ok(find(f.render(), 'About USD 2090'), 'the fiat line carries an accessible label');
 });

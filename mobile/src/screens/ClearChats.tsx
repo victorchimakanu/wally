@@ -1,10 +1,8 @@
 import React, { useState } from 'react';
-import { View } from 'react-native';
 import { router } from 'expo-router';
-import { Button, Card, Label, Note, Pill, Screen } from '../components/ui';
+import { Button, Card, Group, Label, Note, Row, Screen } from '../components/ui';
 import { entryFor } from '../services/app-data';
 import { useDemo } from '../demo/store';
-import { colors as c } from '../theme';
 
 /**
  * Delete every message, without touching the wallet.
@@ -43,40 +41,30 @@ export function ClearChatsScreen() {
     }
   }
 
-  if (done) return <Screen title="Chats cleared" subtitle="Your wallet is untouched">
-    <Card>
-      <Pill tone="success">NOTHING LEFT TO READ</Pill>
-      <Note>Every message is off this phone, and the chat list is empty. Your wallet, your recovery phrase and your saved recipients are exactly as they were.</Note>
-    </Card>
-    <Note>Wally never sent your chats anywhere, so there is no copy elsewhere to delete.</Note>
+  if (done) return <Screen title="Chats cleared">
+    <Note>Your wallet, recovery phrase and saved recipients are unchanged.</Note>
     <Button label="Done" onPress={() => router.back()} />
   </Screen>;
 
-  return <Screen title="Clear chat history" subtitle="Your wallet is not affected">
-    <Card>
-      <Label size={12} weight="semibold" color={c.orange}>WHAT THIS DELETES</Label>
-      <Label size={14}>· {entryFor('chats').label}</Label>
-      <Label size={14}>· Your simulated transfers in Activity</Label>
-      <Note>{messages === 1 ? 'One message on this phone.' : `${messages.toLocaleString('en-US')} messages on this phone.`} The simulated transfers go too — they are saved in the same place, and there is no deleting half a file.</Note>
-    </Card>
-
-    <Card>
-      <Label size={16} weight="medium">What stays</Label>
-      <View style={{ gap: 2 }}>
-        <Label size={14}>· Your wallet and recovery phrase</Label>
-        <Label size={14}>· Your saved recipients</Label>
-        <Label size={14}>· Your real transfers, which are on the blockchain and cannot be deleted by anyone — not by us, not by you</Label>
-      </View>
-      <Note>Clearing a chat does not undo anything it did. A transfer that went through has gone through.</Note>
-    </Card>
+  // What goes and what stays, as two lists: the screen answers "will this touch my money?"
+  // before anyone has to ask it.
+  return <Screen title="Clear chats">
+    <Group title="Deletes">
+      <Row title={entryFor('chats').label} value={messages === 1 ? '1 message' : `${messages.toLocaleString('en-US')} messages`} />
+      <Row title="Simulated transfers in Activity" />
+    </Group>
+    <Group title="Keeps">
+      <Row title="Wallet and recovery phrase" />
+      <Row title="Saved recipients" />
+      <Row title="Real transfers on the blockchain" />
+    </Group>
 
     {!!failed && <Card>
       <Label weight="semibold">The chats were not cleared</Label>
       <Note error>{failed}</Note>
-      <Note>They are still on this phone. Nothing else was changed.</Note>
     </Card>}
 
     <Button label={busy ? 'Clearing…' : 'Clear every message'} onPress={() => { void clear(); }} disabled={busy} />
-    <Button secondary label="Keep my chats" onPress={() => router.back()} />
+    <Button secondary label="Cancel" onPress={() => router.back()} />
   </Screen>;
 }

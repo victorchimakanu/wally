@@ -1,9 +1,9 @@
 import React, { useMemo, useState } from 'react';
 import { Pressable, TextInput, View } from 'react-native';
-import { Button, Card, Label, Note, Screen, shared } from '../components/ui';
+import { Button, Card, Label, Note, Screen, useShared } from '../components/ui';
 import { WallyAsset } from '../components/WallyAsset';
 import { allNotices, licenceSummary, noticeText, searchNotices, type Notice } from '../services/notices';
-import { colors as c, fonts } from '../theme';
+import { fonts, useColors } from '../theme';
 
 /**
  * The open source licences the app is obliged to show.
@@ -27,6 +27,8 @@ import { colors as c, fonts } from '../theme';
 const PAGE = 25;
 
 function NoticeRow({ notice, open, onToggle }: { notice: Notice; open: boolean; onToggle: () => void }) {
+  const c = useColors();
+  const shared = useShared();
   const text = open ? noticeText(notice) : null;
   return <Card>
     <Pressable accessibilityRole="button" accessibilityState={{ expanded: open }} onPress={onToggle} style={shared.row}>
@@ -49,6 +51,8 @@ function NoticeRow({ notice, open, onToggle }: { notice: Notice; open: boolean; 
 }
 
 export function LicencesScreen() {
+  const c = useColors();
+  const shared = useShared();
   const [search, setSearch] = useState('');
   const [shown, setShown] = useState(PAGE);
   const [open, setOpen] = useState<string | null>(null);
@@ -66,10 +70,9 @@ export function LicencesScreen() {
     setOpen(null);
   }
 
-  return <Screen title="Open source licences" subtitle={`${total} packages`}>
+  return <Screen title="Licences">
     <Card>
       <Label size={16}>Wally is built on {total} open source packages.</Label>
-      <Note>Their licences require that we carry this notice. Nothing here is about you or your wallet — it is a list of the software the app is made of.</Note>
       <Label size={11} color={c.muted}>{summary.slice(0, 5).map(s => `${s.license} ${s.count}`).join(' · ')}</Label>
     </Card>
 

@@ -6,12 +6,11 @@ import type { Currency, MarketAsset } from './market-api.ts';
  * "0.042 ETH" means nothing to most people. "₦180,000" means something, and for a product whose
  * one-line pitch is *keep your money in dollars, spend it in Naira*, that gap is the product.
  *
- * **It is built and not shown yet, deliberately.** Every balance in this app is testnet, and
- * testnet tokens are worth nothing — the app says so on every screen. Putting a naira figure
- * beside one would contradict the only honest thing it currently says about value, so
- * `fiatDisplayable()` gates it on the chain being a mainnet, and today that is false
- * everywhere. The arithmetic and its rounding are settled now so that turning it on later is a
- * flag rather than a feature.
+ * **On a testnet the figure is marked, not hidden.** Every balance in this app is testnet
+ * today, and testnet tokens are worth nothing — the app says so on every screen. The wallet
+ * card still shows what they would be worth, because that is the product, but
+ * `fiatDisplayable()` tells it whether the wallet is on a mainnet; until it is, the figure
+ * reads "at mainnet prices" so it cannot be mistaken for money.
  *
  * Nothing here invents a price. An asset with no price returns null and the screen shows
  * nothing, exactly as a missing balance shows "Unavailable" rather than zero.
@@ -25,10 +24,10 @@ export type FiatValue = {
 };
 
 /**
- * Whether a fiat figure may be shown at all.
+ * Whether a fiat figure may be shown as money, without the "at mainnet prices" mark.
  *
- * The whole gate, in one place. `testnet` is what the wallet reports about itself, so this
- * cannot be switched on by accident in a build that is still on Sepolia.
+ * The whole gate, in one place. `testnet` is what the wallet reports about itself, so the mark
+ * cannot be dropped by accident in a build that is still on Sepolia.
  */
 export function fiatDisplayable(input: { network: string | undefined }): boolean {
   return input.network === 'mainnet';
