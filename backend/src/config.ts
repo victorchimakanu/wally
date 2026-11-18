@@ -173,8 +173,36 @@ const Schema = z.object({
    */
   minimumAppVersion: z.string().default(""),
 
-  /** Requests per minute per client IP, across all routes. */
+  /**
+   * Requests per minute for one installation, across all routes.
+   *
+   * This is the budget a single user gets. A caller that sends no installation id is budgeted
+   * per address at this same rate, which is what every caller got before ids existed.
+   */
   rateLimitPerMinute: z.coerce.number().int().positive().default(120),
+
+  /**
+   * Requests per minute from one network address, whatever ids it presents.
+   *
+   * The ceiling, not the policy — see `ratelimit.ts`. It has to fit a carrier-grade NAT pool,
+   * because on Nigerian mobile networks one address is many subscribers, and a budget divided
+   * among strangers is how real users get 429s for doing nothing. At roughly twenty requests a
+   * minute for an active app, 3000 holds on the order of a hundred and fifty of them.
+   *
+   * It bounds a single machine rather than a single person, which is all an address can honestly
+   * be used for.
+   */
+  rateLimitPerAddress: z.coerce.number().int().positive().default(3000),
+
+  /**
+   * Requests per minute for one installation against the paymaster.
+   *
+   * The paymaster is the only route that spends money, and raising the address ceiling above
+   * widens what one address can ask the sponsorship budget to pay for. So it is limited on its
+   * own and far more tightly: nobody legitimately needs many sponsored operations a minute, and
+   * without this the change that fixed the error rate would have made the money exposure worse.
+   */
+  rateLimitPaymasterPerMinute: z.coerce.number().int().positive().default(10),
 
   /**
    * Which proxy may set `X-Forwarded-For`.
@@ -244,6 +272,8 @@ function build() {
     sendingDisabledReason: process.env["SENDING_DISABLED_REASON"],
     minimumAppVersion: process.env["MINIMUM_APP_VERSION"],
     rateLimitPerMinute: process.env["RATE_LIMIT_PER_MINUTE"],
+    rateLimitPerAddress: process.env["RATE_LIMIT_PER_ADDRESS"],
+    rateLimitPaymasterPerMinute: process.env["RATE_LIMIT_PAYMASTER_PER_MINUTE"],
     trustedProxy: process.env["TRUSTED_PROXY"],
     allowedOrigins: process.env["ALLOWED_ORIGINS"],
     upstreamTimeoutMs: process.env["UPSTREAM_TIMEOUT_MS"],

@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import { timingSafeEqual } from "node:crypto";
 import { config, onLoopback, trustProxySetting } from "./config.js";
 import { getLogger, scrubSecrets } from "./logger.js";
+import { callerOf, createRateLimiter } from "./ratelimit.js";
 import { healthRoutes } from "./routes/health.js";
 import { marketRoutes } from "./routes/market.js";
 import { rpcRoutes } from "./routes/rpc.js";
@@ -42,23 +43,6 @@ function keyMatches(given: string, expected: string): boolean {
   return timingSafeEqual(a, b);
 }
 
-/** Fixed-window limiter per client IP. In-memory is adequate for a single VPS process. */
-function createRateLimiter(perMinute: number) {
-  const windows = new Map<string, { count: number; resetAt: number }>();
-  return function allow(key: string): boolean {
-    const now = Date.now();
-    // Opportunistic sweep; this map only grows with distinct active clients.
-    if (windows.size > 10_000) for (const [id, w] of windows) if (w.resetAt <= now) windows.delete(id);
-    const window = windows.get(key);
-    if (!window || window.resetAt <= now) {
-      windows.set(key, { count: 1, resetAt: now + 60_000 });
-      return true;
-    }
-    window.count++;
-    return window.count <= perMinute;
-  };
-}
-
 export function buildServer() {
   const app = Fastify({
     logger: false,
@@ -69,7 +53,10 @@ export function buildServer() {
     trustProxy: trustProxySetting(),
   });
 
-  const allow = createRateLimiter(config.rateLimitPerMinute);
+  // Two limits, and a request has to pass both. One separates honest callers from each other;
+  // the other bounds a machine that will not identify itself honestly. See `ratelimit.ts`.
+  const allowCaller = createRateLimiter(config.rateLimitPerMinute);
+  const allowAddress = createRateLimiter(config.rateLimitPerAddress);
 
   app.addHook("onRequest", async (request: FastifyRequest, reply: FastifyReply) => {
     // Native apps send no Origin. Browsers do, and only configured origins are answered.
@@ -103,7 +90,13 @@ export function buildServer() {
     if (shallowHealth) return;
 
     // Rate limit before the key check, so a brute-force attempt is bounded too.
-    if (!allow(request.ip)) {
+    //
+    // The address ceiling is checked first and applies to everyone: it is the only limit an
+    // attacker cannot widen by inventing identifiers. Then the caller's own budget, which is
+    // their installation id when they sent one and their address when they did not — the
+    // latter being exactly the policy that existed before ids.
+    const caller = callerOf(request);
+    if (!allowAddress(request.ip) || !allowCaller(caller.key)) {
       return reply.code(429).send({ error: "Too many requests. Try again shortly." });
     }
 
