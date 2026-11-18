@@ -8,8 +8,10 @@ import { AssetChoice, LiveActivityCard, LiveReceiveCard, NetworkChoice, WalletSt
 import { useWallet } from '../data/wallet';
 import { useDemo } from '../demo/store';
 import { CHAINS, fetchGasPrice, formatUnits, isAddress, parseSendAmount, sendableMax, type Chain, type LiveTransaction } from '../services/wallet-api';
+import { availableBase, committedBase } from '../services/committed-balance.ts';
 import { monotonicNow, quoteExpired, secondsLeft } from '../services/quote-clock';
 import { addressTrust, trustWarning } from '../services/address-safety.ts';
+import { chainOfNetwork, crossChainWarning, type ChainUse } from '../services/chain-safety.ts';
 import { readWatch, watchStatus, watchTransfer } from '../services/transfer-watch.ts';
 import { usePreferences } from '../demo/preferences';
 import { useColors } from '../theme';
@@ -57,6 +59,49 @@ export function LiveSendScreen() {
   ));
 
   /**
+   * Warn when the address is right and the network is not.
+   *
+   * Every EVM address is valid on every EVM chain, so nothing downstream will refuse this —
+   * the transfer confirms and the money sits where nobody can reach it. Wally's own Arbitrum
+   * account is an ERC-4337 smart account from the factory, so it need not equal the Ethereum
+   * EOA; a contract exists only where it was deployed.
+   *
+   * History is trusted here, unlike in the lookalike check above, and the difference matters.
+   * There a poisoned entry in history is the attack. Here the question is only which chains
+   * an address has been seen on, and an attacker who adds one makes this warn more, never
+   * less. The wider source is the safer one.
+   */
+  const chainUses: ChainUse[] = [
+    ...preferences.recipients.flatMap(item => {
+      const saved = chainOfNetwork(item.network);
+      return saved ? [{ address: item.address, chain: saved }] : [];
+    }),
+    ...(wallet.history?.items ?? []).flatMap(item =>
+      item.recipient ? [{ address: item.recipient, chain: item.chain }] : []),
+  ];
+  const wrongChain = crossChainWarning({ address: recipient.trim(), chain, uses: chainUses });
+
+  /**
+   * What is actually spendable, which is not what the node reports.
+   *
+   * `eth_getBalance` answers for the latest block, so a transfer already broadcast and not yet
+   * mined is not deducted from it. The line below this used to print that raw figure under the
+   * word "Available", which is untrue for as long as anything is in flight — and someone who
+   * sends twice in quick succession types an amount against money they have already spent.
+   */
+  const committed = committedBase({
+    chain,
+    symbol: sending,
+    decimals,
+    owned: (wallet.snapshot?.balances ?? []).map(item => item.address),
+    history: wallet.history?.items ?? [],
+  });
+  const available = availableBase(balance?.balanceWei === undefined || balance?.balanceWei === null ? null : BigInt(balance.balanceWei), committed);
+  const availableText = available.base === null
+    ? balance?.balance ?? 'Unavailable'
+    : formatUnits(available.base, decimals);
+
+  /**
    * Fill the amount with everything that can actually be sent.
    *
    * For a token that is the whole balance — the fee comes out of ETH. For the coin the fee
@@ -69,7 +114,10 @@ export function LiveSendScreen() {
     setMaxBusy(true); setError('');
     try {
       const gasPriceWei = token ? undefined : (await fetchGasPrice(chain)) ?? undefined;
-      const most = sendableMax({ balanceBase: BigInt(balance.balanceWei), native: !token, ...(gasPriceWei === undefined ? {} : { gasPriceWei }) });
+      // Against what is spendable, not what the node reports: offering a maximum that
+      // includes a transfer already in flight produces a quote the chain will refuse.
+      const spendable = available.base ?? BigInt(balance.balanceWei);
+      const most = sendableMax({ balanceBase: spendable, native: !token, ...(gasPriceWei === undefined ? {} : { gasPriceWei }) });
       if (most <= 0n) {
         throw new Error(token
           ? `There is no ${sending} here to send.`
@@ -109,11 +157,15 @@ export function LiveSendScreen() {
       <View style={[shared.row, { gap: 20 }]}><Label size={13} weight="medium" color={c.muted} style={shared.flex}>To</Label><LinkButton label="Saved" accessibilityLabel="Choose saved recipient" disabled={busy} onPress={() => router.push('/address-book')} /><LinkButton label="Scan" accessibilityLabel="Scan a QR code" disabled={busy} onPress={() => router.push('/scan')} /></View>
       <TextInput accessibilityLabel="Recipient address" value={recipient} editable={!busy} autoCapitalize="none" autoCorrect={false} placeholder="0x…" placeholderTextColor={c.muted} onChangeText={value => { wallet.clearQuote(); setRecipient(value); }} style={shared.input} />
       {!!lookalike && <Card style={{ backgroundColor: c.warningTint, borderColor: c.warningTint }}><Label weight="semibold">Check this address carefully</Label><Note>{lookalike}</Note></Card>}
+      {!!wrongChain && <Card style={{ backgroundColor: c.warningTint, borderColor: c.warningTint }}><Label weight="semibold">Not used on this network</Label><Note>{wrongChain}</Note></Card>}
     </View>
     <View style={{ gap: 8 }}>
       <View style={shared.row}><Label size={13} weight="medium" color={c.muted} style={shared.flex}>Amount</Label><LinkButton label={maxBusy ? 'Working…' : 'Max'} accessibilityLabel="Send max" disabled={busy || maxBusy || !balance?.balanceWei || balance.balanceWei === '0'} onPress={() => { void fillMax(); }} /></View>
       <TextInput accessibilityLabel={`Amount in ${sending}`} value={amount} editable={!busy} keyboardType="decimal-pad" placeholder={token ? '25' : '0.001'} placeholderTextColor={c.muted} onChangeText={value => { wallet.clearQuote(); setAmount(value); }} style={shared.input} />
-      <Label size={13} color={c.muted}>{balance?.balance ?? '—'} {sending} available{token ? ' · fee paid in ETH' : ''}</Label>
+      <Label size={13} color={c.muted}>{availableText} {sending} available{token ? ' · fee paid in ETH' : ''}</Label>
+      {available.pending && <Note>{available.base === null
+        ? `A ${sending} transfer is still confirming, so this figure still includes it.`
+        : `${formatUnits(available.committed, decimals)} ${sending} is held for a transfer still confirming. Your balance is ${balance?.balance ?? '—'}.`}</Note>}
     </View>
     {params.scannedAmountIgnored === '1' && <Note>The scanned code had an amount. Wally leaves it out: type the amount you mean.</Note>}
     {balance?.balance === '0' && <Card style={{ backgroundColor: c.warningTint, borderColor: c.warningTint }}><Label weight="semibold">No {sending} on {CHAINS[chain].name} yet</Label><Button secondary label="Receive" onPress={() => router.push('/receive')} /></Card>}
