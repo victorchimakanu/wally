@@ -248,6 +248,39 @@ export function formatUnits(value: bigint, decimals: number, show = 6): string {
 export function formatEth(value: bigint, decimals = 6): string {
   return formatUnits(value, 18, decimals);
 }
+
+/**
+ * The same number, written so the amount field reads it back as itself.
+ *
+ * `formatUnits` above is for **display**, and groups thousands through
+ * `toLocaleString('en-US')`. `normaliseAmount` reads a lone comma as a **decimal point**, on
+ * purpose — see its comment; the reasoning is about which direction an ambiguous `1,250` should
+ * fail in, and it is right. But the two together meant the app wrote a comma meaning one thing
+ * into a field that read it as the other, and the Max button was the bridge:
+ *
+ * ```
+ * balance 1,000     Max fills "1,000"      parses as 1 USDT        — 1000x too small, silently
+ * balance 2,500     Max fills "2,500"      parses as 2.5 USDT      — 1000x too small, silently
+ * balance 9,999     Max fills "9,999"      parses as 9.999 USDT    — 1000x too small, silently
+ * balance 1,234.56  Max fills "1,234.56"   refused outright        — the button does nothing
+ * ```
+ *
+ * Every balance from 1,000 up — which is the whole band between there and the 9,999 ceiling
+ * `parseSendAmount` enforces — came out either refused or wrong by a thousand. On the one
+ * control whose entire promise is being exact.
+ *
+ * So: no grouping, and no truncation either, because a Max that rounds down is not a maximum.
+ * `test/amount.test.ts` asserts the round trip rather than the spelling, so this cannot
+ * drift back by someone reusing the display formatter here.
+ */
+export function amountForInput(value: bigint, decimals: number): string {
+  const scale = 10n ** BigInt(decimals);
+  const whole = (value / scale).toString();
+  const part = decimals === 0
+    ? ''
+    : (value % scale).toString().padStart(decimals, '0').replace(/0+$/, '');
+  return part ? `${whole}.${part}` : whole;
+}
 function object(value: unknown): Record<string, unknown> { if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid wallet API response.'); return value as Record<string, unknown>; }
 function chain(value: unknown): Chain { if (value !== 'arbitrum' && value !== 'ethereum') throw new Error('Unexpected wallet network.'); return value; }
 function time(value: unknown): value is number { return typeof value === 'number' && Number.isSafeInteger(value) && value > 0; }

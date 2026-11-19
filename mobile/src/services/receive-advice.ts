@@ -1,4 +1,5 @@
 import type { Chain } from './wallet-api.ts';
+import { chainAssetPhrase } from './asset-copy.ts';
 
 /**
  * What to tell someone standing on the Receive screen, derived from the addresses they have.
@@ -16,6 +17,18 @@ import type { Chain } from './wallet-api.ts';
  * So the advice is read from the addresses themselves. Equal addresses say they are equal;
  * different ones say so and name the risk. A sentence derived from the data cannot outlive the
  * fact it describes.
+ *
+ * ## The half that was still written by hand
+ *
+ * All three branches below said **"Send only testnet ETH"**, as a literal, while the Wallet
+ * screen showed a USDT balance for the very same address and USDt sending had been live since
+ * 8 November. The chain half of this sentence was derived and correct; the asset half was a
+ * string and was already wrong — the exact failure this file's own comment argues against, one
+ * clause away from where it was argued.
+ *
+ * It does not lose funds: USDt sent here arrives and is displayed. It tells the person this
+ * address cannot take the asset the product is built around. The asset names now come from
+ * `assetNamesOn()`, the same list the Send screen's picker reads.
  */
 
 export type ReceiveAdvice = {
@@ -35,16 +48,19 @@ export function receiveAdvice(
   const others = (Object.keys(addresses) as Chain[])
     .filter(key => key !== chain && !!addresses[key]);
 
+  // "testnet ETH" or "testnet ETH and testnet USDt", from the same list the Send picker reads.
+  const assets = chainAssetPhrase(chain);
+
   // Nothing to compare against: say the one thing that is certainly true.
   if (!mine || others.length === 0) {
-    return { text: `Send only testnet ETH on ${chainName}.`, chainSpecific: false };
+    return { text: `Send only ${assets} on ${chainName}.`, chainSpecific: false };
   }
 
   const differing = others.filter(key => addresses[key]!.toLowerCase() !== mine.toLowerCase());
 
   if (differing.length === 0) {
     return {
-      text: `Send only testnet ETH on ${chainName}. This same address also works on ${others.map(nameOf).join(' and ')}.`,
+      text: `Send only ${assets} on ${chainName}. This same address also works on ${others.map(nameOf).join(' and ')}.`,
       chainSpecific: false,
     };
   }
@@ -52,7 +68,7 @@ export function receiveAdvice(
   // The case that will become normal. Named plainly, because the failure is unrecoverable:
   // funds sent to an address on a chain that does not hold it are not coming back.
   return {
-    text: `Send only testnet ETH on ${chainName}, and only to this address. Your ${differing.map(nameOf).join(' and ')} address is different — funds sent to the wrong one cannot be recovered.`,
+    text: `Send only ${assets} on ${chainName}, and only to this address. Your ${differing.map(nameOf).join(' and ')} address is different — funds sent to the wrong one cannot be recovered.`,
     chainSpecific: true,
   };
 }

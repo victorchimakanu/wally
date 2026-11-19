@@ -30,6 +30,44 @@ export const SAVEABLE = ['BTC', 'ETH', 'SOL', 'USDT'] as const;
 const NETWORKS = ['Arbitrum', 'Ethereum'] as const;
 const ADDRESS = /^0x[\da-fA-F]{40}$/;
 
+/**
+ * The three worked examples the demo wallet ships with.
+ *
+ * Their addresses are `0x1111…`, `0x6666…` and `0x4444…`: valid, non-zero, and nobody holds a
+ * key for any of them. Anything sent to one is gone — not refused, not reversible.
+ *
+ * That was fine while they existed only in the demo. They did not: `PreferencesProvider` is
+ * mounted for the whole app, so on 19 Nov 2026 they were sitting in the address book of a
+ * **live** wallet, two taps from a prefilled transfer — Wallet → Send → Saved → Victor → Send,
+ * recipient already filled, nothing marking the entry as a sample. The name is a real
+ * teammate's, and `addressTrust()` cannot help: an address in the address book is `known`,
+ * which is the one verdict that suppresses the warning. The samples are trusted *because* they
+ * are saved.
+ *
+ * Nothing was lost, because the dev wallet was empty. An empty balance is not a safeguard.
+ */
+export const SAMPLE_RECIPIENTS: readonly Recipient[] = [
+  { id: 'victor', name: 'Victor', address: '0x' + '1'.repeat(40), network: 'Arbitrum' },
+  { id: 'emmy', name: 'Emmy', address: '0x' + '6'.repeat(40), network: 'Ethereum' },
+  { id: 'daniel', name: 'Daniel', address: '0x' + '4'.repeat(40), network: 'Arbitrum' },
+];
+
+/**
+ * Drop the samples, for a wallet that can really spend.
+ *
+ * Matched on **id and address together**. Either alone would be wrong: a user is entitled to
+ * save a real contact called Victor, and a user who edits a sample's address has made it their
+ * own entry. Only an untouched sample goes.
+ *
+ * This runs on what was loaded from disk as well as on the defaults, because a device that ran
+ * the demo first has the samples persisted and would otherwise carry them into live mode.
+ */
+export function withoutSampleRecipients(recipients: readonly Recipient[]): Recipient[] {
+  return recipients.filter(entry => !SAMPLE_RECIPIENTS.some(
+    sample => sample.id === entry.id && sample.address.toLowerCase() === entry.address.toLowerCase(),
+  ));
+}
+
 export type LoadResult = {
   preferences: Preferences;
   /** What could not be read, in words, for the screen. Empty when everything loaded. */

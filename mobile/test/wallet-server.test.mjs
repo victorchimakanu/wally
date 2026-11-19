@@ -79,6 +79,16 @@ test('WDK signs only the reviewed transaction; uncertain broadcast survives rest
   try {
     service = await createWalletService(directory, { transport });
     await assert.rejects(service.quote('alice', { chain: 'constructor', recipient: '0x1111111111111111111111111111111111111111', amount: '0.001' }), /Choose a test network/);
+    // Through the real call site and real ethers: the shape check passes this (40 hex
+    // characters, and `validAddress` is case insensitive because it is also applied to
+    // addresses read back off the chain), so the EIP-55 checksum is the only thing left to
+    // catch it. Called bare, getAddress threw `bad address checksum` — no SAFE_MESSAGE prefix,
+    // so the server answered 503 "Check the connection and retry" for a typo. Put the guard
+    // back the way it was and this assertion fails on the message.
+    await assert.rejects(
+      service.quote('alice', { chain: 'arbitrum', recipient: '0x8Ba1f109551bD432803012645Ac136ddd64DBA72', amount: '0.001' }),
+      /EIP-55 checksum/,
+    );
     const q = await service.quote('alice', { chain: 'arbitrum', recipient: '0x1111111111111111111111111111111111111111', amount: '0.001' });
     await assert.rejects(service.confirm('bob', { quoteId: q.id, approved: true }), /another session/);
     const tx = await service.confirm('alice', { quoteId: q.id, approved: true }); assert.equal(tx.status, 'unknown'); assert.equal(tx.owner, undefined); assert.equal(broadcasts, 1);
@@ -430,4 +440,56 @@ test('no user-facing refusal is silently replaced with a connection error', asyn
   for (const message of deliberate) {
     assert.ok(thrown.includes(message), `"${message}" is listed as deliberate but is no longer thrown; remove it.`);
   }
+});
+
+/**
+ * The hole the test above cannot see.
+ *
+ * It reads `throw new Error('literal')` out of the source, so it covers every refusal **Wally
+ * writes** and none that Wally makes a library raise. `ethers.getAddress` was called bare on the
+ * recipient, and its `bad address checksum` throw matched no SAFE_MESSAGE prefix — so a single
+ * mistyped character came back as 503 "Check the connection and retry", advice about the network
+ * for a problem with the address, on a retry that could never succeed.
+ *
+ * The checksum is the only thing that catches a corrupted address before money moves. This
+ * fixes it where it is decided — the status and the sentence the user actually reads.
+ */
+test('a mistyped recipient is refused as a mistake, not reported as a broken connection', async () => {
+  const { checksummedRecipient, SAFE_MESSAGE } = await import('../scripts/wallet-api-core.mjs');
+  const good = '0x8ba1f109551bD432803012645Ac136ddd64DBA72';
+  // Stands in for ethers: accepts the checksummed address, throws its real message for anything
+  // else. Stubbed rather than imported because ethers lives in the isolated WDK runtime.
+  const ethers = { getAddress: value => { if (value === good) return good; throw new Error('bad address checksum (argument="address", code=INVALID_ARGUMENT)'); } };
+
+  assert.equal(checksummedRecipient(ethers, good), good, 'a correctly checksummed address passes through unchanged');
+  // Read from the function rather than repeated here, so changing the wording to something the
+  // server would swallow fails this test instead of silently reopening the hole.
+  let refusal = null;
+  try { checksummedRecipient(ethers, '0x8Ba1f109551bD432803012645Ac136ddd64DBA72'); } catch (error) { refusal = error; }
+  assert.ok(refusal, 'an address whose capitalisation fails the checksum must be refused');
+  assert.ok(SAFE_MESSAGE.test(refusal.message), `the refusal must survive the 503 filter, but "${refusal.message}" does not match SAFE_MESSAGE`);
+
+  // End to end through the real classifier: the old throw and the new one, side by side.
+  const port = 33700 + Math.floor(Math.random() * 1000), url = `http://127.0.0.1:${port}`;
+  let next = null;
+  const service = { quote: async () => { throw new Error(next); } };
+  const server = createWalletApi(service, { port });
+  await new Promise(resolve => server.listen(port, '127.0.0.1', resolve));
+  try {
+    const cookie = (await fetch(url + '/api/wallet/session')).headers.get('set-cookie').split(';')[0];
+    const ask = async message => {
+      next = message;
+      const res = await fetch(url + '/api/wallet/quote', { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: '{}' });
+      return { status: res.status, error: (await res.json()).error };
+    };
+
+    const bare = await ask('bad address checksum (argument="address", code=INVALID_ARGUMENT)');
+    assert.equal(bare.status, 503, 'calling getAddress bare is what produced the wrong answer');
+    assert.match(bare.error, /Check the connection/, 'and this is the sentence it produced');
+
+    const fixed = await ask(refusal.message);
+    assert.equal(fixed.status, 400, 'a mistyped address is the user\'s to fix, so it is a 400');
+    assert.doesNotMatch(fixed.error, /Check the connection/, 'and must not blame the connection');
+    assert.equal(fixed.error, refusal.message, 'the user reads the refusal itself, not a replacement');
+  } finally { server.close(); }
 });

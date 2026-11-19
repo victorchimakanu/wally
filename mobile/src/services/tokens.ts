@@ -91,6 +91,33 @@ export function allTokens(): readonly Token[] {
 }
 
 /**
+ * How Wally writes a symbol in a sentence. The contract calls itself `USDT`; the product
+ * writes `USDt`, and has done since the brand work.
+ */
+export function displaySymbol(symbol: string): string {
+  return symbol === 'USDT' ? 'USDt' : symbol;
+}
+
+/**
+ * Everything an address on this chain can hold, named the way a sentence needs it.
+ *
+ * Native coin first, then the pinned tokens: `['ETH', 'USDt']` on Arbitrum, `['ETH']` on
+ * Ethereum. The native coin is ETH on both chains here; a chain with a different native coin
+ * would need this to read it rather than assume, and there is no such chain yet.
+ *
+ * **This exists because the same sentence keeps being written by hand and keeps going stale.**
+ * Chat denied USDt for eleven days after it shipped (PR #57). A footnote on the Wallet screen
+ * said sending it "is not built yet" for the same eleven days (PR #58). The Receive screen said
+ * "Send only testnet ETH" and the QVAC system prompt told the model "USDt and Bitcoin are not
+ * configured", both still live on 19 Nov 2026 — three weeks and two more surfaces, each written
+ * separately and each wrong in the same direction. Deriving it is the only fix that holds:
+ * `test/asset-copy.test.ts` fails when a surface stops reading this.
+ */
+export function assetNamesOn(chain: Chain): readonly string[] {
+  return ['ETH', ...tokensFor(chain).map(token => displaySymbol(token.symbol))];
+}
+
+/**
  * What a tester has to be told about this token, or null when there is nothing to say.
  *
  * This is the only reader of `official`, and every screen that names a token calls it. The

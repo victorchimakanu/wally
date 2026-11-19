@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { wei, normaliseAmount, maxSendable } from '../src/services/wallet-api.ts';
+import { readFileSync } from 'node:fs';
+import { wei, normaliseAmount, maxSendable, amountForInput, parseSendAmount } from '../src/services/wallet-api.ts';
 
 /**
  * Amount parsing decides how much money moves, so every case here is written around the
@@ -148,4 +149,84 @@ test('a send amount is bounded where the user can see it, not a round trip later
   // A token's decimals are honoured here too, so this is reusable when USDt sending lands.
   assert.equal(parseSendAmount('10.5', 6, 'USDT'), 10_500_000n);
   assert.throws(() => parseSendAmount('10.5000001', 6, 'USDT'), /up to 6 decimals/);
+});
+/**
+ * The Max button has to write a number the amount field can read back.
+ *
+ * It did not. `fillMax` filled the field with `formatUnits(...)`, which groups thousands
+ * through `toLocaleString('en-US')`, into a field whose parser reads a lone comma as a decimal
+ * point. The comma rule is deliberate and right — see `normaliseAmount` — so the bug is not
+ * there; it is that the display formatter was used to produce machine input.
+ *
+ * The result, for every balance between 1,000 and the 9,999 ceiling:
+ *
+ *   1,000    -> filled "1,000"     -> parsed as 1 USDT        (1000x too small, silently)
+ *   2,500    -> filled "2,500"     -> parsed as 2.5 USDT      (1000x too small, silently)
+ *   1,234.56 -> filled "1,234.56"  -> refused; the button does nothing at all
+ *
+ * Asserted as a **round trip**, not as a spelling. What matters is that whatever Max writes
+ * means what Max meant; how it is punctuated is not the point and pinning it would be the same
+ * mistake one level up.
+ */
+test('whatever Max fills in, the amount field reads back as the same number', () => {
+  const cases: [bigint, number, string][] = [
+    // Below the grouping threshold: this always worked, and must keep working.
+    [999_000000n, 6, 'USDT'],
+    [999_999999n, 6, 'USDT'],
+    // The band that was broken. 9,999 is the largest parseSendAmount accepts.
+    [1000_000000n, 6, 'USDT'],
+    [1000_500000n, 6, 'USDT'],
+    [1234_560000n, 6, 'USDT'],
+    [2500_000000n, 6, 'USDT'],
+    [9999_000000n, 6, 'USDT'],
+    [9999_999999n, 6, 'USDT'],
+    // Native ETH, 18 decimals, including a value that uses every place.
+    [1n, 18, 'ETH'],
+    [1_000000000000000000n, 18, 'ETH'],
+    [1234_123456789012345678n, 18, 'ETH'],
+    [9999_999999999999999999n, 18, 'ETH'],
+  ];
+  for (const [value, decimals, symbol] of cases) {
+    const filled = amountForInput(value, decimals);
+    assert.ok(!filled.includes(','), `Max must not write a thousands separator, but wrote "${filled}"`);
+    const parsed = parseSendAmount(filled, decimals, symbol);
+    assert.equal(parsed, value,
+      `Max filled "${filled}" for ${value} base units of ${symbol}, which reads back as ${parsed}`);
+  }
+});
+
+test('Max is exact, not rounded down', () => {
+  // A maximum that quietly drops the last places is not a maximum, and the shortfall is
+  // unspendable afterwards. `formatUnits`'s default shows 6 places; at 18 decimals that
+  // discards twelve of them.
+  const dust = 1234_123456789012345678n;
+  assert.equal(parseSendAmount(amountForInput(dust, 18), 18, 'ETH'), dust);
+});
+
+/**
+ * The call-site half, and the reason it is written as an absence.
+ *
+ * The round-trip cases above protect `amountForInput`. They do not protect the Send screen
+ * from going back to `setAmount(formatUnits(...))`, which is the actual bug — reverting that
+ * one line leaves every case above passing. Testing the function is not testing the caller,
+ * and that gap is how this shipped.
+ *
+ * So this names the **dangerous** pattern rather than the safe one. A check for the presence
+ * of `amountForInput` would pass as soon as the identifier appeared anywhere in the file, which
+ * is precisely the hollow guard that let an earlier fix regress unnoticed (see PR #58). A check
+ * for the absence of a grouped formatter flowing into the amount field fails the moment the bug
+ * comes back, however it is spelled.
+ */
+test('no display formatter is written into the amount field', () => {
+  const file = new URL('../src/screens/LiveWallet.tsx', import.meta.url).pathname;
+  const source = readFileSync(file, 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const bad = /setAmount\(\s*(formatUnits|formatEth|[^)]*toLocaleString)/.exec(source);
+  assert.equal(bad, null,
+    `${bad?.[0]} — formatUnits and formatEth group thousands with toLocaleString('en-US'), and ` +
+    'the amount field reads a lone comma as a decimal point. Use amountForInput().');
+  // And the screen must still be filling the field from somewhere, or the check above is
+  // satisfied by a Max button that does nothing at all.
+  assert.match(source, /setAmount\(amountForInput\(/,
+    'the Max button must still fill the amount field');
 });

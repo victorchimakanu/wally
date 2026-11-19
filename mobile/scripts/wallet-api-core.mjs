@@ -157,6 +157,31 @@ export function tokenUnits(raw, decimals, symbol) {
 export function ethDisplay(value) { const n = BigInt(value), whole = n / 10n ** 18n, fraction = (n % 10n ** 18n).toString().padStart(18, '0').replace(/0+$/, ''); return `${whole}${fraction ? '.' + fraction : ''}`; }
 export function validAddress(address) { return typeof address === 'string' && /^0x[\da-fA-F]{40}$/.test(address) && !/^0x0{40}$/i.test(address); }
 /**
+ * The recipient, checksum-verified, or a refusal the user can act on.
+ *
+ * `validAddress` above is shape only — 40 hex characters, case insensitive — because the same
+ * test is applied to addresses read back off the chain, where indexers return lowercase. It
+ * therefore cannot see an EIP-55 checksum failure, and neither can the app's `isAddress`.
+ *
+ * `ethers.getAddress` *does* check it, and used to be called bare. Its throw says
+ * `bad address checksum`, which matches no SAFE_MESSAGE prefix, so the server classified a
+ * mistyped address as an unexpected SDK fault and answered **503 "The wallet service could not
+ * complete this request. Check the connection and retry."** — a message about the network for a
+ * problem with one character, on a retry that could never succeed. The checksum is the one
+ * mechanism that catches a corrupted address before money moves, and it was firing into a
+ * message that told the user to look somewhere else.
+ *
+ * The wording names the mechanism rather than saying "invalid", because the user's next move
+ * depends on knowing the address is wrong rather than the app being broken.
+ */
+export function checksummedRecipient(ethers, address) {
+  try {
+    return ethers.getAddress(address);
+  } catch {
+    throw new Error('The recipient address has a character wrong. Its capitalisation is an EIP-55 checksum and it does not match, so this is not a real address. Copy it again from the source. Nothing was sent.');
+  }
+}
+/**
  * Statuses that are final. A record in one of these no longer blocks sending on its chain.
  *
  * `unknown` and `pending` are the two that block, and until now nothing could ever leave
@@ -360,7 +385,7 @@ export async function createWalletService(directory, { transport = fetch } = {})
     const token = body.token === undefined || body.token === 'ETH' ? null
       : (TOKENS[chain] ?? []).find(entry => entry.symbol === body.token) ?? null;
     if (body.token !== undefined && body.token !== 'ETH' && !token) throw new Error('Only testnet ETH and the pinned token are supported on this network.');
-    const recipient = ethers.getAddress(body.recipient);
+    const recipient = checksummedRecipient(ethers, body.recipient);
     const value = token ? tokenUnits(body.amount, token.decimals, token.symbol) : ethUnits(body.amount);
     await checked(chain);
     // OUTSTANDING, not a second copy of ['unknown', 'pending']: this list and SETTLED have to

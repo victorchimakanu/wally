@@ -10,6 +10,7 @@ import type { PhoneModel, PhoneBackend } from '../services/phone-models';
 import { liveWalletEnabled, useWallet } from '../data/wallet';
 import { liveIntentReply, quickLiveReply } from '../services/live-wallet-chat';
 import { quickMarketReply } from '../services/market-chat';
+import { assetPhrase } from '../services/asset-copy';
 
 const STORAGE_KEY = 'wally.frontend-demo.v1';
 // This HTTP transport is for development only. Public Expo variables must never contain secrets.
@@ -184,7 +185,10 @@ export function DemoProvider({ children }: React.PropsWithChildren) {
       if (hasAi && (!current.current.offline || phoneAvailable)) {
         void runAi(clean, chatId, history); return true;
       }
-      const reply = liveWalletEnabled ? { text: 'The local assistant is unavailable. You can use wallet tools to fetch balances, receive, check Activity, or manually review a testnet ETH transfer. Nothing has been submitted.' } : scriptedReply(clean, current.current);
+      // Built, not written: this branch runs only with the live wallet connected, so it names
+      // the live wallet's assets. It said "a testnet ETH transfer" while Send had a USDt
+      // picker. See services/asset-copy.ts for the other four instances of this.
+      const reply = liveWalletEnabled ? { text: `The local assistant is unavailable. You can use wallet tools to fetch balances, receive, check Activity, or manually review a transfer of ${assetPhrase()}. Nothing has been submitted.` } : scriptedReply(clean, current.current);
       append(chatId, [{ id: id(), role: 'assistant', ...reply, text: hasAi ? `Offline scripted preview: ${reply.text}` : reply.text }]);
       return true;
     },
@@ -206,7 +210,9 @@ export function DemoProvider({ children }: React.PropsWithChildren) {
       return null;
     },
     prepare(nextDraft, origin) {
-      if (liveWalletEnabled) return 'This is an old demo draft. Use Send to review a real testnet ETH transfer. USDt is not connected.';
+      // "USDt is not connected" — false from 8 Nov 2026, and in the one branch that only ever
+      // runs when the real wallet *is* connected. Derived now, like the rest.
+      if (liveWalletEnabled) return `This is an old demo draft. Use Send to review a real transfer — this wallet holds ${assetPhrase()}.`;
       if (origin && !originIsCurrent(current.current, origin, nextDraft)) return 'This draft is no longer current. Open the latest draft.';
       activeQuote.current = null; setQuote(null);
       setDraft(nextDraft);

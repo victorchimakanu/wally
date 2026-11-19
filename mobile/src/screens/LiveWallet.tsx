@@ -7,7 +7,7 @@ import { tokenCaveat, tokensFor } from '../services/tokens';
 import { AssetChoice, LiveActivityCard, LiveReceiveCard, NetworkChoice, WalletStatus } from '../components/WalletData';
 import { useWallet } from '../data/wallet';
 import { useDemo } from '../demo/store';
-import { CHAINS, fetchGasPrice, formatUnits, isAddress, parseSendAmount, sendableMax, type Chain, type LiveTransaction } from '../services/wallet-api';
+import { CHAINS, amountForInput, fetchGasPrice, formatUnits, isAddress, parseSendAmount, sendableMax, type Chain, type LiveTransaction } from '../services/wallet-api';
 import { availableBase, committedBase } from '../services/committed-balance.ts';
 import { monotonicNow, quoteExpired, secondsLeft } from '../services/quote-clock';
 import { addressTrust, trustWarning } from '../services/address-safety.ts';
@@ -124,7 +124,9 @@ export function LiveSendScreen() {
           : 'The network fee could not be read, so Wally will not guess at a maximum. Type an amount instead.');
       }
       wallet.clearQuote();
-      setAmount(formatUnits(most, decimals, decimals));
+      // amountForInput, not formatUnits: the display formatter groups thousands and this field
+      // reads a comma as a decimal point, so Max used to fill "1,000" into a box that meant 1.
+      setAmount(amountForInput(most, decimals));
     } catch (failure) { setError(failure instanceof Error ? failure.message : 'A maximum could not be worked out.'); }
     finally { setMaxBusy(false); }
   }

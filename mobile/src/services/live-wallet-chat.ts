@@ -1,7 +1,13 @@
 import type { ChatReply } from '../demo/model.ts';
 import type { WalletIntent, ChatIntent } from './qvac.ts';
-import { CHAINS, type Chain } from './wallet-api.ts';
-import { tokensFor } from './tokens.ts';
+import { CHAINS } from './wallet-api.ts';
+import { displaySymbol } from './tokens.ts';
+import { assetPhrase, tokenAssets } from './asset-copy.ts';
+
+// Re-exported because `test/live-chat-copy.test.ts` asserts these replies against the token
+// list through this module. The list itself now lives in asset-copy.ts, which the Receive
+// screen and the model's system prompt read too — see that file for why.
+export { tokenAssets };
 
 /**
  * What chat says the live wallet can do.
@@ -24,30 +30,8 @@ import { tokensFor } from './tokens.ts';
  * asset is unavailable, so the two cannot drift apart again without the build noticing.
  */
 
-/** The chains this wallet connects, in display order. */
-const CHAIN_ORDER = ['arbitrum', 'ethereum'] as const satisfies readonly Chain[];
-
-/** Every token this wallet connects, with the network it lives on. Exported for the test. */
-export function tokenAssets(): readonly { symbol: string; chain: Chain }[] {
-  return CHAIN_ORDER.flatMap(chain => tokensFor(chain).map(token => ({ symbol: token.symbol, chain })));
-}
-
 /** The app writes Tether's symbol as USDt; the contract calls itself USDT. */
-function display(symbol: string): string {
-  return symbol === 'USDT' ? 'USDt' : symbol;
-}
-
-function list(parts: readonly string[]): string {
-  if (parts.length <= 1) return parts[0] ?? '';
-  return `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1] ?? ''}`;
-}
-
-/** "testnet ETH on Arbitrum Sepolia and Ethereum Sepolia, and testnet USDt on Arbitrum Sepolia" */
-function assetPhrase(): string {
-  const native = `testnet ETH on ${list(CHAIN_ORDER.map(chain => CHAINS[chain].name))}`;
-  const tokens = list(tokenAssets().map(asset => `testnet ${display(asset.symbol)} on ${CHAINS[asset.chain].name}`));
-  return tokens ? `${native}, and ${tokens}` : native;
-}
+const display = displaySymbol;
 
 export function liveIntentReply(intent: ChatIntent | WalletIntent): ChatReply {
   if (intent.intent === 'chat') return { text: intent.reply };
