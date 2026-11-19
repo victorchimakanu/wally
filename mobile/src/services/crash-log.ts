@@ -70,6 +70,37 @@ export function scrubCrash(input: unknown): string {
   text = text.replace(/\b(seed|mnemonic|phrase|privateKey|private_key|secret|password|entropy)\b\s*[:=]\s*\S+/gi,
     (_m, label: string) => `${label}: ${REDACTED}`);
 
+  // The app's **own** credential, and credential labels generally.
+  //
+  // `EXPO_PUBLIC_WALLY_APP_KEY` goes to the backend as the `x-wally-key` header
+  // (`backend.ts:52`, `qvac.ts:170`), and that key is one of only two things standing in front
+  // of the paymaster route — the one route that spends money. It was on none of the lists above.
+  // No code currently writes a header into an error message, so this is a gap rather than a
+  // demonstrated leak; it belongs here because this function is the last thing between a secret
+  // and a report the app actively invites the user to copy and paste, and "nothing reaches it
+  // today" is a property of other files, which change without this one.
+  //
+  // Three things this gets right that the obvious version does not:
+  //
+  //  - **To end of line, not one token.** `Authorization: Bearer sk-…` is two words, and a rule
+  //    that stops at the first leaves the secret itself sitting in the report next to the word
+  //    `[redacted]`. That is worse than not matching at all, because it reads as handled.
+  //  - **A leading-prefix allowance.** `\bapp_key\b` does not match inside
+  //    `EXPO_PUBLIC_WALLY_APP_KEY`, since `_` is a word character and there is no boundary. The
+  //    env-var spelling is the likeliest one to appear in a stack trace.
+  //  - **Not bare `key`, and above all not bare `token`.** This app says "token" constantly to
+  //    mean USDt; redacting `token: USDT` would cost the reports more than it protects.
+  // Serialised headers first, and only the one value. `{"x-wally-key":"…","x-wally-install":"…"}`
+  // is how a header bag is most likely to be written down, and redacting to end of line there
+  // would take the rest of the object with it — including the installation id, which is not a
+  // secret and is often the thing that explains the report.
+  const CREDENTIAL = String.raw`[\w-]*(?:api[_-]?key|app[_-]?key|secret[_-]?key|access[_-]?token|authorization|x-wally-key)`;
+  text = text.replace(new RegExp(String.raw`(["'])(${CREDENTIAL})\1(\s*:\s*)(["']).*?\4`, 'gi'),
+    (_m, q: string, label: string, colon: string) => `${q}${label}${q}${colon}${q}${REDACTED}${q}`);
+  text = text.replace(new RegExp(String.raw`\b(${CREDENTIAL})\s*[:=]\s*[^\n]*`, 'gi'),
+    (_m, label: string) => `${label}: ${REDACTED}`);
+  text = text.replace(/\bbearer\s+\S+/gi, `bearer ${REDACTED}`);
+
   return text;
 }
 

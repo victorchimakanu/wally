@@ -157,6 +157,31 @@ export function tokenUnits(raw, decimals, symbol) {
 export function ethDisplay(value) { const n = BigInt(value), whole = n / 10n ** 18n, fraction = (n % 10n ** 18n).toString().padStart(18, '0').replace(/0+$/, ''); return `${whole}${fraction ? '.' + fraction : ''}`; }
 export function validAddress(address) { return typeof address === 'string' && /^0x[\da-fA-F]{40}$/.test(address) && !/^0x0{40}$/i.test(address); }
 /**
+ * The recipient, checksum-verified, or a refusal the user can act on.
+ *
+ * `validAddress` above is shape only — 40 hex characters, case insensitive — because the same
+ * test is applied to addresses read back off the chain, where indexers return lowercase. It
+ * therefore cannot see an EIP-55 checksum failure, and neither can the app's `isAddress`.
+ *
+ * `ethers.getAddress` *does* check it, and used to be called bare. Its throw says
+ * `bad address checksum`, which matches no SAFE_MESSAGE prefix, so the server classified a
+ * mistyped address as an unexpected SDK fault and answered **503 "The wallet service could not
+ * complete this request. Check the connection and retry."** — a message about the network for a
+ * problem with one character, on a retry that could never succeed. The checksum is the one
+ * mechanism that catches a corrupted address before money moves, and it was firing into a
+ * message that told the user to look somewhere else.
+ *
+ * The wording names the mechanism rather than saying "invalid", because the user's next move
+ * depends on knowing the address is wrong rather than the app being broken.
+ */
+export function checksummedRecipient(ethers, address) {
+  try {
+    return ethers.getAddress(address);
+  } catch {
+    throw new Error('The recipient address has a character wrong. Its capitalisation is an EIP-55 checksum and it does not match, so this is not a real address. Copy it again from the source. Nothing was sent.');
+  }
+}
+/**
  * Statuses that are final. A record in one of these no longer blocks sending on its chain.
  *
  * `unknown` and `pending` are the two that block, and until now nothing could ever leave
@@ -360,7 +385,7 @@ export async function createWalletService(directory, { transport = fetch } = {})
     const token = body.token === undefined || body.token === 'ETH' ? null
       : (TOKENS[chain] ?? []).find(entry => entry.symbol === body.token) ?? null;
     if (body.token !== undefined && body.token !== 'ETH' && !token) throw new Error('Only testnet ETH and the pinned token are supported on this network.');
-    const recipient = ethers.getAddress(body.recipient);
+    const recipient = checksummedRecipient(ethers, body.recipient);
     const value = token ? tokenUnits(body.amount, token.decimals, token.symbol) : ethUnits(body.amount);
     await checked(chain);
     // OUTSTANDING, not a second copy of ['unknown', 'pending']: this list and SETTLED have to
@@ -571,8 +596,22 @@ export async function createWalletService(directory, { transport = fetch } = {})
   async function history() {
     const errors = [], items = [];
     await Promise.all(Object.entries(NETWORKS).map(async ([chain, network]) => {
-      try { const response = await transport(`${network.indexer}/api/v2/addresses/${accountInfo.get(chain).address}/transactions`, { signal: AbortSignal.timeout(15000) }); if (!response.ok) throw new Error(); const data = await response.json(); if (!Array.isArray(data.items)) throw new Error(); for (const item of data.items.slice(0, 25)) { if (!/^0x[\da-f]{64}$/i.test(item.hash) || !/^\d+$/.test(String(item.value))) continue; items.push({ hash: item.hash, chain, network: network.name, from: item.from?.hash ?? '', recipient: item.to?.hash ?? '', amount: ethDisplay(item.value), symbol: 'ETH', status: item.status === 'ok' ? 'confirmed' : item.status === 'error' ? 'failed' : 'pending', submittedAt: Date.parse(item.timestamp) || 0, explorerUrl: `${network.explorer}/tx/${item.hash}` }); } }
-      catch { errors.push(`${network.name} history is unavailable. Showing locally tracked submissions where available.`); }
+      try { const response = await transport(`${network.indexer}/api/v2/addresses/${accountInfo.get(chain).address}/transactions`, { signal: AbortSignal.timeout(15000) }); if (!response.ok) { const refused = new Error('indexer refused'); refused.status = response.status; throw refused; } const data = await response.json(); if (!Array.isArray(data.items)) throw new Error(); for (const item of data.items.slice(0, 25)) { if (!/^0x[\da-f]{64}$/i.test(item.hash) || !/^\d+$/.test(String(item.value))) continue; items.push({ hash: item.hash, chain, network: network.name, from: item.from?.hash ?? '', recipient: item.to?.hash ?? '', amount: ethDisplay(item.value), symbol: 'ETH', status: item.status === 'ok' ? 'confirmed' : item.status === 'error' ? 'failed' : 'pending', submittedAt: Date.parse(item.timestamp) || 0, explorerUrl: `${network.explorer}/tx/${item.hash}` }); } }
+      // A 403 here is not an outage. Blockscout puts its Arbitrum Sepolia API behind a bot
+      // challenge — verified 19 Nov 2026: arbitrum-sepolia.blockscout.com answers 403 with a
+      // Cloudflare interstitial while eth-sepolia.blockscout.com answers 200 — so no server
+      // can read that chain from it, ever. Saying "unavailable" invited a developer to retry,
+      // check the network and go looking for a fault, which is the same cost as the stale copy
+      // elsewhere in this audit: a message that sends you to the wrong place.
+      //
+      // The app does not depend on this. With EXPO_PUBLIC_WALLY_PROXY_URL set it reads history
+      // through the backend, which moved to Etherscan on 31 Oct and covers both chains. This
+      // server's list is the fallback, and on Arbitrum it is the journal alone.
+      catch (error) {
+        errors.push(error?.status === 403
+          ? `${network.name} history cannot be read from this development server: its indexer answers a bot challenge for this chain, so this is permanent rather than a fault to retry. Run the backend proxy for indexed history. Transfers submitted from here are still listed.`
+          : `${network.name} history is unavailable. Showing locally tracked submissions where available.`);
+      }
     }));
     await Promise.all(journal.slice(0, 25).map(async record => { try { await receipt(record.chain, record.hash); } catch {} if (!items.some(item => item.hash === record.hash && item.chain === record.chain)) items.push(visibleRecord(record)); }));
     return { version: 1, source: 'Blockscout and local submission receipts', fetchedAt: Date.now(), items: items.sort((a, b) => b.submittedAt - a.submittedAt).slice(0, 50), errors };

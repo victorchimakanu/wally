@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View } from 'react-native';
 import { router } from 'expo-router';
 import { Button, Card, Group, Label, Note, Row, Screen } from '../components/ui';
 import { SettingsToggle as Toggle } from '../components/SettingsToggle';
-import { getKeystore } from '../services/wallet-worklet';
+import { currentCustody, getKeystore } from '../services/wallet-worklet';
+import { removalConsequence, type Custody } from '../services/custody';
 import { describeStoredData } from '../services/app-data';
 import { clearDeviceData } from '../services/app-data-device';
 import { useDemo } from '../demo/store';
@@ -42,6 +43,15 @@ export function ResetWalletScreen() {
   const [kept, setKept] = useState<{ label: string; reason: string }[]>([]);
   const [walletGone, setWalletGone] = useState(false);
   const [dataGone, setDataGone] = useState(false);
+  // What removing this wallet costs depends on which wallet is showing the money, so the
+  // screen asks rather than assuming. Null until it knows, and it says nothing until then —
+  // a consequence you have not determined is not one to put in front of someone.
+  const [custody, setCustody] = useState<Custody | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void currentCustody().then(value => { if (alive) setCustody(value); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
   const { clearHistory } = useDemo();
   const { resetPreferences } = usePreferences();
 
@@ -108,7 +118,7 @@ export function ResetWalletScreen() {
   return <Screen title="Remove this wallet">
     <Card>
       <Label size={18} weight="semibold">This cannot be undone</Label>
-      <Note>Your money stays on the blockchain. Without your recovery phrase, nobody can reach it again.</Note>
+      {!!custody && <Note>{removalConsequence(custody)}</Note>}
     </Card>
 
     <Group title="Deletes from this phone">{removes.map(line => <Row key={line} title={line} />)}</Group>

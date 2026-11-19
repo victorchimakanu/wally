@@ -127,3 +127,44 @@ test('the text handed over is scrubbed again on the way out', () => {
 test('an empty log says so plainly', () => {
   assert.match(reportText([]), /No problems have been recorded/);
 });
+
+/**
+ * The app's own credential, which was on none of the lists.
+ *
+ * `EXPO_PUBLIC_WALLY_APP_KEY` travels as the `x-wally-key` header (`backend.ts:52`,
+ * `qvac.ts:170`) and is one of only two things in front of the paymaster route — the one route
+ * that spends money. Nothing in the app writes a header into an error message today, so this is
+ * a gap rather than a demonstrated leak. It is covered because this function is the last thing
+ * between a secret and a report the app invites the user to copy and paste, and "nothing
+ * reaches it today" is a property of other files.
+ */
+test('a credential is redacted whole, in every shape it is likely to be written in', () => {
+  // Two words after the label. A rule that stops at the first leaves the secret in the report
+  // next to the word "[redacted]", which is worse than not matching, because it reads as safe.
+  assert.equal(scrubCrash('Authorization: Bearer sk-abc123def456 and more'), 'Authorization: [redacted]');
+
+  // The env-var spelling, which is the likeliest to appear in a stack trace. `\bapp_key\b` does
+  // not match inside this, because `_` is a word character and there is no boundary before it.
+  assert.match(scrubCrash('EXPO_PUBLIC_WALLY_APP_KEY=abc123def456ghi789'), /^EXPO_PUBLIC_WALLY_APP_KEY: \[redacted\]$/);
+  for (const shape of ['x-wally-key: abc123def456', 'api_key=ABCD1234EFGH', 'apiKey: ABCD1234EFGH', 'accessToken: ABCD1234EFGH']) {
+    assert.ok(!/ABCD1234EFGH|abc123def456/.test(scrubCrash(shape)), `the value survived: ${scrubCrash(shape)}`);
+  }
+
+  // A serialised header bag: the one value goes, the rest of the object stays. The installation
+  // id is not a secret and is frequently the thing that explains the report.
+  const headers = scrubCrash('headers {"x-wally-key":"abc123def456","x-wally-install":"inst-9"}');
+  assert.ok(!headers.includes('abc123def456'), headers);
+  assert.ok(headers.includes('inst-9'), `the non-secret header was taken too: ${headers}`);
+});
+
+test('redaction does not eat the words this app needs in a report', () => {
+  // "token" means USDt here, constantly. Redacting `token: USDT` would cost the reports more
+  // than it protects, so bare `token` and bare `key` are deliberately not credential labels.
+  for (const kept of ['token: USDT amount: 25', 'Failed on chain arbitrum, token USDT, decimals 6', 'The network fee could not be read.']) {
+    assert.equal(scrubCrash(kept), kept);
+  }
+  // And the things that must still go, unchanged by any of the above.
+  assert.equal(scrubCrash('abandon ability able about above absent absorb abstract absurd abuse access accident'), '[redacted]');
+  assert.equal(scrubCrash('0x' + 'a'.repeat(64)), '[redacted]');
+  assert.equal(scrubCrash('to 0x8ba1f109551bD432803012645Ac136ddd64DBA72'), 'to 0x8ba1f1…BA72');
+});

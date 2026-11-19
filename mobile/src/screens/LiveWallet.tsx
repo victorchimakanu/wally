@@ -7,7 +7,8 @@ import { tokenCaveat, tokensFor } from '../services/tokens';
 import { AssetChoice, LiveActivityCard, LiveReceiveCard, NetworkChoice, WalletStatus } from '../components/WalletData';
 import { useWallet } from '../data/wallet';
 import { useDemo } from '../demo/store';
-import { CHAINS, fetchGasPrice, formatUnits, isAddress, parseSendAmount, sendableMax, type Chain, type LiveTransaction } from '../services/wallet-api';
+import { CHAINS, amountForInput, fetchGasPrice, formatUnits, parseSendAmount, sendableMax, type Chain, type LiveTransaction } from '../services/wallet-api';
+import { recipientProblem } from '../services/address-checksum';
 import { availableBase, committedBase } from '../services/committed-balance.ts';
 import { monotonicNow, quoteExpired, secondsLeft } from '../services/quote-clock';
 import { addressTrust, trustWarning } from '../services/address-safety.ts';
@@ -124,7 +125,9 @@ export function LiveSendScreen() {
           : 'The network fee could not be read, so Wally will not guess at a maximum. Type an amount instead.');
       }
       wallet.clearQuote();
-      setAmount(formatUnits(most, decimals, decimals));
+      // amountForInput, not formatUnits: the display formatter groups thousands and this field
+      // reads a comma as a decimal point, so Max used to fill "1,000" into a box that meant 1.
+      setAmount(amountForInput(most, decimals));
     } catch (failure) { setError(failure instanceof Error ? failure.message : 'A maximum could not be worked out.'); }
     finally { setMaxBusy(false); }
   }
@@ -133,7 +136,12 @@ export function LiveSendScreen() {
     if (busy) return;
     setError('');
     try {
-      if (!isAddress(recipient.trim())) throw new Error('Enter a complete, non-zero EVM wallet address.');
+      // recipientProblem, not isAddress: isAddress is case-insensitive by design, because the
+      // same function validates addresses read back off the chain where indexers return
+      // lowercase. It therefore cannot see a bad EIP-55 checksum, and one used to travel all
+      // the way to the wallet server and come back as 503 "Check the connection and retry".
+      const problem = recipientProblem(recipient);
+      if (problem) throw new Error(problem);
       // parseSendAmount, not wei(): wei() is the permissive parser that also reads amounts off
       // the chain, and using it here let an amount through that the wallet server then refused
       // a round trip later, with a message about decimal places that was not the problem.

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  custodyOf, custodyNotice, moneySource, protectsDisplayedFunds, spendAllowed,
+  custodyOf, custodyNotice, keystoreUnavailableText, moneySource, protectsDisplayedFunds, removalConsequence, spendAllowed,
   type Custody,
 } from '../src/services/custody.ts';
 
@@ -117,4 +117,54 @@ test('every allowed decision carries whether a backup protects it', () => {
     const decision = spendAllowed(custody, record);
     if (decision.allowed) assert.equal(typeof decision.protectedByBackup, 'boolean', custody.kind);
   }
+});
+
+/**
+ * The two sentences that were written rather than derived.
+ *
+ * `protectsDisplayedFunds()` has existed and been correct since 8 November. Two screens then
+ * stated its answer as a fixed string and got it wrong for every state but one:
+ *
+ *  - **Remove this wallet** said "Your money stays on the blockchain. Without your recovery
+ *    phrase, nobody can reach it again." True under `device`. Under `dev-server` — which is how
+ *    every developer runs this, and how it was audited — the balances belong to a seed on a
+ *    computer and the phrase controls something else entirely, so that sentence tells someone
+ *    their phrase is protecting money it has no relationship to.
+ *  - **Recovery phrase / Set up a wallet** on web said "The browser preview runs on demo
+ *    funds", two taps from a Wallet screen correctly saying the funds are testnet money held by
+ *    a server on this computer. One of the two had to be wrong.
+ */
+test('what removal costs is read from custody, not asserted', () => {
+  const device = custodyOf({ keystoreWallet: true, devServerConfigured: false });
+  const dev = custodyOf({ keystoreWallet: false, devServerConfigured: true });
+  const none = custodyOf({ keystoreWallet: false, devServerConfigured: false });
+  const split = custodyOf({ keystoreWallet: true, devServerConfigured: true, splitPermitted: true });
+  const blocked = custodyOf({ keystoreWallet: true, devServerConfigured: true });
+
+  // The one state the old sentence was true in keeps saying it.
+  assert.match(removalConsequence(device), /Without your recovery phrase, nobody can reach it again/);
+
+  // In every state where the phrase does *not* control the money on screen, the sentence must
+  // not claim it does. This is the assertion the old fixed string could never satisfy.
+  for (const [label, custody] of [['dev-server', dev], ['split', split], ['demo', none], ['blocked', blocked]] as const) {
+    assert.equal(protectsDisplayedFunds(custody), false, label);
+    const text = removalConsequence(custody);
+    assert.ok(!/Without your recovery phrase, nobody can reach it again/.test(text),
+      `${label} repeats the device-wallet promise: ${text}`);
+  }
+  // And the dev-server wording has to point at the thing that actually holds the money.
+  assert.match(removalConsequence(dev), /wallet server on your computer/);
+  assert.match(removalConsequence(dev), /seed file/);
+});
+
+test('the browser keystore refusal names the funds it is actually showing', () => {
+  const none = custodyOf({ keystoreWallet: false, devServerConfigured: false });
+  const dev = custodyOf({ keystoreWallet: false, devServerConfigured: true });
+
+  assert.match(keystoreUnavailableText(none), /demo funds/);
+  // The bug: this said "demo funds" here too, contradicting the Wallet screen.
+  assert.ok(!/demo funds/.test(keystoreUnavailableText(dev)), keystoreUnavailableText(dev));
+  assert.match(keystoreUnavailableText(dev), /wallet server on your computer/);
+  // Both still say the actual reason, which is the part a user needs.
+  for (const custody of [none, dev]) assert.match(keystoreUnavailableText(custody), /needs the Wally app on a phone/);
 });

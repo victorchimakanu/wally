@@ -156,7 +156,13 @@ test('the Send screen asks for the caveat beside the asset it is about', () => {
 test('no screen hand-writes the caveat, or the claim that outlived its feature', () => {
   for (const path of sources()) {
     if (path.endsWith('/services/tokens.ts')) continue;
-    const text = read(path);
+    // `code`, not `read`: this scans for shipped copy, and a comment is not copy. The two
+    // phrases below are the historic bugs, so the files that fix them quote them while
+    // explaining why — asset-copy.ts tabulates all four. Matching the raw text made writing
+    // that explanation impossible, which pushes the reasoning out of the codebase and is the
+    // opposite of what these cases are for. `code()` already existed here for this reason and
+    // simply was not applied on this line.
+    const text = code(read(path));
     assert.doesNotMatch(text, /not Tether/i, `${path.slice(SRC.length)} hand-writes the caveat instead of calling tokenCaveat()`);
     // The sentence that was false for eleven days. Pinned by phrase because the exact wording
     // is what a person would reach for when writing it again.

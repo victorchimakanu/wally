@@ -79,6 +79,16 @@ test('WDK signs only the reviewed transaction; uncertain broadcast survives rest
   try {
     service = await createWalletService(directory, { transport });
     await assert.rejects(service.quote('alice', { chain: 'constructor', recipient: '0x1111111111111111111111111111111111111111', amount: '0.001' }), /Choose a test network/);
+    // Through the real call site and real ethers: the shape check passes this (40 hex
+    // characters, and `validAddress` is case insensitive because it is also applied to
+    // addresses read back off the chain), so the EIP-55 checksum is the only thing left to
+    // catch it. Called bare, getAddress threw `bad address checksum` — no SAFE_MESSAGE prefix,
+    // so the server answered 503 "Check the connection and retry" for a typo. Put the guard
+    // back the way it was and this assertion fails on the message.
+    await assert.rejects(
+      service.quote('alice', { chain: 'arbitrum', recipient: '0x8Ba1f109551bD432803012645Ac136ddd64DBA72', amount: '0.001' }),
+      /EIP-55 checksum/,
+    );
     const q = await service.quote('alice', { chain: 'arbitrum', recipient: '0x1111111111111111111111111111111111111111', amount: '0.001' });
     await assert.rejects(service.confirm('bob', { quoteId: q.id, approved: true }), /another session/);
     const tx = await service.confirm('alice', { quoteId: q.id, approved: true }); assert.equal(tx.status, 'unknown'); assert.equal(tx.owner, undefined); assert.equal(broadcasts, 1);
@@ -429,5 +439,106 @@ test('no user-facing refusal is silently replaced with a connection error', asyn
   // The list above must not rot into a place where real refusals go to be forgotten.
   for (const message of deliberate) {
     assert.ok(thrown.includes(message), `"${message}" is listed as deliberate but is no longer thrown; remove it.`);
+  }
+});
+
+/**
+ * The hole the test above cannot see.
+ *
+ * It reads `throw new Error('literal')` out of the source, so it covers every refusal **Wally
+ * writes** and none that Wally makes a library raise. `ethers.getAddress` was called bare on the
+ * recipient, and its `bad address checksum` throw matched no SAFE_MESSAGE prefix — so a single
+ * mistyped character came back as 503 "Check the connection and retry", advice about the network
+ * for a problem with the address, on a retry that could never succeed.
+ *
+ * The checksum is the only thing that catches a corrupted address before money moves. This
+ * fixes it where it is decided — the status and the sentence the user actually reads.
+ */
+test('a mistyped recipient is refused as a mistake, not reported as a broken connection', async () => {
+  const { checksummedRecipient, SAFE_MESSAGE } = await import('../scripts/wallet-api-core.mjs');
+  const good = '0x8ba1f109551bD432803012645Ac136ddd64DBA72';
+  // Stands in for ethers: accepts the checksummed address, throws its real message for anything
+  // else. Stubbed rather than imported because ethers lives in the isolated WDK runtime.
+  const ethers = { getAddress: value => { if (value === good) return good; throw new Error('bad address checksum (argument="address", code=INVALID_ARGUMENT)'); } };
+
+  assert.equal(checksummedRecipient(ethers, good), good, 'a correctly checksummed address passes through unchanged');
+  // Read from the function rather than repeated here, so changing the wording to something the
+  // server would swallow fails this test instead of silently reopening the hole.
+  let refusal = null;
+  try { checksummedRecipient(ethers, '0x8Ba1f109551bD432803012645Ac136ddd64DBA72'); } catch (error) { refusal = error; }
+  assert.ok(refusal, 'an address whose capitalisation fails the checksum must be refused');
+  assert.ok(SAFE_MESSAGE.test(refusal.message), `the refusal must survive the 503 filter, but "${refusal.message}" does not match SAFE_MESSAGE`);
+
+  // End to end through the real classifier: the old throw and the new one, side by side.
+  const port = 33700 + Math.floor(Math.random() * 1000), url = `http://127.0.0.1:${port}`;
+  let next = null;
+  const service = { quote: async () => { throw new Error(next); } };
+  const server = createWalletApi(service, { port });
+  await new Promise(resolve => server.listen(port, '127.0.0.1', resolve));
+  try {
+    const cookie = (await fetch(url + '/api/wallet/session')).headers.get('set-cookie').split(';')[0];
+    const ask = async message => {
+      next = message;
+      const res = await fetch(url + '/api/wallet/quote', { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: '{}' });
+      return { status: res.status, error: (await res.json()).error };
+    };
+
+    const bare = await ask('bad address checksum (argument="address", code=INVALID_ARGUMENT)');
+    assert.equal(bare.status, 503, 'calling getAddress bare is what produced the wrong answer');
+    assert.match(bare.error, /Check the connection/, 'and this is the sentence it produced');
+
+    const fixed = await ask(refusal.message);
+    assert.equal(fixed.status, 400, 'a mistyped address is the user\'s to fix, so it is a 400');
+    assert.doesNotMatch(fixed.error, /Check the connection/, 'and must not blame the connection');
+    assert.equal(fixed.error, refusal.message, 'the user reads the refusal itself, not a replacement');
+  } finally { server.close(); }
+});
+
+/**
+ * A bot challenge is not an outage, and the difference is what a developer does next.
+ *
+ * Blockscout puts its Arbitrum Sepolia API behind Cloudflare. Verified 19 Nov 2026:
+ * `arbitrum-sepolia.blockscout.com` answers **403** with an interstitial, while
+ * `eth-sepolia.blockscout.com` answers 200. So no server can read that chain from it, ever.
+ *
+ * The message said "Arbitrum Sepolia history is unavailable", which reads as a fault and sends
+ * you to check the network and retry — the same cost as the stale copy elsewhere in this audit:
+ * a sentence that points at the wrong place. A genuine failure still says that; a 403 says what
+ * is actually true and where indexed history really comes from.
+ */
+test('a challenged indexer is reported as permanent, a real failure is not', needsWdk, async () => {
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../internal');
+  const directory = mkdtempSync(path.join(root, 'wallet-test-'));
+  let service;
+  // Arbitrum's indexer answers the challenge; Ethereum's simply falls over.
+  const transport = async (url, options) => {
+    if (url.includes('arbitrum-sepolia.blockscout')) return new Response('<!DOCTYPE html><title>Just a moment...</title>', { status: 403 });
+    if (url.includes('eth-sepolia.blockscout')) return new Response('nope', { status: 500 });
+    const request = JSON.parse(options.body);
+    const chainId = url.includes('arbitrum') ? '0x66eee' : '0xaa36a7';
+    const result = request.method === 'eth_chainId' ? chainId : request.method === 'eth_getBalance' ? '0x0' : '0x0';
+    return Response.json({ jsonrpc: '2.0', id: request.id, result });
+  };
+  try {
+    service = await createWalletService(directory, { transport });
+    const { errors } = await service.history();
+    const challenged = errors.find(line => line.startsWith('Arbitrum Sepolia'));
+    const failed = errors.find(line => line.startsWith('Ethereum Sepolia'));
+
+    assert.ok(challenged, `no line for the challenged chain: ${JSON.stringify(errors)}`);
+    assert.match(challenged, /permanent rather than a fault to retry/);
+    assert.match(challenged, /backend proxy/, 'it must say where indexed history actually comes from');
+    assert.ok(!/is unavailable\./.test(challenged), `still reads as an outage: ${challenged}`);
+
+    // The ordinary failure keeps the ordinary message — the distinction is the whole point,
+    // and a fix that called every failure permanent would be as wrong in the other direction.
+    assert.ok(failed, `no line for the failing chain: ${JSON.stringify(errors)}`);
+    assert.match(failed, /is unavailable\./);
+    assert.ok(!/permanent/.test(failed), `a transient failure was called permanent: ${failed}`);
+  } finally {
+    service?.dispose();
+    assert.equal(path.dirname(directory), root);
+    assert.match(path.basename(directory), /^wallet-test-/);
+    rmSync(directory, { recursive: true, force: true });
   }
 });

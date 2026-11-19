@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parsePreferences, droppedNotice, toStored, PREFERENCES_VERSION, type Preferences } from '../src/services/preferences-store.ts';
+import { parsePreferences, droppedNotice, toStored, PREFERENCES_VERSION, SAMPLE_RECIPIENTS, withoutSampleRecipients, type Preferences, type Recipient } from '../src/services/preferences-store.ts';
 
 /**
  * The address book lives in this record. The old loader validated the whole object in one
@@ -116,4 +116,45 @@ test('appearance is read when valid, dropped when not, and absent when never set
   // A record from before the setting existed reads back without the key, so older
   // equality checks on preferences keep holding.
   assert.equal('appearance' in parsePreferences({ name: 'A' }, base).preferences, false);
+});
+
+/**
+ * The samples are demo content, and on 19 Nov 2026 they were in a live wallet's address book.
+ *
+ * `0x1111…`, `0x6666…` and `0x4444…` are valid, non-zero and unowned: anything sent to one is
+ * gone. `PreferencesProvider` is mounted app-wide, so Wallet → Send → Saved → Victor → Send
+ * reached a prefilled transfer to a burn address in two taps, with nothing marking the entry as
+ * a sample. `addressTrust()` is no help and cannot be: an address in the address book is
+ * `known`, the one verdict that suppresses the warning.
+ */
+test('the sample recipients can be taken out for a wallet that can really spend', () => {
+  const mine: Recipient = { id: 'real', name: 'A real person', address: '0x' + '7'.repeat(40), network: 'Arbitrum' };
+
+  // Untouched samples go.
+  assert.deepEqual(withoutSampleRecipients([...SAMPLE_RECIPIENTS]), []);
+  // Everything else stays, in order.
+  assert.deepEqual(withoutSampleRecipients([mine, ...SAMPLE_RECIPIENTS]), [mine]);
+
+  // A real contact who happens to share a sample's name or id is NOT a sample. Matching on id
+  // alone would delete this person's entry, which is worse than the bug being fixed.
+  const sameId: Recipient = { id: 'victor', name: 'Victor', address: '0x' + '7'.repeat(40), network: 'Arbitrum' };
+  assert.deepEqual(withoutSampleRecipients([sameId]), [sameId]);
+
+  // And a sample whose address the user edited has become their own entry.
+  const edited: Recipient = { ...SAMPLE_RECIPIENTS[0]!, address: '0x' + '8'.repeat(40) };
+  assert.deepEqual(withoutSampleRecipients([edited]), [edited]);
+
+  // Case is not a difference: the indexer, EIP-55 and the dev server disagree about it freely.
+  const upper: Recipient = { ...SAMPLE_RECIPIENTS[0]!, address: SAMPLE_RECIPIENTS[0]!.address.toUpperCase().replace('0X', '0x') };
+  assert.deepEqual(withoutSampleRecipients([upper]), []);
+});
+
+test('every sample address is one nobody holds, and none is the zero address', () => {
+  // If a sample were ever changed to a real address this would stop being a burn hazard and
+  // start being a worse one: a stranger's wallet seeded into everybody's address book.
+  for (const sample of SAMPLE_RECIPIENTS) {
+    assert.match(sample.address, /^0x([\da-f])\1{39}$/i,
+      `${sample.name} must be an obvious placeholder, not a real-looking address`);
+    assert.ok(!/^0x0{40}$/i.test(sample.address), 'the zero address is rejected elsewhere and would not behave like the others');
+  }
 });

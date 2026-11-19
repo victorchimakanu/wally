@@ -1,12 +1,19 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
-import { parsePreferences, droppedNotice, toStored, type Preferences, type Recipient } from '../services/preferences-store';
+import { parsePreferences, droppedNotice, toStored, SAMPLE_RECIPIENTS, withoutSampleRecipients, type Preferences, type Recipient } from '../services/preferences-store';
+import { liveWalletEnabled } from '../data/wallet';
 export type { Preferences, Recipient };
-const defaults: Preferences = { name: 'Daniel', currency: 'USD', saved: ['BTC', 'ETH'], recipients: [
-  { id: 'victor', name: 'Victor', address: '0x' + '1'.repeat(40), network: 'Arbitrum' },
-  { id: 'emmy', name: 'Emmy', address: '0x' + '6'.repeat(40), network: 'Ethereum' },
-  { id: 'daniel', name: 'Daniel', address: '0x' + '4'.repeat(40), network: 'Arbitrum' },
-] };
+/**
+ * The samples are for the demo wallet and only the demo wallet.
+ *
+ * With a live wallet connected they are three unrecoverable burn addresses sitting in the
+ * address book, reachable in two taps with the recipient prefilled. See SAMPLE_RECIPIENTS in
+ * services/preferences-store.ts for why `addressTrust()` cannot catch that.
+ */
+const defaults: Preferences = {
+  name: 'Daniel', currency: 'USD', saved: ['BTC', 'ETH'],
+  recipients: liveWalletEnabled ? [] : [...SAMPLE_RECIPIENTS],
+};
 const key = 'wally.frontend-preferences.v1';
 const Context = createContext<{ preferences: Preferences; updatePreferences: (patch: Partial<Preferences>) => void; resetPreferences: () => void; error: string } | null>(null);
 export function PreferencesProvider({ children }: React.PropsWithChildren) {
@@ -22,7 +29,10 @@ export function PreferencesProvider({ children }: React.PropsWithChildren) {
       // expression and threw, and this catch replaced every saved recipient with the samples.
       // One malformed address cost a user their entire address book.
       const { preferences: loaded, dropped } = parsePreferences(JSON.parse(raw), defaults);
-      setPreferences(loaded);
+      // Not just the defaults: a device that ran the demo first has the samples on disk, and
+      // connecting a real wallet must not inherit them. Silent, because they were never the
+      // user's entries and naming them would read as "we deleted your contacts".
+      setPreferences(liveWalletEnabled ? { ...loaded, recipients: withoutSampleRecipients(loaded.recipients) } : loaded);
       const notice = droppedNotice(dropped);
       if (notice) setError(notice);
     }).catch(() => { if (alive) setError('Saved preferences could not be read on this device. Nothing was changed.'); }).finally(() => { if (alive) setReady(true); });

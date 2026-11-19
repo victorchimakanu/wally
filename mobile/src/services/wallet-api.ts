@@ -85,8 +85,15 @@ export function normaliseAmount(value: string): string {
  *
  * The fractional limit follows `decimals`: a token with 6 cannot express a seventh place, and
  * silently truncating it would mean sending a different amount from the one on screen.
+ *
+ * **`unit` has no default.** It used to default to `'ETH'`, which only ever reached the user as
+ * a lie: a six-decimal USDt amount refused by a caller that forgot the argument said "Enter an
+ * amount in ETH with up to 6 decimals" — naming the wrong asset in the one sentence whose job
+ * is telling someone what to type. Every production caller already passed it, so the default
+ * was protecting nothing and waiting to mislead. Required now, so forgetting it is a compile
+ * error rather than a wrong message.
  */
-export function toBaseUnits(value: string, decimals: number, unit = 'ETH'): bigint {
+export function toBaseUnits(value: string, decimals: number, unit: string): bigint {
   if (!Number.isInteger(decimals) || decimals < 0 || decimals > 36) {
     throw new Error('A token must declare a whole number of decimals.');
   }
@@ -247,6 +254,39 @@ export function formatUnits(value: bigint, decimals: number, show = 6): string {
 /** Native ETH. Same single implementation. */
 export function formatEth(value: bigint, decimals = 6): string {
   return formatUnits(value, 18, decimals);
+}
+
+/**
+ * The same number, written so the amount field reads it back as itself.
+ *
+ * `formatUnits` above is for **display**, and groups thousands through
+ * `toLocaleString('en-US')`. `normaliseAmount` reads a lone comma as a **decimal point**, on
+ * purpose — see its comment; the reasoning is about which direction an ambiguous `1,250` should
+ * fail in, and it is right. But the two together meant the app wrote a comma meaning one thing
+ * into a field that read it as the other, and the Max button was the bridge:
+ *
+ * ```
+ * balance 1,000     Max fills "1,000"      parses as 1 USDT        — 1000x too small, silently
+ * balance 2,500     Max fills "2,500"      parses as 2.5 USDT      — 1000x too small, silently
+ * balance 9,999     Max fills "9,999"      parses as 9.999 USDT    — 1000x too small, silently
+ * balance 1,234.56  Max fills "1,234.56"   refused outright        — the button does nothing
+ * ```
+ *
+ * Every balance from 1,000 up — which is the whole band between there and the 9,999 ceiling
+ * `parseSendAmount` enforces — came out either refused or wrong by a thousand. On the one
+ * control whose entire promise is being exact.
+ *
+ * So: no grouping, and no truncation either, because a Max that rounds down is not a maximum.
+ * `test/amount.test.ts` asserts the round trip rather than the spelling, so this cannot
+ * drift back by someone reusing the display formatter here.
+ */
+export function amountForInput(value: bigint, decimals: number): string {
+  const scale = 10n ** BigInt(decimals);
+  const whole = (value / scale).toString();
+  const part = decimals === 0
+    ? ''
+    : (value % scale).toString().padStart(decimals, '0').replace(/0+$/, '');
+  return part ? `${whole}.${part}` : whole;
 }
 function object(value: unknown): Record<string, unknown> { if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid wallet API response.'); return value as Record<string, unknown>; }
 function chain(value: unknown): Chain { if (value !== 'arbitrum' && value !== 'ethereum') throw new Error('Unexpected wallet network.'); return value; }
