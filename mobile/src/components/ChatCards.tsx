@@ -104,7 +104,7 @@ export function InlineChatTool({ tool, onRetry, onManual, onAsk }: { tool: ChatT
   if (tool.kind === 'live-balances') return <LiveWalletOverview onActivity={() => onAsk('Show my transaction history')} />;
   if (tool.kind === 'live-receive') return <LiveReceiveCard />;
   if (tool.kind === 'live-activity') return <LiveActivityCard compact />;
-  if (tool.kind === 'live-send') return <Card><Label size={18} weight="semibold">Send testnet ETH</Label><Note>Choose the network, amount and recipient in Send. You approve the exact fee review before anything is broadcast.</Note><Button label="Open Send" onPress={() => router.push('/send')} /></Card>;
+  if (tool.kind === 'live-send') return <Card><Label size={18} weight="semibold">Send a testnet transfer</Label><Note>Choose the network, the asset, the amount and the recipient in Send. Fees are always paid in ETH. You approve the exact fee review before anything is broadcast.</Note><Button label="Open Send" onPress={() => router.push('/send')} /></Card>;
   if (tool.kind === 'balances') return <View style={{ gap: 12 }}><WalletOverview balance={tool.balance} snapshot transactionId={tool.transactionId} /><Note>{tool.offline ? 'Cached' : 'Sample'} balances when requested · Fictional funds</Note></View>;
   if (tool.kind === 'receive') return <ReceiveChatCard />;
   if (tool.kind === 'market') return <Card><Label size={18} weight="bold">Today’s market</Label>{market?.assets.map(asset => <AssetRow key={asset.symbol} asset={asset} onPress={() => onAsk(`Explain ${asset.name}`)} />)}<MarketStatus refresh /></Card>;
