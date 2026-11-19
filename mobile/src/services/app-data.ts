@@ -45,7 +45,7 @@ export type Category = 'keys' | 'personal' | 'cache';
  */
 export type DataId =
   | 'wallet-key' | 'wallet-record'
-  | 'chats' | 'preferences' | 'wallet-cache' | 'app-lock' | 'benchmark' | 'crashes'
+  | 'chats' | 'preferences' | 'wallet-cache' | 'app-lock' | 'benchmark' | 'crashes' | 'install'
   | 'prices' | 'charts';
 
 export type StoredData = {
@@ -92,6 +92,12 @@ export const STORED_DATA: readonly StoredData[] = [
   // whatever a message happened to contain. Personal, and it goes in a wipe.
   { id: 'crashes', key: 'wally.problem-reports.v1', exact: true, store: 'async', category: 'personal',
     label: 'Problem reports from this app', owner: 'services/crash-log-device.ts' },
+
+  // The random name this installation sends the backend so it can tell two phones apart behind
+  // one carrier address. Not a credential and not a wallet identity — it changes on reinstall
+  // and nothing is keyed to it. Still an identifier this device holds, so it goes in a wipe.
+  { id: 'install', key: 'wally.install.v1', exact: true, store: 'async', category: 'personal',
+    label: 'The random name this app calls itself', owner: 'services/install-id.ts' },
 
   // Public data that is merely cached here.
   { id: 'prices', key: 'wally.market.v1.', exact: false, store: 'async', category: 'cache',

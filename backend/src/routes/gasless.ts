@@ -5,6 +5,7 @@ import {
 import { singleFlight } from "../cache.js";
 import { fetchJson, UpstreamError } from "../upstream.js";
 import { getLogger } from "../logger.js";
+import { callerOf, createRateLimiter } from "../ratelimit.js";
 
 const log = getLogger("gasless");
 
@@ -35,6 +36,20 @@ type RpcRequest = { jsonrpc?: unknown; id?: unknown; method?: unknown; params?: 
  */
 const flight = singleFlight<Record<string, unknown>>();
 
+/**
+ * The paymaster's own budget, per caller, and much tighter than the general one.
+ *
+ * Raising the per-address ceiling to fit a carrier-grade NAT pool (see `ratelimit.ts`) widens
+ * what one address can ask the sponsorship policy to pay for, by exactly the factor the
+ * ceiling went up. A sponsorship policy is money, so the route that spends it cannot inherit
+ * a budget sized for balance polling.
+ *
+ * Nobody legitimately needs many sponsored operations a minute: a person sends a transfer,
+ * waits for it, and sends another. The bundler is deliberately not limited here — it moves no
+ * money of Wally's, and `eth_sendUserOperation` is already gated on RPC_ALLOW_BROADCAST.
+ */
+const allowSponsorship = createRateLimiter(config.rateLimitPaymasterPerMinute);
+
 type Upstream = {
   label: "bundler" | "paymaster";
   url(chain: "arbitrum" | "ethereum"): string | undefined;
@@ -46,6 +61,11 @@ function register(app: FastifyInstance, upstream: Upstream): void {
     const chain = (request.params as Record<string, unknown>)["chain"];
     if (!isChain(chain)) {
       return reply.code(400).send({ error: "Unknown chain. Supported: arbitrum, ethereum." });
+    }
+
+    // Before anything upstream is contacted, because the point is to not spend.
+    if (upstream.label === "paymaster" && !allowSponsorship(callerOf(request).key)) {
+      return reply.code(429).send({ error: "Too many sponsored transfers in a row. Try again shortly." });
     }
 
     const target = upstream.url(chain);

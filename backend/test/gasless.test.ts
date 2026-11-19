@@ -17,6 +17,9 @@ afterEach(() => {
 
 const PIMLICO = "https://api.pimlico.io/v2/421614/rpc?apikey=test-key";
 
+const SPENDER = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
+const NEIGHBOUR = "9c858901-8a57-4791-81fe-4c455b099bc9";
+
 async function serverWith(env: Record<string, string> = {}) {
   vi.resetModules();
   for (const [name, value] of Object.entries(env)) vi.stubEnv(name, value);
@@ -193,5 +196,91 @@ describe("gasless proxy", () => {
       payload: { method: "pm_chainId" },
     });
     expect(allowed.statusCode).toBe(200);
+  });
+});
+
+describe("the sponsorship budget", () => {
+  /**
+   * The paymaster is the only route that spends money, and the per-address ceiling was raised
+   * to 3000 so a carrier-grade NAT pool fits behind it (see `ratelimit.ts`). That raise widens
+   * what one address can ask the sponsorship policy to pay for by the same factor — so this
+   * route is limited on its own, far more tightly, and nobody legitimately needs many
+   * sponsored operations a minute.
+   *
+   * A mutation disabling this limit survived the suite until these cases existed. The unit
+   * tests of the limiter proved the counting; nothing proved the route used it.
+   */
+  it("refuses a caller who asks for sponsorship too often", async () => {
+    const app = await serverWith({
+      BUNDLER_URL_ARBITRUM: PIMLICO, PAYMASTER_URL_ARBITRUM: PIMLICO,
+      RATE_LIMIT_PAYMASTER_PER_MINUTE: "2",
+    });
+    stubUpstream({ jsonrpc: "2.0", id: 1, result: { paymaster: "0x" } });
+
+    const codes: number[] = [];
+    for (let i = 0; i < 4; i++) {
+      const response = await app.inject({
+        method: "POST", url: "/v1/paymaster/arbitrum",
+        headers: { "x-wally-install": SPENDER },
+        payload: { method: "pm_getPaymasterData", params: [] },
+      });
+      codes.push(response.statusCode);
+    }
+    expect(codes.slice(2)).toEqual([429, 429]);
+  });
+
+  it("does not spend upstream on a request it is going to refuse", async () => {
+    // The point is to not spend. A refusal that still called Pimlico would be pointless.
+    const app = await serverWith({
+      BUNDLER_URL_ARBITRUM: PIMLICO, PAYMASTER_URL_ARBITRUM: PIMLICO,
+      RATE_LIMIT_PAYMASTER_PER_MINUTE: "1",
+    });
+    const calls = stubUpstream({ jsonrpc: "2.0", id: 1, result: { paymaster: "0x" } });
+
+    for (let i = 0; i < 3; i++) {
+      await app.inject({
+        method: "POST", url: "/v1/paymaster/arbitrum",
+        headers: { "x-wally-install": SPENDER },
+        payload: { method: "pm_getPaymasterData", params: [] },
+      });
+    }
+    expect(calls.length, "a refused sponsorship must not reach the paymaster").toBe(1);
+  });
+
+  it("does not limit the bundler, which spends nothing of Wally's", async () => {
+    const app = await serverWith({
+      BUNDLER_URL_ARBITRUM: PIMLICO, PAYMASTER_URL_ARBITRUM: PIMLICO,
+      RATE_LIMIT_PAYMASTER_PER_MINUTE: "1",
+    });
+    stubUpstream();
+
+    const codes: number[] = [];
+    for (let i = 0; i < 3; i++) {
+      const response = await app.inject({
+        method: "POST", url: "/v1/bundler/arbitrum",
+        headers: { "x-wally-install": SPENDER },
+        payload: { method: "eth_chainId", params: [] },
+      });
+      codes.push(response.statusCode);
+    }
+    expect(codes.every(code => code !== 429), "the bundler must not inherit the paymaster budget").toBe(true);
+  });
+
+  it("budgets each installation separately here too", async () => {
+    const app = await serverWith({
+      BUNDLER_URL_ARBITRUM: PIMLICO, PAYMASTER_URL_ARBITRUM: PIMLICO,
+      RATE_LIMIT_PAYMASTER_PER_MINUTE: "1",
+    });
+    stubUpstream({ jsonrpc: "2.0", id: 1, result: { paymaster: "0x" } });
+    const ask = (id: string) => app.inject({
+      method: "POST", url: "/v1/paymaster/arbitrum",
+      headers: { "x-wally-install": id },
+      payload: { method: "pm_getPaymasterData", params: [] },
+    });
+
+    expect((await ask(SPENDER)).statusCode).not.toBe(429);
+    expect((await ask(SPENDER)).statusCode).toBe(429);
+    // Someone else's turn is not consumed by the first one's.
+    expect((await ask(NEIGHBOUR)).statusCode).not.toBe(429);
   });
 });
