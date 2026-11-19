@@ -8,6 +8,7 @@
  * Nothing here is required: with EXPO_PUBLIC_WALLY_PROXY_URL unset, each caller falls back to
  * the path it used before the backend existed.
  */
+import { INSTALL_HEADER, currentInstallId } from './install-id.ts';
 
 /**
  * Accept a proxy URL only when it is safe to call, and normalise it for path joining.
@@ -41,6 +42,14 @@ export function backendOrigin(): string {
  * not user authentication.
  */
 export function backendHeaders(origin = backendOrigin()): Record<string, string> {
+  if (!origin) return {};
   const key = process.env.EXPO_PUBLIC_WALLY_APP_KEY ?? '';
-  return origin && key ? { 'x-wally-key': key } : {};
+  // The installation id, so the backend can tell this phone from the others sharing a
+  // carrier address. Sent only to a configured Wally origin, and only alongside the key —
+  // see `install-id.ts` for what it deliberately is not.
+  const install = currentInstallId();
+  return {
+    ...(key ? { 'x-wally-key': key } : {}),
+    ...(install ? { [INSTALL_HEADER]: install } : {}),
+  };
 }

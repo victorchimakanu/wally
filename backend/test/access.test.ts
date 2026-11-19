@@ -16,6 +16,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
  */
 
 const KEY = "an-app-key-of-at-least-16-chars";
+const ID_A = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
+const ID_B = "9c858901-8a57-4791-81fe-4c455b099bc9";
 
 async function serverWith(env: Record<string, string>) {
   vi.resetModules();
@@ -125,6 +127,59 @@ describe("rate limiting", () => {
     }
     expect(codes.slice(0, 3), "the budget must be honoured").toEqual([200, 200, 200]);
     expect(codes.slice(3), "requests past the budget must be refused").toEqual([429, 429]);
+  });
+
+  it("gives two installations behind one address two budgets", async () => {
+    // The whole reason this exists. Carrier-grade NAT is the norm on Nigerian mobile
+    // networks, and a per-address budget is one budget divided among strangers.
+    const app = await serverWith({ RATE_LIMIT_PER_MINUTE: "2", RATE_LIMIT_PER_ADDRESS: "100" });
+    const ask = (id: string) => app.inject({
+      method: "GET", url: "/v1/rpc/methods", headers: { "x-wally-install": id },
+    });
+
+    const first = [await ask(ID_A), await ask(ID_A), await ask(ID_A)];
+    expect(first.map(r => r.statusCode)).toEqual([200, 200, 429]);
+    // The neighbour is untouched by the first one spending its budget.
+    expect((await ask(ID_B)).statusCode).toBe(200);
+  });
+
+  it("does not let rotating installation ids escape the address ceiling", async () => {
+    // The property that stops this being security theatre, and the one a unit test of the
+    // limiter cannot establish: that server.ts actually applies both limits. A mutation
+    // removing the ceiling survived the suite until this case existed.
+    const app = await serverWith({ RATE_LIMIT_PER_MINUTE: "1000", RATE_LIMIT_PER_ADDRESS: "3" });
+
+    const codes: number[] = [];
+    for (let i = 0; i < 6; i++) {
+      // A fresh, perfectly valid id every single request.
+      const fresh = `${i.toString(16).padStart(8, "0")}-4f89-41d3-9a0c-0305e82c3301`;
+      const response = await app.inject({
+        method: "GET", url: "/v1/rpc/methods", headers: { "x-wally-install": fresh },
+      });
+      codes.push(response.statusCode);
+    }
+    expect(codes).toEqual([200, 200, 200, 429, 429, 429]);
+  });
+
+  it("budgets a caller that sends no id per address, as before", async () => {
+    const app = await serverWith({ RATE_LIMIT_PER_MINUTE: "2", RATE_LIMIT_PER_ADDRESS: "100" });
+    const codes: number[] = [];
+    for (let i = 0; i < 3; i++) codes.push((await app.inject({ method: "GET", url: "/v1/rpc/methods" })).statusCode);
+    expect(codes).toEqual([200, 200, 429]);
+  });
+
+  it("budgets a junk id per address rather than trusting it", async () => {
+    // Otherwise "not a uuid" would be a key like any other, and sending a different one each
+    // time would be free.
+    const app = await serverWith({ RATE_LIMIT_PER_MINUTE: "2", RATE_LIMIT_PER_ADDRESS: "100" });
+    const codes: number[] = [];
+    for (let i = 0; i < 3; i++) {
+      const response = await app.inject({
+        method: "GET", url: "/v1/rpc/methods", headers: { "x-wally-install": `junk-${i}` },
+      });
+      codes.push(response.statusCode);
+    }
+    expect(codes).toEqual([200, 200, 429]);
   });
 
   it("counts before the key is checked, so guessing keys is bounded too", async () => {
