@@ -10,6 +10,7 @@ import { historyProvenance } from '../services/history-source';
 import { custodyNotice } from '../services/custody';
 import { receiveAdvice } from '../services/receive-advice';
 import { CHAINS, formatEth, type Chain } from '../services/wallet-api';
+import { tokenCaveat, tokensFor } from '../services/tokens.ts';
 import { useMarket } from '../data/market';
 import { formatPrice } from '../services/market-api';
 import { fiatDisplayable, fiatTotal, fiatValue } from '../services/fiat-value';
@@ -102,6 +103,18 @@ function NetworkMark({ chain }: { chain: Chain }) {
   return <View style={{ width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: chain === 'arbitrum' ? c.amber : c.tint }}><Label size={17} weight="semibold">{chain === 'arbitrum' ? 'A' : 'E'}</Label></View>;
 }
 /** Figma home/wallet-overview + wallet/network-balances: one total, then each network's balance. */
+/**
+ * The caveat for the token in this row, or null.
+ *
+ * Looked up by chain and symbol because a balance row carries those and not the Token itself.
+ * `tokenAt` refuses an unpinned address rather than guessing, and a symbol nothing pins simply
+ * has nothing to say about it.
+ */
+function caveatFor(chain: Chain, symbol: string): string | null {
+  const token = tokensFor(chain).find(entry => entry.symbol === symbol);
+  return token ? tokenCaveat(token) : null;
+}
+
 export function LiveWalletOverview({ onActivity = () => router.push('/history') }: { onActivity?: () => void } = {}) {
   const wallet = useWallet();
   const balances = wallet.snapshot?.balances ?? [];
@@ -136,10 +149,11 @@ export function LiveWalletOverview({ onActivity = () => router.push('/history') 
       {tokenBalances.map(item => <View key={`${item.chain}:${item.symbol}`} style={{ paddingVertical: 12, gap: 6, borderTopWidth: 1, borderColor: c.line }}>
         <View style={shared.row}><NetworkMark chain={item.chain} /><View style={shared.flex}><Label size={16} weight="medium">{item.symbol}</Label><Label size={12} color={c.muted}>{item.chain === 'arbitrum' ? 'Arbitrum' : 'Ethereum'} Sepolia · Testnet</Label></View><View style={{ alignItems: 'flex-end', flexShrink: 1 }}><Label size={16} weight="semibold">{item.balance === null ? 'Unavailable' : `${item.balance} ${item.symbol}`}</Label><Label size={12} color={item.error ? c.error : c.muted}>{item.error ? 'Could not refresh' : 'Available balance'}</Label><FiatLine amount={item.balance} symbol={item.symbol} /></View></View>
         {!!item.error && <Note error>{item.error}</Note>}
+        {!!caveatFor(item.chain, item.symbol) && <Note>{caveatFor(item.chain, item.symbol)}</Note>}
       </View>)}
     </Card>}
     {!!wallet.error && <Note error>{wallet.error}</Note>}
-    <Note>Testnet funds held by the WDK wallet on your computer, with no monetary value. The USDt contract is a third-party testnet deployment, not Tether’s — sending it is not built yet.</Note>
+    <Note>{['Testnet funds held by the WDK wallet on your computer, with no monetary value.', ...new Set(tokenBalances.flatMap(item => caveatFor(item.chain, item.symbol) ?? []))].join(' ')}</Note>
     <View style={shared.row}><Button secondary label="Refresh" disabled={wallet.loading || wallet.offline} style={shared.flex} onPress={() => { void wallet.refresh(); }} /><Button secondary label="Activity" style={shared.flex} onPress={onActivity} /></View>
   </View>;
 }
