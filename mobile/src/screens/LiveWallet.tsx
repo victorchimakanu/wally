@@ -3,7 +3,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import * as Linking from 'expo-linking';
 import { Pressable, TextInput, View } from 'react-native';
 import { Address, Button, Card, Detail, Divider, Label, LinkButton, Note, Pill, Screen, useShared } from '../components/ui';
-import { tokensFor } from '../services/tokens';
+import { tokenCaveat, tokensFor } from '../services/tokens';
 import { AssetChoice, LiveActivityCard, LiveReceiveCard, NetworkChoice, WalletStatus } from '../components/WalletData';
 import { useWallet } from '../data/wallet';
 import { useDemo } from '../demo/store';
@@ -153,6 +153,7 @@ export function LiveSendScreen() {
     <NetworkChoice value={chain} onChange={next => { wallet.clearQuote(); setChain(next); setAsset('ETH'); setError(''); }} />
     {!!scannedChain && <Note>Switched to {CHAINS[scannedChain].name}, the network the scanned code asked for.</Note>}
     <AssetChoice value={sending} options={assets} onChange={next => { wallet.clearQuote(); setAsset(next); setAmount(''); setError(''); }} />
+    {!!token && !!tokenCaveat(token) && <Note>{tokenCaveat(token)}</Note>}
     <View style={{ gap: 8 }}>
       <View style={[shared.row, { gap: 20 }]}><Label size={13} weight="medium" color={c.muted} style={shared.flex}>To</Label><LinkButton label="Saved" accessibilityLabel="Choose saved recipient" disabled={busy} onPress={() => router.push('/address-book')} /><LinkButton label="Scan" accessibilityLabel="Scan a QR code" disabled={busy} onPress={() => router.push('/scan')} /></View>
       <TextInput accessibilityLabel="Recipient address" value={recipient} editable={!busy} autoCapitalize="none" autoCorrect={false} placeholder="0x…" placeholderTextColor={c.muted} onChangeText={value => { wallet.clearQuote(); setRecipient(value); }} style={shared.input} />
@@ -207,8 +208,12 @@ export function LiveReviewScreen() {
         <Divider />
         <Detail label="Network" value={`${q.network} · Chain ${q.chainId}`} />
         <Detail label="Max fee" value={`${q.fee} ETH`} />
-        {/* A token total is already "25 USDt + 0.0001 ETH"; only an ETH total is a bare number. */}
-        <Detail label="Total" value={q.symbol === 'ETH' ? `${q.total} ETH` : q.total} emphasis />
+        {/* A token total is two assets and reads "25 USDT + up to 0.000021 ETH"; only an ETH
+            total is a bare number. The token form is composed here from `amount` and `fee`
+            rather than echoed from `q.total`: parseQuote verifies the sum for ETH and leaves
+            the token string alone, so `q.total` is the one figure on this screen that nothing
+            checked. Same words, from data the parser stands behind. */}
+        <Detail label="Total" value={q.symbol === 'ETH' ? `${q.total} ETH` : `${q.amount} ${q.symbol} + up to ${q.fee} ETH`} emphasis />
       </Card>
     </> : <Card><Label weight="semibold">This review has ended</Label><Note>{busy ? 'Sending…' : 'Check Activity before sending again.'}</Note>{!busy && <Button secondary label="Check Activity" onPress={() => router.push('/history')} />}</Card>}
     {!!error && <Note error>{error}</Note>}

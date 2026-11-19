@@ -40,9 +40,16 @@ export type Token = {
   decimals: number;
   /** Shown in the UI where "USDT" alone would be ambiguous. */
   name: string;
+  /** Who actually issues this asset, for saying whose contract this is *not*. */
+  issuer: string;
   /**
-   * False when the deployment is not the token issuer's own. Surfaced in the app so a tester
-   * is never misled into thinking testnet USDt is Tether's.
+   * False when the deployment is not the token issuer's own.
+   *
+   * Read through `tokenCaveat()` below, which is what every surface showing this token calls.
+   * For thirteen days this field was set here, documented as "surfaced in the app so a tester
+   * is never misled", and read by nothing at all — while a hand-written sentence elsewhere
+   * said the same thing and went stale. A flag that nothing reads is not a safeguard, it is a
+   * note to yourself. `test/token-caveat.test.ts` fails if it stops being read.
    */
   official: boolean;
 };
@@ -52,6 +59,7 @@ const USDT_ARBITRUM_SEPOLIA: Token = {
   symbol: 'USDT',
   decimals: 6,
   name: 'Tether USD (testnet)',
+  issuer: 'Tether',
   official: false,
 };
 
@@ -80,4 +88,25 @@ export function tokenAt(chain: Chain, address: string): Token | null {
 /** Every pinned token across all chains, for the indexer and for display lookups. */
 export function allTokens(): readonly Token[] {
   return Object.values(TOKENS).flat();
+}
+
+/**
+ * What a tester has to be told about this token, or null when there is nothing to say.
+ *
+ * This is the only reader of `official`, and every screen that names a token calls it. The
+ * point is that the warning exists *because the data says so*: pin an issuer's real contract,
+ * set `official: true`, and the sentence disappears on its own. Nobody has to remember.
+ *
+ * It deliberately does not mention testnet value. "Testnet funds have no monetary value" is
+ * said elsewhere and is a different fact. This one is narrower and easier to miss: the contract
+ * is not the issuer's, so a USDt transfer working here proves nothing about Tether's own token,
+ * and must not be read as a mainnet path already tested.
+ */
+export function tokenCaveat(token: Token): string | null {
+  return token.official ? null : `This ${token.symbol} is a third-party testnet deployment, not ${token.issuer}'s own contract.`;
+}
+
+/** The caveats for everything connected on a chain, in display order. */
+export function chainCaveats(chain: Chain): readonly string[] {
+  return tokensFor(chain).map(tokenCaveat).filter((caveat): caveat is string => caveat !== null);
 }

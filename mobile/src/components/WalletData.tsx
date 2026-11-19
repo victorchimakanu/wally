@@ -10,6 +10,7 @@ import { custodyNotice } from '../services/custody';
 import { receiveAdvice } from '../services/receive-advice';
 import { historyGap } from '../services/history-source';
 import { CHAINS, formatEth, type Chain } from '../services/wallet-api';
+import { tokenCaveat, tokensFor } from '../services/tokens.ts';
 import { fiatDisplayable, fiatTotal } from '../services/fiat-value';
 import { formatPrice } from '../services/market-api';
 import { useMarket } from '../data/market';
@@ -72,6 +73,17 @@ function NetworkMark({ chain }: { chain: Chain }) {
   const c = useColors();
   return <View style={{ width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: chain === 'arbitrum' ? c.amber : c.tint }}><Label size={17} weight="semibold">{chain === 'arbitrum' ? 'A' : 'E'}</Label></View>;
 }
+/**
+ * The caveat for the token in this row, or null.
+ *
+ * Looked up by chain and symbol because a balance row carries those and not the Token itself.
+ * A symbol nothing pins simply has nothing to say about it, so ETH rows get nothing.
+ */
+function caveatFor(chain: Chain, symbol: string): string | null {
+  const token = tokensFor(chain).find(entry => entry.symbol === symbol);
+  return token ? tokenCaveat(token) : null;
+}
+
 /** Figma home/wallet-overview + wallet/network-balances: one total, then each network's balance. */
 /** `onActivity` adds an Activity button, for chat; on the Wallet screen Activity is its own tab. */
 export function LiveWalletOverview({ onActivity }: { onActivity?: () => void } = {}) {
@@ -97,6 +109,7 @@ export function LiveWalletOverview({ onActivity }: { onActivity?: () => void } =
   const balanceRow = (item: (typeof balances)[number], title: string) => <View key={`${item.chain}:${item.symbol}`} style={{ paddingHorizontal: 16, paddingVertical: 12, gap: 6 }}>
     <View style={shared.row}><NetworkMark chain={item.chain} /><Label size={16} weight="medium" style={shared.flex}>{title}</Label><View style={{ alignItems: 'flex-end', flexShrink: 1 }}><Label size={16} weight="semibold">{item.balance === null ? 'Unavailable' : `${item.balance} ${item.symbol}`}</Label>{!!item.error && <Label size={12} color={c.error}>Could not refresh</Label>}</View></View>
     {!!item.error && <Note error>{item.error}</Note>}
+    {!!caveatFor(item.chain, item.symbol) && <Note>{caveatFor(item.chain, item.symbol)}</Note>}
   </View>;
   return <View style={{ gap: 12 }}>
     <Card style={{ backgroundColor: c.tint, borderColor: c.tint, alignItems: 'center', gap: 4, paddingVertical: 24 }}>
