@@ -5,7 +5,7 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Button, Card, Label, Note, Pill, Screen } from '../components/ui';
 import { parseScannedAddress } from '../services/qr-address';
 import { CHAINS, type Chain } from '../services/wallet-api';
-import { colors as c } from '../theme';
+import { useColors } from '../theme';
 
 /**
  * Scan a recipient address.
@@ -23,6 +23,7 @@ import { colors as c } from '../theme';
  * open. The Send screen says it switched.
  */
 export function ScanAddressScreen() {
+  const c = useColors();
   const [permission, requestPermission] = useCameraPermissions();
   const [problem, setProblem] = useState('');
   // A camera fires this many times a second. Without a latch the first good code navigates
@@ -64,7 +65,7 @@ export function ScanAddressScreen() {
     </Screen>;
   }
 
-  return <Screen title="Scan an address" subtitle="Point at the recipient’s QR code">
+  return <Screen title="Scan an address">
     <Card style={{ padding: 0, overflow: 'hidden' }}>
       <View style={{ aspectRatio: 1, backgroundColor: c.ink }}>
         <CameraView

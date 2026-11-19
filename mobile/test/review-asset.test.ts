@@ -38,13 +38,13 @@ function quote({ symbol = 'ETH', amount = '0.001', total = '0.001021' } = {}): L
 }
 
 function renderReview(q: LiveQuote | null): Value {
-  const ui = Object.fromEntries(['Address', 'Button', 'Card', 'Detail', 'Label', 'Note', 'Pill', 'Screen'].map(name => [name, name]));
+  const ui = Object.fromEntries(['Address', 'Button', 'Card', 'Detail', 'Divider', 'Group', 'Label', 'LinkButton', 'Note', 'Pill', 'Screen'].map(name => [name, name]));
   const mocks: Record<string, Value> = {
     react: { useEffect: () => {}, useRef: (initial: Value) => ({ current: initial }), useState: (initial: Value) => [typeof initial === 'function' ? initial() : initial, () => {}] },
     'expo-router': { router: {}, useLocalSearchParams: () => ({}) },
     'expo-linking': {},
     'react-native': { Pressable: 'Pressable', TextInput: 'TextInput', View: 'View' },
-    '../components/ui': { ...ui, shared: { row: {}, flex: {}, between: {}, center: {}, input: {} } },
+    '../components/ui': { ...ui, shared: { row: {}, flex: {}, between: {}, center: {}, input: {} }, useShared: () => ({ row: {}, flex: {}, between: {}, center: {}, input: {} }) },
     '../services/tokens': { tokenCaveat: () => null, tokensFor: () => [] },
     '../components/WalletData': { AssetChoice: 'AssetChoice', LiveActivityCard: 'LiveActivityCard', LiveReceiveCard: 'LiveReceiveCard', NetworkChoice: 'NetworkChoice', WalletStatus: 'WalletStatus' },
     '../data/wallet': { useWallet: () => ({ quote: q, offline: false, confirm: async () => {}, clearQuote: () => {} }) },
@@ -56,8 +56,8 @@ function renderReview(q: LiveQuote | null): Value {
     '../services/address-safety.ts': { addressTrust: () => null, trustWarning: () => '' },
     '../services/chain-safety.ts': { chainOfNetwork: () => null, crossChainWarning: () => '' },
     '../services/transfer-watch.ts': { readWatch: async () => null, watchStatus: () => null, watchTransfer: async () => null },
-    '../demo/preferences': { usePreferences: () => ({}) },
-    '../theme': { colors: {}, fonts: {}, radius: {} },
+    '../demo/preferences': { usePreferences: () => ({ preferences: {} }) },
+    '../theme': { colors: {}, fonts: {}, radius: {}, useColors: () => ({}), useTheme: () => ({ palette: {}, dark: false }) },
   };
   const source = readFileSync(`${SRC}screens/LiveWallet.tsx`, 'utf8');
   const compiled = ts.transpileModule(source, { compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.CommonJS, esModuleInterop: true } }).outputText;
@@ -131,47 +131,44 @@ function note(tree: Value, phrase: string): string | undefined {
 }
 
 
+const TOKEN = () => quote({ symbol: 'USDT', amount: '25', total: '25 USDT + 0.000021 ETH' });
+
 test('a token review names the token, not ETH', () => {
-  const screen = said(quote({ symbol: 'USDT', amount: '25', total: '25 USDT + 0.000021 ETH' }));
+  const screen = said(TOKEN());
   assert.match(screen, /25 USDT/, `the amount is not shown in USDT: ${screen}`);
-  assert.match(screen, /Confirm and send USDT/, 'the confirm button still offers to send ETH');
+  assert.match(screen, /Send 25 USDT/, 'the send button does not name the amount and asset');
   // The bug in one assertion: the number the user typed must never appear beside ETH.
   assert.doesNotMatch(screen, /25 ETH/, 'a USDt amount is labelled ETH');
 });
 
-test('a token review shows no single total, because there is not one', () => {
-  const screen = said(quote({ symbol: 'USDT', amount: '25', total: '25 USDT + 0.000021 ETH' }));
-  assert.doesNotMatch(screen, /Amount \+ fee/, 'a token review invents a total');
-  // `total` for a token is server prose that parseQuote deliberately does not verify, so it is
-  // the one number on this screen nothing checked. It must not be rendered at all.
-  assert.doesNotMatch(screen, /25 USDT \+ 0\.000021 ETH/, 'the unverified server total is displayed');
-  // Read off the note itself. Both amounts have to be stated there, or "there is no total" is
-  // just hiding information — and the fee Detail saying it elsewhere does not count.
-  const explanation = note(renderReview(quote({ symbol: 'USDT', amount: '25', total: '25 USDT + 0.000021 ETH' })), 'no single total');
-  assert.ok(explanation, 'nothing explains why there is no total');
-  assert.match(explanation, /25 USDT/, `the note omits the amount: ${explanation}`);
-  assert.match(explanation, /0\.000021 ETH/, `the note omits the fee: ${explanation}`);
+test('the token total is composed from what the parser checked, not echoed from the server', () => {
+  // parseQuote verifies total === amount + fee for ETH and deliberately leaves the token form
+  // alone, because the two sides are different assets. So `q.total` is the one figure on this
+  // screen nothing validated, and the row is built from `amount` and `fee` instead — the same
+  // sentence, out of data the parser stands behind.
+  const total = detail(renderReview(TOKEN()), 'Total');
+  assert.equal(total, '25 USDT + up to 0.000021 ETH');
+  assert.notEqual(total, '25 USDT + 0.000021 ETH', 'the unverified server total is being echoed');
 });
 
 test('the fee row is always quoted in ETH, token or not', () => {
-  // Read off the row, because the token note mentions the fee too and would otherwise cover for
-  // a mislabelled one. Gas is native on both chains; a fee in USDT is not a thing that exists.
-  for (const q of [quote(), quote({ symbol: 'USDT', amount: '25', total: '25 USDT + 0.000021 ETH' })]) {
-    assert.equal(detail(renderReview(q), 'Maximum network fee'), '0.000021 ETH', `fee row wrong for ${q.symbol}`);
+  // Read off the row rather than the screen: the total mentions the fee too and would otherwise
+  // cover for a mislabelled one. Gas is native on both chains; a fee in USDT does not exist.
+  for (const q of [quote(), TOKEN()]) {
+    assert.equal(detail(renderReview(q), 'Max fee'), '0.000021 ETH', `fee row wrong for ${q.symbol}`);
   }
 });
 
-test('a native review is unchanged, including the total the parser checked', () => {
+test('a native review keeps the bare total the parser checked', () => {
   const screen = said(quote());
   assert.match(screen, /0\.001 ETH/);
-  assert.match(screen, /Confirm and send ETH/);
-  assert.match(screen, /Amount \+ fee/);
-  assert.match(screen, /0\.001021 ETH/);
-  assert.doesNotMatch(screen, /no single total/);
+  assert.match(screen, /Send 0\.001 ETH/);
+  assert.equal(detail(renderReview(quote()), 'Total'), '0.001021 ETH');
 });
 
-test('with no quote the screen asks for a fresh one and offers to send nothing', () => {
+test('with no quote the screen offers to send nothing', () => {
   const screen = said(null);
-  assert.match(screen, /A fresh review is required/);
+  assert.match(screen, /This review has ended/);
   assert.doesNotMatch(screen, /0\.001/);
+  assert.doesNotMatch(screen, /25/);
 });

@@ -1,9 +1,8 @@
 import React, { useState } from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
-import { Keyboard, Pressable, TextInput, View } from 'react-native';
-import { Button, Card, Detail, Label, Note, Screen, shared } from '../components/ui';
+import { Keyboard, Pressable, View } from 'react-native';
+import { Button, Card, Group, Label, Note, Row, Screen, useShared } from '../components/ui';
 import { AssetLogo, AssetRow, Watchlist } from '../components/MarketRows';
-import { WallyAsset } from '../components/WallyAsset';
 import { ChatComposer } from '../components/ChatComposer';
 import { WalletToolsModal } from '../components/ChatCards';
 import { COINS, formatPrice, formatChange } from '../services/market-api';
@@ -11,7 +10,7 @@ import { useMarket } from '../data/market';
 import { MarketStatus, PriceChart } from '../components/MarketData';
 import { usePreferences } from '../demo/preferences';
 import { useDemo } from '../demo/store';
-import { colors as c, fonts } from '../theme';
+import { useColors } from '../theme';
 
 function AskDock({ topic }: { topic?: string }) {
   const { state, ai, newChat, sendMessage } = useDemo();
@@ -27,45 +26,52 @@ function AskDock({ topic }: { topic?: string }) {
   }
   const privacy = ai.mode === 'qvac' ? ai.location === 'phone' ? 'ON THIS PHONE' : 'ON YOUR COMPUTER' : 'SCRIPTED PREVIEW';
   return <>
-    <ChatComposer value={input} onChange={setInput} onSend={send} onTools={() => { Keyboard.dismiss(); setTools(true); }} onPrivacy={() => router.push({ pathname: '/preferences', params: { page: 'model' } })} paused={state.aiPaused} privacy={privacy} />
+    <ChatComposer value={input} onChange={setInput} onSend={send} onTools={() => { Keyboard.dismiss(); setTools(true); }} onPrivacy={() => router.push({ pathname: '/preferences', params: { panel: 'model' } })} paused={state.aiPaused} privacy={privacy} />
     <WalletToolsModal visible={tools} onClose={() => setTools(false)} onManual={() => router.push('/send')} />
   </>;
 }
+/** Four tracked assets fit on one screen, so there is nothing to search or filter. */
 export function MarketScreen() {
-  const params = useLocalSearchParams<{ filter?: string }>();
-  const [filter, setFilter] = useState(params.filter === 'Trends' ? 'Trends' : 'All assets');
-  const [search, setSearch] = useState('');
+  const c = useColors();
   const { data, loading, error } = useMarket();
-  const all = data?.assets ?? [];
-  const assets = all.filter(asset => (filter !== 'Stablecoins' || asset.symbol === 'USDT') && (filter !== 'Gainers' || asset.change !== null && asset.change > 0) && (asset.name + asset.symbol).toLowerCase().includes(search.toLowerCase())).sort((a, b) => filter === 'Trends' || filter === 'Gainers' ? (b.change ?? -Infinity) - (a.change ?? -Infinity) : 0);
+  const { preferences } = usePreferences();
+  const assets = data?.assets ?? [];
+  const watching = assets.some(asset => preferences.saved.includes(asset.symbol));
   return <Screen title="Market" footer={<AskDock />}>
-    <Card style={{ backgroundColor: c.successTint }}><Label size={18} weight="bold">Market pulse</Label><Label size={16}>{data ? `${all.filter(asset => asset.change !== null && asset.change > 0).length} of ${all.length} tracked assets are up over 24h.` : 'Fetching current prices and market activity.'}</Label><MarketStatus refresh /></Card>
-    <View style={[shared.row, shared.input]}><WallyAsset name="ddc2c.svg" /><TextInput accessibilityLabel="Search market assets" value={search} onChangeText={setSearch} placeholder="Search assets" placeholderTextColor={c.muted} style={{ flex: 1, fontSize: 16, fontFamily: fonts.regular, color: c.ink }} /></View>
-    <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap' }}>{['All assets', 'Gainers', 'Stablecoins', 'Trends'].map(value => <Pressable key={value} accessibilityRole="tab" accessibilityState={{ selected: value === filter }} onPress={() => setFilter(value)} style={{ paddingHorizontal: 12, paddingVertical: 10, backgroundColor: value === filter ? c.ink : c.surface, borderRadius: 20, borderWidth: 1, borderColor: c.line }}><Label size={12} color={value === filter ? c.surface : c.ink}>{value}</Label></Pressable>)}</View>
-    {!search && filter === 'All assets' && <Watchlist />}
-    <Label size={18} weight="bold">{filter === 'Trends' || filter === 'Gainers' ? 'Top movers · 24h' : 'Explore assets'}</Label>
-    {assets.map(asset => <AssetRow key={asset.symbol} asset={asset} />)}
-    {!assets.length && <Card><Label weight="semibold">{loading ? 'Loading assets…' : error && !data ? 'Market data unavailable' : 'No matching assets'}</Label><Note>{filter === 'Gainers' ? 'Only assets with positive 24h performance appear here.' : 'Try Bitcoin, Ethereum, Solana or Tether.'}</Note></Card>}
+    <Watchlist />
+    <Group title={watching ? 'All assets' : undefined}>{assets.map(asset => <AssetRow key={asset.symbol} asset={asset} />)}</Group>
+    {!assets.length && <Label color={c.muted}>{loading ? 'Loading prices…' : error && !data ? 'Market data unavailable' : 'No assets'}</Label>}
+    <MarketStatus refresh />
   </Screen>;
 }
 export function AssetScreen() {
+  const c = useColors();
+  const shared = useShared();
   const { symbol } = useLocalSearchParams<{ symbol: string }>();
   const { preferences, updatePreferences, error } = usePreferences();
-  const { newChat } = useDemo();
   const [timeframe, setTimeframe] = useState('1D');
   const { data, currency } = useMarket();
   const asset = data?.assets.find(item => item.symbol === symbol);
-  if (!asset) return <Screen title="Market"><Note>{COINS.some(coin => coin.symbol === symbol) ? 'Fetching asset data. Previously fetched prices will appear when available.' : 'Asset not found.'}</Note><MarketStatus refresh /><Button label="Browse assets" onPress={() => router.replace('/market')} /></Screen>;
+  if (!asset) return <Screen title="Market"><Note>{COINS.some(coin => coin.symbol === symbol) ? 'Loading prices…' : 'Asset not found.'}</Note><MarketStatus refresh /></Screen>;
   const saved = preferences.saved.includes(asset.symbol);
-  return <Screen title="Market" footer={<AskDock topic={asset.symbol} />}>
-    <View style={shared.between}><View><Label size={25} weight="semibold">{asset.name}</Label><Note>{asset.symbol} · Price and performance</Note></View><AssetLogo symbol={asset.symbol} /></View>
-    <Card><View style={shared.between}><Label weight="medium">{asset.symbol} / {currency}</Label><Note>24H</Note></View><Label size={28} weight="semibold">{formatPrice(asset.price, currency)}</Label><Label size={12} color={asset.change !== null && asset.change < 0 ? c.error : c.success}>{formatChange(asset.change)} over 24h</Label>
+  const falling = asset.change !== null && asset.change < 0;
+  return <Screen title={asset.name} footer={<AskDock topic={asset.symbol} />}>
+    <View style={shared.between}>
+      <View style={{ gap: 2, flexShrink: 1 }}><Label size={32} weight="semibold" adjustsFontSizeToFit numberOfLines={1} style={{ lineHeight: 40 }}>{formatPrice(asset.price, currency)}</Label><Label size={14} color={asset.change === null ? c.muted : falling ? c.error : c.success}>{formatChange(asset.change)} · 24h</Label></View>
+      <AssetLogo symbol={asset.symbol} />
+    </View>
+    <Card>
       <PriceChart id={asset.id} days={({ '1D': 1, '1W': 7, '1M': 30, '1Y': 365 } as Record<string, number>)[timeframe]} />
-      <View style={shared.row}>{['1D', '1W', '1M', '1Y'].map(value => <Pressable key={value} accessibilityRole="tab" accessibilityState={{ selected: timeframe === value }} onPress={() => setTimeframe(value)} style={{ flex: 1, borderRadius: 18, borderWidth: 1, borderColor: timeframe === value ? c.orange : c.line, backgroundColor: timeframe === value ? c.amber : c.surface, alignItems: 'center', paddingVertical: 8 }}><Label size={12}>{value}</Label></Pressable>)}</View><MarketStatus />
+      <View style={shared.row}>{['1D', '1W', '1M', '1Y'].map(value => <Pressable key={value} accessibilityRole="tab" accessibilityState={{ selected: timeframe === value }} onPress={() => setTimeframe(value)} style={{ flex: 1, borderRadius: 18, borderWidth: 1, borderColor: timeframe === value ? c.orange : c.line, backgroundColor: timeframe === value ? c.amber : c.surface, alignItems: 'center', paddingVertical: 8 }}><Label size={12}>{value}</Label></Pressable>)}</View>
     </Card>
-    <View style={shared.row}><Button secondary label={saved ? 'Saved' : 'Save'} style={shared.flex} onPress={() => updatePreferences({ saved: saved ? preferences.saved.filter(value => value !== asset.symbol) : [...preferences.saved, asset.symbol] })} /><Button accent label="Ask Wally" style={shared.flex} onPress={() => router.push({ pathname: '/chat', params: { id: newChat(), topic: asset.symbol } })} /></View>
-    <Card><Label size={18} weight="bold">Market facts</Label><Detail label="Market cap" value={formatPrice(asset.cap, currency, true)} /><Detail label="24h volume" value={formatPrice(asset.volume, currency, true)} /><Detail label="Circulating supply" value={asset.supply === null ? 'Unavailable' : `${asset.supply.toLocaleString('en-US', { notation: 'compact' })} ${asset.symbol}`} /><Detail label="Maximum supply" value={asset.maximum === null ? 'Not reported' : `${asset.maximum.toLocaleString('en-US', { notation: 'compact' })} ${asset.symbol}`} /><Note>CoinGecko · {asset.updatedAt ? `Provider updated ${new Date(asset.updatedAt).toLocaleString()}` : 'Provider timestamp unavailable'}</Note></Card>
-    <Card style={{ backgroundColor: c.tint }}><Label weight="medium">Market asset</Label><Label color={c.muted}>Market prices describe traded assets. Testnet tokens have no monetary value.</Label></Card>
+    <Button secondary label={saved ? 'On watchlist' : 'Add to watchlist'} onPress={() => updatePreferences({ saved: saved ? preferences.saved.filter(value => value !== asset.symbol) : [...preferences.saved, asset.symbol] })} />
+    <Group>
+      <Row title="Market cap" value={formatPrice(asset.cap, currency, true)} />
+      <Row title="24h volume" value={formatPrice(asset.volume, currency, true)} />
+      <Row title="Circulating supply" value={asset.supply === null ? 'Unavailable' : `${asset.supply.toLocaleString('en-US', { notation: 'compact' })} ${asset.symbol}`} />
+      <Row title="Maximum supply" value={asset.maximum === null ? 'Not reported' : `${asset.maximum.toLocaleString('en-US', { notation: 'compact' })} ${asset.symbol}`} />
+    </Group>
+    <MarketStatus />
     {!!error && <Note error>{error}</Note>}
   </Screen>;
 }

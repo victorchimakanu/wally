@@ -106,3 +106,14 @@ test('a recipient with a plausible but wrong address is refused', () => {
     assert.deepEqual(preferences.recipients, [], `accepted ${bad}`);
   }
 });
+
+test('appearance is read when valid, dropped when not, and absent when never set', () => {
+  const base: Preferences = { name: 'A', currency: 'USD', saved: [], recipients: [] };
+  assert.equal(parsePreferences({ appearance: 'dark' }, base).preferences.appearance, 'dark');
+  const bad = parsePreferences({ appearance: 'sepia' }, base);
+  assert.equal(bad.preferences.appearance, undefined);
+  assert.deepEqual(bad.dropped, ['your appearance setting']);
+  // A record from before the setting existed reads back without the key, so older
+  // equality checks on preferences keep holding.
+  assert.equal('appearance' in parsePreferences({ name: 'A' }, base).preferences, false);
+});

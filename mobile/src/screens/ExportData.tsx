@@ -1,13 +1,10 @@
 import { CustodyGuard } from '../components/WalletData';
 import React, { useState } from 'react';
-import { View } from 'react-native';
-import { router } from 'expo-router';
 import { Button, Card, Label, Note, Pill, Screen } from '../components/ui';
 import { useWallet } from '../data/wallet';
-import { colors as c } from '../theme';
 import { fetchProxyHistory, type Chain } from '../services/wallet-api';
 import {
-  CSV_COLUMNS, collectHistory, describeGaps, exportFilename, historyCsv, isComplete,
+  collectHistory, describeGaps, exportFilename, historyCsv, isComplete,
   type Collected,
 } from '../services/history-export';
 import { deliverCsv } from '../services/history-export-device';
@@ -64,64 +61,40 @@ export function ExportDataScreen() {
     } finally { setBusy(false); }
   }
 
-  if (wallet.blocked) return <Screen title="Export your history" subtitle="Unavailable in this build"><CustodyGuard /></Screen>;
+  if (wallet.blocked) return <Screen title="Export history"><CustodyGuard /></Screen>;
 
-  if (!wallet.enabled) return <Screen title="Export your history" subtitle="Nothing to export yet">
-    <Card>
-      <Pill>NO LIVE WALLET</Pill>
-      <Note>This build has no wallet connected, so there are no transfers to export. The demo transfers on the Activity screen are simulated and are not a financial record.</Note>
-    </Card>
-    <Button secondary label="Back" onPress={() => router.back()} />
+  if (!wallet.enabled) return <Screen title="Export history">
+    <Note>Nothing to export: demo transfers are simulated, not a financial record.</Note>
   </Screen>;
 
   const gaps = found ? describeGaps(found) : [];
   const whole = found ? isComplete(found) : false;
 
-  return <Screen title="Export your history" subtitle="A spreadsheet file of every transfer">
-    <Card>
-      <Label size={12} weight="semibold" color={c.orange}>WHAT YOU GET</Label>
-      <Note>A CSV file — one row per transfer, opens in Excel, Google Sheets or anything your accountant uses.</Note>
-      <View style={{ gap: 2 }}>
-        {CSV_COLUMNS.map(column => <Label key={column} size={13}>· {column}</Label>)}
-      </View>
-      <Note>Amounts are exactly as the blockchain recorded them, not rounded for display.</Note>
-    </Card>
-
-    {!found && <Card>
-      <Label size={16} weight="medium">Before the file is written</Label>
-      <Note>Your whole history is read first, across {chains.length === 1 ? 'your chain' : 'both chains'}, so the file is not just what fits on the Activity screen. This can take a few seconds.</Note>
-    </Card>}
-
+  return <Screen title="Export history">
     {!!found && <Card>
-      <Pill tone={whole ? 'success' : 'warning'}>{whole ? 'COMPLETE RECORD' : 'SOME TRANSFERS ARE MISSING'}</Pill>
+      <Pill tone={whole ? 'success' : 'warning'}>{whole ? 'Complete' : 'Some transfers are missing'}</Pill>
       <Label size={16}>{found.items.length === 1 ? '1 transfer found' : `${found.items.length.toLocaleString('en-US')} transfers found`}</Label>
-      {whole
-        ? <Note>Every chain answered in full. This file is the complete record this app can give.</Note>
-        : <>
-            <Note error>Do not file this as a complete record.</Note>
-            {gaps.map(gap => <Note key={gap} error>· {gap}</Note>)}
-            <Note>The file will be named PARTIAL so it cannot be mistaken for the whole thing later.</Note>
-          </>}
+      {!whole && <>
+        <Note error>Do not file this as a complete record.</Note>
+        {gaps.map(gap => <Note key={gap} error>· {gap}</Note>)}
+        <Note>The file name says PARTIAL.</Note>
+      </>}
     </Card>}
 
     {!!error && <Card>
       <Label weight="semibold">Nothing was exported</Label>
       <Note error>{error}</Note>
-      <Note>Your history and your wallet are untouched.</Note>
     </Card>}
 
-    {!!sent && <Card><Pill tone="success">DONE</Pill><Note>{sent}</Note></Card>}
+    {!!sent && <Note>{sent}</Note>}
 
     {!found
       ? <Button label={busy ? 'Reading your history…' : 'Read my history'} onPress={() => { void gather(); }} disabled={busy || !chains.length} />
       : <Button
-          label={busy ? 'Writing…' : whole ? 'Save the complete file' : 'Save the partial file anyway'}
+          label={busy ? 'Writing…' : whole ? 'Save CSV' : 'Save partial CSV'}
           onPress={() => { void write(found); }}
           disabled={busy}
         />}
     {!!found && <Button secondary label="Check again" onPress={() => { void gather(); }} disabled={busy} />}
-    <Button secondary label="Back" onPress={() => router.back()} />
-
-    <Note>This file is written on your phone and handed to whatever you choose to send it with. Wally does not upload it anywhere.</Note>
   </Screen>;
 }

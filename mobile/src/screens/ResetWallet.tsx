@@ -1,14 +1,13 @@
 import React, { useState } from 'react';
 import { View } from 'react-native';
 import { router } from 'expo-router';
-import { Button, Card, Label, Note, Pill, Screen } from '../components/ui';
+import { Button, Card, Group, Label, Note, Row, Screen } from '../components/ui';
 import { SettingsToggle as Toggle } from '../components/SettingsToggle';
 import { getKeystore } from '../services/wallet-worklet';
 import { describeStoredData } from '../services/app-data';
 import { clearDeviceData } from '../services/app-data-device';
 import { useDemo } from '../demo/store';
 import { usePreferences } from '../demo/preferences';
-import { colors as c } from '../theme';
 
 /**
  * Remove this wallet from this phone.
@@ -88,10 +87,10 @@ export function ResetWalletScreen() {
 
   // The wallet is gone but something would not delete. Saying "done" here would be a lie, and
   // navigating away would hide it, so the screen stays and names what is left.
-  if (walletGone && kept.length) return <Screen title="Wallet removed" subtitle="Some data is still here" back={false}>
+  if (walletGone && kept.length) return <Screen title="Wallet removed" back={false}>
     <Card>
-      <Pill tone="success">THE WALLET IS OFF THIS PHONE</Pill>
-      <Note>Your keys are deleted. Your recovery phrase is the only way back to that money.</Note>
+      <Label size={16} weight="medium">The wallet is off this phone</Label>
+      <Note>Your recovery phrase is the only way back to that money.</Note>
     </Card>
     <Card>
       <Label size={16} weight="medium">This phone would not delete</Label>
@@ -99,34 +98,22 @@ export function ResetWalletScreen() {
         <Label size={14}>{item.label}</Label>
         <Note error>{item.reason}</Note>
       </View>)}
-      <Note>Try again from Settings. Nothing here can reach your money — the keys are already gone.</Note>
+      <Note>Try again from Settings. The keys are already gone, so none of this can reach your money.</Note>
     </Card>
     <Button label="Set up a wallet" onPress={() => router.replace('/wallet-setup')} />
   </Screen>;
 
-  return <Screen title="Remove this wallet" subtitle="This cannot be undone">
+  // The irreversible part is said once, as the screen's heading, and the switch asks for the
+  // one thing that makes it survivable. Everything else is a list.
+  return <Screen title="Remove this wallet">
     <Card>
-      <Pill tone="warning">Your recovery phrase is the only way back</Pill>
-      <Note>This deletes the keys stored on this phone. Your money stays on the blockchain, and your twelve words still control it — but without those words, nothing can reach it again. Not us, not anybody.</Note>
+      <Label size={18} weight="semibold">This cannot be undone</Label>
+      <Note>Your money stays on the blockchain. Without your recovery phrase, nobody can reach it again.</Note>
     </Card>
 
-    <Card>
-      <Label size={12} weight="semibold" color={c.orange}>WHAT THIS DELETES</Label>
-      {removes.map(line => <Label key={line} size={14}>· {line}</Label>)}
-      <Note>Saved prices and charts are kept. They are public market data and say nothing about you.</Note>
-    </Card>
+    <Group title="Deletes from this phone">{removes.map(line => <Row key={line} title={line} />)}</Group>
 
-    <Card>
-      <Label size={16} weight="medium">Before you do this</Label>
-      <Note>Check that you can read your recovery phrase off paper right now. Not that you remember writing it down — that you can see it.</Note>
-    </Card>
-
-    <Toggle
-      label="I have my recovery phrase"
-      subtitle="And I have checked I can read it"
-      value={understood}
-      onChange={setUnderstood}
-    />
+    <Toggle label="I can read my recovery phrase on paper right now" value={understood} onChange={setUnderstood} />
 
     {!!error && <Card>
       <Label weight="semibold">The wallet was not removed</Label>
@@ -137,6 +124,6 @@ export function ResetWalletScreen() {
     </Card>}
 
     <Button label={busy ? 'Removing…' : 'Remove wallet from this phone'} onPress={() => { void forget(); }} disabled={!understood || busy} />
-    <Button secondary label="Keep my wallet" onPress={() => router.back()} />
+    <Button secondary label="Cancel" onPress={() => router.back()} />
   </Screen>;
 }

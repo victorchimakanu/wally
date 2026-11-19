@@ -4,17 +4,17 @@ import { router } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
 import { createClipboardSafety, copyNotice } from '../services/clipboard-safety.ts';
 import { Pressable, Share, View } from 'react-native';
-import { Button, Card, Label, Note, Pill, QrTile, ReceiveAddress, shared } from './ui';
+import { Button, Card, Group, Label, LinkButton, Note, Pill, QrTile, ReceiveAddress, useShared } from './ui';
 import { useWallet } from '../data/wallet';
-import { historyProvenance } from '../services/history-source';
 import { custodyNotice } from '../services/custody';
 import { receiveAdvice } from '../services/receive-advice';
+import { historyGap } from '../services/history-source';
 import { CHAINS, formatEth, type Chain } from '../services/wallet-api';
 import { tokenCaveat, tokensFor } from '../services/tokens.ts';
-import { useMarket } from '../data/market';
+import { fiatDisplayable, fiatTotal } from '../services/fiat-value';
 import { formatPrice } from '../services/market-api';
-import { fiatDisplayable, fiatTotal, fiatValue } from '../services/fiat-value';
-import { colors as c } from '../theme';
+import { useMarket } from '../data/market';
+import { useColors } from '../theme';
 
 /** Figma network/receive-selector: one pill with the selected network on an amber segment. */
 /**
@@ -24,6 +24,7 @@ import { colors as c } from '../theme';
  * the Send screen gains a row rather than a new idea.
  */
 export function AssetChoice({ value, options, onChange }: { value: string; options: readonly string[]; onChange: (value: string) => void }) {
+  const c = useColors();
   if (options.length < 2) return null;
   return <View accessibilityRole="radiogroup" style={{ flexDirection: 'row', padding: 4, borderRadius: 29, borderWidth: 1, borderColor: c.line, backgroundColor: c.surface }}>
     {options.map(option => <Pressable key={option} accessibilityRole="radio" accessibilityState={{ selected: value === option }} onPress={() => onChange(option)}
@@ -34,7 +35,8 @@ export function AssetChoice({ value, options, onChange }: { value: string; optio
 }
 
 export function NetworkChoice({ value, onChange }: { value: Chain; onChange: (value: Chain) => void }) {
-  return <View accessibilityRole="radiogroup" style={{ flexDirection: 'row', padding: 4, borderRadius: 29, borderWidth: 1, borderColor: c.line, backgroundColor: c.surface }}>{(Object.keys(CHAINS) as Chain[]).map(chain => { const selected = value === chain; return <Pressable key={chain} accessibilityRole="radio" aria-checked={selected} accessibilityState={{ checked: selected }} accessibilityLabel={CHAINS[chain].name} onPress={() => onChange(chain)} style={{ flex: 1, minHeight: 46, paddingHorizontal: 8, borderRadius: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: selected ? c.amber : 'transparent' }}><Label size={15} weight={selected ? 'semibold' : 'medium'} numberOfLines={1}>{CHAINS[chain].name}</Label></Pressable>; })}</View>;
+  const c = useColors();
+  return <View accessibilityRole="radiogroup" style={{ flexDirection: 'row', padding: 4, borderRadius: 29, borderWidth: 1, borderColor: c.line, backgroundColor: c.surface }}>{(Object.keys(CHAINS) as Chain[]).map(chain => { const selected = value === chain; return <Pressable key={chain} accessibilityRole="radio" aria-checked={selected} accessibilityState={{ checked: selected }} accessibilityLabel={CHAINS[chain].name} onPress={() => onChange(chain)} style={{ flex: 1, minHeight: 46, paddingHorizontal: 8, borderRadius: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: selected ? c.amber : 'transparent' }}><Label size={15} weight={selected ? 'semibold' : 'medium'} numberOfLines={1}>{CHAINS[chain].name.replace(/ Sepolia$/, '')}</Label></Pressable>; })}</View>;
 }
 /**
  * The refusal, and the warning that replaces it when a developer opts in.
@@ -46,78 +48,55 @@ export function NetworkChoice({ value, onChange }: { value: Chain; onChange: (va
  * Returns null in the two safe states, so a screen can render it unconditionally.
  */
 export function CustodyGuard() {
+  const c = useColors();
   const wallet = useWallet();
 
   if (wallet.blocked) return <Card>
-    <Pill tone="warning">TWO WALLETS</Pill>
-    <Label size={16} weight="medium">This build cannot open your wallet</Label>
+    <Pill tone="warning">Two wallets</Pill>
+    <Label size={16} weight="medium">This build can’t open your wallet</Label>
     <Note>{wallet.blocked}</Note>
-    <Note>A wallet is stored on this phone, and this build is also configured to use the development wallet server on a computer. Those are different wallets with different recovery phrases, so showing you one while offering to back up the other could cost you money. Wally would rather show you nothing.</Note>
-    <Note>Two ways out: remove the wallet from this phone in Settings, or unset EXPO_PUBLIC_WALLY_API_URL and rebuild. Your funds on both are untouched either way.</Note>
+    <Note>Remove the wallet from this phone in Settings, or unset EXPO_PUBLIC_WALLY_API_URL and rebuild. Funds on both are untouched.</Note>
   </Card>;
 
   const notice = wallet.custody ? custodyNotice(wallet.custody) : null;
   if (!notice) return null;
-  return <Card><Pill tone="warning">WHOSE MONEY THIS IS</Pill><Note>{notice}</Note></Card>;
+  return <Card style={{ backgroundColor: c.warningTint, borderColor: c.warningTint }}><Label>{notice}</Label></Card>;
 }
 
 export function WalletStatus() {
+  const shared = useShared();
   const wallet = useWallet();
-  return <View style={{ gap: 8 }}><Note>{wallet.loading ? 'Refreshing testnet balances…' : wallet.snapshot ? `${wallet.stale ? 'Saved' : 'Fetched'} balances · ${new Date(wallet.snapshot.fetchedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Connecting to the local wallet…'}</Note>{!!wallet.error && <Note error>{wallet.error}</Note>}<Note>WDK wallet on your computer · Testnet ETH has no monetary value.</Note><Button secondary label="Refresh wallet" disabled={wallet.loading || wallet.offline} onPress={() => { void wallet.refresh(); }} /></View>;
-}
-/**
- * A balance in the money someone actually thinks in — when that can be said honestly.
- *
- * `fiat-value.ts` was written on 8 November and until now nothing imported it, so the gate it
- * carries was not gating anything: there was no call site to refuse. These two components are
- * that call site. They render nothing today, because `fiatDisplayable` requires a mainnet and
- * `parseWallet` refuses any snapshot whose network is not `testnet` — the type is the literal
- * `'testnet'`, so this is enforced by the parser rather than by remembering.
- *
- * That is the point. Turning fiat on later is a change to what the wallet reports, not a
- * feature to build, and the arithmetic has tests that run today against a mainnet snapshot.
- *
- * A figure that cannot be known renders nothing at all, never "—" or a zero. The market
- * snapshot is fetched per currency, and `fiatValue` refuses a price in the wrong one, so a
- * dollar figure can never be printed with a naira sign in front of it.
- */
-function FiatLine({ amount, symbol }: { amount: string | null; symbol: string }) {
-  const wallet = useWallet();
-  const { data: market, currency } = useMarket();
-  if (!fiatDisplayable({ network: wallet.snapshot?.network })) return null;
-  const value = fiatValue(amount, symbol, market?.assets ?? [], currency);
-  if (value.amount === null) return null;
-  return <Label size={12} color={c.muted}>{formatPrice(value.amount, value.currency)}</Label>;
-}
-/** The same, for a total. Null if any part of it could not be priced — see `fiatTotal`. */
-function FiatTotalLine({ balances }: { balances: readonly { amount: string | null; symbol: string }[] }) {
-  const wallet = useWallet();
-  const { data: market, currency } = useMarket();
-  if (!fiatDisplayable({ network: wallet.snapshot?.network })) return null;
-  const value = fiatTotal(balances, market?.assets ?? [], currency);
-  if (value.amount === null) return null;
-  return <Label size={16} weight="medium">{formatPrice(value.amount, value.currency)}</Label>;
+  return <View style={{ gap: 4 }}><View style={shared.between}><Note>{wallet.loading ? 'Updating balances…' : wallet.snapshot ? `${wallet.stale ? 'Saved' : 'Updated'} ${new Date(wallet.snapshot.fetchedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Connecting to the wallet…'}</Note><LinkButton label="Refresh" accessibilityLabel="Refresh balances" disabled={wallet.loading || wallet.offline} onPress={() => { void wallet.refresh(); }} /></View>{!!wallet.error && <Note error>{wallet.error}</Note>}</View>;
 }
 /** Figma network/icon-fallback: a tinted letter mark per network. */
 function NetworkMark({ chain }: { chain: Chain }) {
+  const c = useColors();
   return <View style={{ width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: chain === 'arbitrum' ? c.amber : c.tint }}><Label size={17} weight="semibold">{chain === 'arbitrum' ? 'A' : 'E'}</Label></View>;
 }
-/** Figma home/wallet-overview + wallet/network-balances: one total, then each network's balance. */
 /**
  * The caveat for the token in this row, or null.
  *
  * Looked up by chain and symbol because a balance row carries those and not the Token itself.
- * `tokenAt` refuses an unpinned address rather than guessing, and a symbol nothing pins simply
- * has nothing to say about it.
+ * A symbol nothing pins simply has nothing to say about it, so ETH rows get nothing.
  */
 function caveatFor(chain: Chain, symbol: string): string | null {
   const token = tokensFor(chain).find(entry => entry.symbol === symbol);
   return token ? tokenCaveat(token) : null;
 }
 
-export function LiveWalletOverview({ onActivity = () => router.push('/history') }: { onActivity?: () => void } = {}) {
+/** Figma home/wallet-overview + wallet/network-balances: one total, then each network's balance. */
+/** `onActivity` adds an Activity button, for chat; on the Wallet screen Activity is its own tab. */
+export function LiveWalletOverview({ onActivity }: { onActivity?: () => void } = {}) {
+  const c = useColors();
+  const shared = useShared();
   const wallet = useWallet();
+  const market = useMarket();
   const balances = wallet.snapshot?.balances ?? [];
+  // What the balances are worth in the chosen currency. Testnet tokens are worth nothing and
+  // the app says so, so until the wallet reports a mainnet the figure says it is priced as if
+  // they were mainnet coins, rather than being hidden.
+  const fiat = balances.length ? fiatTotal(balances.map(item => ({ amount: item.balance, symbol: item.symbol })), market.data?.assets ?? [], market.currency) : null;
+  const priced = fiat?.amount == null ? null : `${formatPrice(fiat.amount, fiat.currency)}${fiatDisplayable({ network: wallet.snapshot?.network }) ? '' : ' at mainnet prices'}`;
   // ETH only, and the filter is the whole point: `balanceWei` holds base units at the asset's
   // own scale, so summing across assets would add 10.5 USDt (10,500,000 base units) into a wei
   // total and then label the result ETH. Apples into oranges, presented as apples.
@@ -125,39 +104,31 @@ export function LiveWalletOverview({ onActivity = () => router.push('/history') 
   const total = nativeKnown.length ? formatEth(nativeKnown.reduce((sum, item) => sum + BigInt(item.balanceWei!), 0n)) : null;
   // Tokens are listed in their own units, never folded into a single number.
   const tokenBalances = balances.filter(item => item.symbol !== 'ETH');
-  const synced = wallet.snapshot ? `${wallet.stale ? 'Saved' : 'Updated'} ${new Date(wallet.snapshot.fetchedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Connecting to the local wallet…';
+  const synced = wallet.snapshot ? `${wallet.stale ? 'Saved' : 'Updated'} ${new Date(wallet.snapshot.fetchedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Connecting to the wallet…';
+  const chainName = (chain: Chain) => chain === 'arbitrum' ? 'Arbitrum' : 'Ethereum';
+  const balanceRow = (item: (typeof balances)[number], title: string) => <View key={`${item.chain}:${item.symbol}`} style={{ paddingHorizontal: 16, paddingVertical: 12, gap: 6 }}>
+    <View style={shared.row}><NetworkMark chain={item.chain} /><Label size={16} weight="medium" style={shared.flex}>{title}</Label><View style={{ alignItems: 'flex-end', flexShrink: 1 }}><Label size={16} weight="semibold">{item.balance === null ? 'Unavailable' : `${item.balance} ${item.symbol}`}</Label>{!!item.error && <Label size={12} color={c.error}>Could not refresh</Label>}</View></View>
+    {!!item.error && <Note error>{item.error}</Note>}
+    {!!caveatFor(item.chain, item.symbol) && <Note>{caveatFor(item.chain, item.symbol)}</Note>}
+  </View>;
   return <View style={{ gap: 12 }}>
     <Card style={{ backgroundColor: c.tint, borderColor: c.tint, alignItems: 'center', gap: 4, paddingVertical: 24 }}>
-      <Label size={16} weight="medium">Personal wallet</Label>
-      <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 6 }}><Label size={40} weight="semibold" style={{ lineHeight: 48 }}>{total ?? '—'}</Label><Label size={16} weight="semibold">ETH</Label></View><FiatTotalLine balances={nativeKnown.map(item => ({ amount: item.balance, symbol: item.symbol }))} />
-      <Label size={13} color={c.muted}>{wallet.loading ? 'Refreshing balances…' : `${Object.keys(CHAINS).length} test networks · ${synced}`}</Label>
+      <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 6 }}><Label size={40} weight="semibold" style={{ lineHeight: 48 }}>{total ?? '—'}</Label><Label size={16} weight="semibold">ETH</Label></View>
+      {priced && <Label size={16} color={c.muted} accessibilityLabel={`About ${priced}`}>{priced}</Label>}
+      <View style={[shared.row, { gap: 16 }]}><Label size={13} color={c.muted}>{wallet.loading ? 'Updating balances…' : synced}</Label><LinkButton label="Refresh" accessibilityLabel="Refresh balances" disabled={wallet.loading || wallet.offline} onPress={() => { void wallet.refresh(); }} /></View>
       {nativeKnown.length < balances.filter(item => item.symbol === 'ETH').length && <Label size={12} color={c.error}>Total excludes a network that could not refresh</Label>}
     </Card>
-    <Card style={{ gap: 0, paddingVertical: 12 }}>
-      <Label size={16} weight="bold" style={{ paddingBottom: 4 }}>By network</Label>
-      {balances.filter(item => item.symbol === 'ETH').map(item => <View key={`${item.chain}:${item.symbol}`} style={{ paddingVertical: 12, gap: 6, borderTopWidth: 1, borderColor: c.line }}>
-        <View style={shared.row}><NetworkMark chain={item.chain} /><View style={shared.flex}><Label size={16} weight="medium">{item.chain === 'arbitrum' ? 'Arbitrum' : 'Ethereum'}</Label><Label size={12} color={c.muted}>Sepolia · Testnet</Label></View><View style={{ alignItems: 'flex-end', flexShrink: 1 }}><Label size={16} weight="semibold">{item.balance === null ? 'Unavailable' : `${item.balance} ETH`}</Label><Label size={12} color={item.error ? c.error : c.muted}>{item.error ? 'Could not refresh' : 'Available balance'}</Label><FiatLine amount={item.balance} symbol={item.symbol} /></View></View>
-        {!!item.error && <Note error>{item.error}</Note>}
-      </View>)}
-      {!wallet.snapshot && <Note>Balances appear after the wallet API responds.</Note>}
-    </Card>
-    {/* Tokens get their own card and their own units. Each row prints the asset's own symbol
+    <Group>{balances.filter(item => item.symbol === 'ETH').map(item => balanceRow(item, chainName(item.chain)))}</Group>
+    {/* Tokens get their own group and their own units. Each row prints the asset's own symbol
         rather than a hardcoded one, and nothing here is added into the ETH total above — the
         two are different things and a single number would be meaningless. */}
-    {tokenBalances.length > 0 && <Card style={{ gap: 0, paddingVertical: 12 }}>
-      <Label size={16} weight="bold" style={{ paddingBottom: 4 }}>Tokens</Label>
-      {tokenBalances.map(item => <View key={`${item.chain}:${item.symbol}`} style={{ paddingVertical: 12, gap: 6, borderTopWidth: 1, borderColor: c.line }}>
-        <View style={shared.row}><NetworkMark chain={item.chain} /><View style={shared.flex}><Label size={16} weight="medium">{item.symbol}</Label><Label size={12} color={c.muted}>{item.chain === 'arbitrum' ? 'Arbitrum' : 'Ethereum'} Sepolia · Testnet</Label></View><View style={{ alignItems: 'flex-end', flexShrink: 1 }}><Label size={16} weight="semibold">{item.balance === null ? 'Unavailable' : `${item.balance} ${item.symbol}`}</Label><Label size={12} color={item.error ? c.error : c.muted}>{item.error ? 'Could not refresh' : 'Available balance'}</Label><FiatLine amount={item.balance} symbol={item.symbol} /></View></View>
-        {!!item.error && <Note error>{item.error}</Note>}
-        {!!caveatFor(item.chain, item.symbol) && <Note>{caveatFor(item.chain, item.symbol)}</Note>}
-      </View>)}
-    </Card>}
+    <Group title="Tokens">{tokenBalances.map(item => balanceRow(item, `${item.symbol} · ${chainName(item.chain)}`))}</Group>
     {!!wallet.error && <Note error>{wallet.error}</Note>}
-    <Note>{['Testnet funds held by the WDK wallet on your computer, with no monetary value.', ...new Set(tokenBalances.flatMap(item => caveatFor(item.chain, item.symbol) ?? []))].join(' ')}</Note>
-    <View style={shared.row}><Button secondary label="Refresh" disabled={wallet.loading || wallet.offline} style={shared.flex} onPress={() => { void wallet.refresh(); }} /><Button secondary label="Activity" style={shared.flex} onPress={onActivity} /></View>
+    {onActivity && <Button secondary label="Activity" onPress={onActivity} />}
   </View>;
 }
 export function LiveReceiveCard() {
+  const shared = useShared();
   const wallet = useWallet();
   const [chain, setChain] = useState<Chain>('arbitrum'), [notice, setNotice] = useState(''), [copied, setCopied] = useState(false);
   // `symbol` is named explicitly: a chain now has more than one balance, and finding by chain
@@ -180,7 +151,6 @@ export function LiveReceiveCard() {
   const addresses = Object.fromEntries((wallet.snapshot?.balances ?? []).map(item => [item.chain, item.address])) as Partial<Record<Chain, string>>;
   const advice = receiveAdvice(chain, CHAINS[chain].name, addresses, key => CHAINS[key].name);
   return <Card style={{ gap: 16 }}>
-    <View style={{ gap: 4 }}><Label size={18} weight="bold" style={{ lineHeight: 22 }}>Receive testnet ETH</Label><Note>{CHAINS[chain].name} · Testnet</Note></View>
     <NetworkChoice value={chain} onChange={next => { setChain(next); setNotice(''); setCopied(false); }} />
     {balance ? <><QrTile><Image source={{ uri: balance.qr }} contentFit="contain" accessibilityLabel={`QR code for ${balance.address}`} style={{ width: 168, height: 168 }} /></QrTile><ReceiveAddress value={balance.address} onCopy={() => { void copy(); }} /><View style={shared.row}><Button label={copied ? 'Copied' : 'Copy address'} style={shared.flex} onPress={() => { void copy(); }} /><Button accent label="Share" style={shared.flex} onPress={() => { void Share.share({ message: `Wally ${CHAINS[chain].name} testnet ETH address: ${balance.address}. Testnet only.` }).catch(() => setNotice('Sharing is unavailable. You can copy the address.')); }} /></View></> : <WalletStatus />}
     {/* Derived from the addresses, never asserted. The fixed version of this line claimed the
@@ -190,6 +160,8 @@ export function LiveReceiveCard() {
   </Card>;
 }
 export function LiveActivityCard({ compact = false, search = '', filter = 'All' }: { compact?: boolean; search?: string; filter?: string }) {
+  const c = useColors();
+  const shared = useShared();
   const wallet = useWallet();
   const { refreshHistory } = wallet;
   useEffect(() => { void refreshHistory(); }, [refreshHistory]);
@@ -199,5 +171,5 @@ export function LiveActivityCard({ compact = false, search = '', filter = 'All' 
     const received = !!item.recipient && addresses.includes(item.recipient.toLowerCase());
     return (filter === 'All' || filter === 'Sent' && sent || filter === 'Received' && received) && `${item.hash} ${item.recipient} ${item.from} ${item.amount} ${item.symbol ?? 'ETH'} ${item.status} ${CHAINS[item.chain].name}`.toLowerCase().includes(search.toLowerCase());
   }) ?? [];
-  return <Card><Label size={18} weight="semibold">On-chain activity</Label>{wallet.historyLoading && <Note>Checking the explorers and network receipts…</Note>}{!!wallet.historyError && <Note error>{wallet.historyError}</Note>}{wallet.history?.errors.map(error => <Note key={error} error>{error}</Note>)}{(compact ? matches.slice(0, 3) : matches).map(item => { const sent = !!item.from && addresses.includes(item.from.toLowerCase()); const address = sent ? item.recipient : item.from; return <Pressable key={`${item.chain}:${item.hash}`} accessibilityRole="button" onPress={() => router.push({ pathname: '/transaction', params: { chain: item.chain, hash: item.hash } })} style={{ gap: 4, paddingVertical: 12, borderBottomWidth: 1, borderColor: c.line }}><View style={shared.between}><Label>{sent ? 'Sent' : 'Received'} {item.amount ?? '—'} {item.symbol ?? 'ETH'}</Label><Label size={12} color={item.status === 'failed' || item.status === 'superseded' ? c.error : c.muted}>{item.status === 'superseded' ? 'never arrived' : item.status}</Label></View><Note>{CHAINS[item.chain].name} · {address ? `${address.slice(0, 8)}…${address.slice(-6)}` : item.hash.slice(0, 12)}</Note></Pressable>; })}{!matches.length && !wallet.historyLoading && <Note>{wallet.history ? 'No matching transactions were returned. Explorer errors above mean history may be incomplete.' : 'Activity has not been fetched yet.'}</Note>}{wallet.history && <Note>{wallet.offline || wallet.historyError ? 'Saved' : 'Fetched'} activity · {new Date(wallet.history.fetchedAt).toLocaleTimeString()} · {historyProvenance(wallet.history.source)}</Note>}{!compact && wallet.historyHasMore && <>{(!!search || filter !== 'All') && <Note>Search and filters cover the {wallet.history?.items.length ?? 0} transactions loaded so far, not your whole history.</Note>}<Button secondary label={wallet.historyLoadingMore ? 'Loading older activity…' : 'Load older activity'} disabled={wallet.historyLoadingMore || wallet.historyLoading || wallet.offline} onPress={() => { void wallet.loadMoreHistory(); }} /></>}<Button secondary label="Refresh activity" disabled={wallet.historyLoading || wallet.offline} onPress={() => { void wallet.refreshHistory(); }} />{compact && <Button secondary label="View all activity" onPress={() => router.push('/history')} />}</Card>;
+  return <Card>{compact && <Label size={18} weight="semibold">Activity</Label>}{wallet.historyLoading && <Note>Loading…</Note>}{!!wallet.historyError && <Note error>{wallet.historyError}</Note>}{wallet.history?.errors.map(error => <Note key={error} error>{error}</Note>)}{(compact ? matches.slice(0, 3) : matches).map(item => { const sent = !!item.from && addresses.includes(item.from.toLowerCase()); const address = sent ? item.recipient : item.from; return <Pressable key={`${item.chain}:${item.hash}`} accessibilityRole="button" onPress={() => router.push({ pathname: '/transaction', params: { chain: item.chain, hash: item.hash } })} style={{ gap: 4, paddingVertical: 12, borderBottomWidth: 1, borderColor: c.line }}><View style={shared.between}><Label>{sent ? 'Sent' : 'Received'} {item.amount ?? '—'} {item.symbol ?? 'ETH'}</Label><Label size={12} color={item.status === 'failed' || item.status === 'superseded' ? c.error : c.muted}>{item.status === 'superseded' ? 'never arrived' : item.status}</Label></View><Note>{CHAINS[item.chain].name} · {address ? `${address.slice(0, 8)}…${address.slice(-6)}` : item.hash.slice(0, 12)}</Note></Pressable>; })}{!matches.length && !wallet.historyLoading && <Note>{wallet.history ? 'No transactions' : 'Not loaded yet'}</Note>}{wallet.history && <Note>{wallet.offline || wallet.historyError ? 'Saved' : 'Updated'} {new Date(wallet.history.fetchedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Note>}{wallet.history && historyGap(wallet.history.source) && <Note>{historyGap(wallet.history.source)}</Note>}{!compact && wallet.historyHasMore && <>{(!!search || filter !== 'All') && <Note>Search and filters cover the {wallet.history?.items.length ?? 0} transactions loaded so far, not your whole history.</Note>}<LinkButton label={wallet.historyLoadingMore ? 'Loading…' : 'Load older'} accessibilityLabel="Load older activity" disabled={wallet.historyLoadingMore || wallet.historyLoading || wallet.offline} onPress={() => { void wallet.loadMoreHistory(); }} /></>}<LinkButton label="Refresh" accessibilityLabel="Refresh activity" disabled={wallet.historyLoading || wallet.offline} onPress={() => { void wallet.refreshHistory(); }} />{compact && <Button secondary label="View all" onPress={() => router.push('/history')} />}</Card>;
 }

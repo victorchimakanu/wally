@@ -45,15 +45,15 @@ function renderBalances({ tokens = true }: { tokens?: boolean } = {}): Value {
   const balances = [row('arbitrum', 'ETH', '0.5'), row('ethereum', 'ETH', '0.25'),
     ...(tokens ? tokensFor('arbitrum').map(token => row('arbitrum', token.symbol, '25')) : [])];
   const snapshot = { version: 1, network: 'testnet', location: 'computer', fetchedAt: 0, balances, tokenNotice: '' };
-  const ui = Object.fromEntries(['Button', 'Card', 'Label', 'Note', 'Pill', 'QrTile', 'ReceiveAddress'].map(name => [name, name]));
+  const ui = Object.fromEntries(['Button', 'Card', 'Divider', 'Group', 'Label', 'LinkButton', 'Note', 'Pill', 'QrTile', 'ReceiveAddress'].map(name => [name, name]));
   const mocks: Record<string, Value> = {
     react: { useEffect: () => {}, useMemo: (factory: () => Value) => factory(), useState: (initial: Value) => [initial, () => {}] },
     'expo-image': { Image: 'Image' }, 'expo-router': { router: {} }, 'expo-clipboard': {},
     '../services/clipboard-safety.ts': { createClipboardSafety: () => ({}), copyNotice: () => '' },
     'react-native': { Pressable: 'Pressable', Share: {}, View: 'View' },
-    './ui': { ...ui, shared: { row: {}, flex: {}, between: {}, center: {}, input: {} } },
+    './ui': { ...ui, shared: { row: {}, flex: {}, between: {}, center: {}, input: {} }, useShared: () => ({ row: {}, flex: {}, between: {}, center: {}, input: {} }) },
     '../data/wallet': { useWallet: () => ({ snapshot, balances, loading: false, stale: false, offline: false, error: '', refresh: () => {} }) },
-    '../services/history-source': { historyProvenance: () => '' },
+    '../services/history-source': { historyProvenance: () => '', historyGap: () => null },
     '../services/custody': { custodyNotice: () => '' },
     '../services/receive-advice': { receiveAdvice: () => '' },
     '../services/wallet-api': { CHAINS: { arbitrum: { name: 'Arbitrum Sepolia' }, ethereum: { name: 'Ethereum Sepolia' } }, formatEth: (value: bigint) => String(value) },
@@ -62,7 +62,8 @@ function renderBalances({ tokens = true }: { tokens?: boolean } = {}): Value {
     '../data/market': { useMarket: () => ({ assets: [] }) },
     '../services/market-api': { formatPrice: () => '' },
     '../services/fiat-value': { fiatDisplayable: () => false, fiatTotal: () => null, fiatValue: () => null },
-    '../theme': { colors: {}, fonts: {}, radius: {} },
+    '../demo/preferences': { usePreferences: () => ({ preferences: {} }) },
+    '../theme': { colors: {}, fonts: {}, radius: {}, useColors: () => ({}), useTheme: () => ({ palette: {}, dark: false }) },
   };
   const source = readFileSync(join(SRC, 'components/WalletData.tsx'), 'utf8');
   const compiled = ts.transpileModule(source, { compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.CommonJS, esModuleInterop: true } }).outputText;

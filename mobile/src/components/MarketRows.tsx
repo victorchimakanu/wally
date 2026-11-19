@@ -3,11 +3,10 @@ import { router } from 'expo-router';
 import { Pressable, View } from 'react-native';
 import { Image } from 'expo-image';
 import { WallyAsset } from './WallyAsset';
-import { Card, Label, shared } from './ui';
+import { Group, Label, useShared } from './ui';
 import { formatPrice, formatChange, type MarketAsset } from '../services/market-api';
 import { useMarket } from '../data/market';
-import { MarketStatus } from './MarketData';
-import { colors as c } from '../theme';
+import { useColors } from '../theme';
 import { usePreferences } from '../demo/preferences';
 export function AssetLogo({ symbol }: { symbol: string }) {
   if (symbol === 'USDT') return <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: '#26A17B', justifyContent: 'center', alignItems: 'center' }}><Label size={24} color="#FFFFFF" weight="bold">₮</Label></View>;
@@ -18,13 +17,16 @@ export function AssetLogo({ symbol }: { symbol: string }) {
 }
 /** Opens the asset screen unless a caller, such as a chat card, handles the press. */
 export function AssetRow({ asset, onPress }: { asset: MarketAsset; onPress?: () => void }) {
-  return <Pressable accessibilityRole="button" accessibilityLabel={`View ${asset.name}`} onPress={onPress ?? (() => router.push({ pathname: '/asset', params: { symbol: asset.symbol } }))} style={[shared.row, { minHeight: 76 }]}>
-    <AssetLogo symbol={asset.symbol} /><View style={shared.flex}><Label size={16}>{asset.name}</Label><Label size={12} color={c.muted}>{asset.symbol}</Label></View><View style={{ alignItems: 'flex-end', flexShrink: 1 }}><Label size={16}>{formatPrice(asset.price, asset.currency)}</Label><Label size={12} color={asset.change === null ? c.muted : asset.change < 0 ? c.error : c.success}>{formatChange(asset.change)}</Label></View>
+  const c = useColors();
+  const shared = useShared();
+  return <Pressable accessibilityRole="button" accessibilityLabel={`View ${asset.name}`} onPress={onPress ?? (() => router.push({ pathname: '/asset', params: { symbol: asset.symbol } }))} style={({ pressed }) => [shared.row, { minHeight: 64, paddingHorizontal: 16, paddingVertical: 10 }, pressed && { backgroundColor: c.toggle }]}>
+    <AssetLogo symbol={asset.symbol} /><Label size={16} style={shared.flex}>{asset.name}</Label><View style={{ alignItems: 'flex-end', flexShrink: 1 }}><Label size={16}>{formatPrice(asset.price, asset.currency)}</Label><Label size={12} color={asset.change === null ? c.muted : asset.change < 0 ? c.error : c.success}>{formatChange(asset.change)}</Label></View>
   </Pressable>;
 }
+/** Saved assets, or nothing: an empty watchlist is not worth a card explaining how to fill it. */
 export function Watchlist() {
   const { preferences } = usePreferences();
   const { data } = useMarket();
   const assets = data?.assets.filter(asset => preferences.saved.includes(asset.symbol)) ?? [];
-  return <Card style={{ backgroundColor: c.tint, gap: 12 }}><Label size={18} weight="bold">Watchlist</Label>{assets.map(asset => <AssetRow key={asset.symbol} asset={asset} />)}{data && !assets.length && <Label color={c.muted}>Save an asset from Market to follow it here.</Label>}<Pressable accessibilityRole="button" accessibilityLabel="View all market assets" onPress={() => router.push('/market')} style={[shared.between, { minHeight: 44 }]}><Label weight="semibold">View all</Label><WallyAsset name="505db.svg" /></Pressable><MarketStatus /></Card>;
+  return <Group title="Watchlist">{assets.map(asset => <AssetRow key={asset.symbol} asset={asset} />)}</Group>;
 }
