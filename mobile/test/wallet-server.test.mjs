@@ -493,3 +493,52 @@ test('a mistyped recipient is refused as a mistake, not reported as a broken con
     assert.equal(fixed.error, refusal.message, 'the user reads the refusal itself, not a replacement');
   } finally { server.close(); }
 });
+
+/**
+ * A bot challenge is not an outage, and the difference is what a developer does next.
+ *
+ * Blockscout puts its Arbitrum Sepolia API behind Cloudflare. Verified 19 Nov 2026:
+ * `arbitrum-sepolia.blockscout.com` answers **403** with an interstitial, while
+ * `eth-sepolia.blockscout.com` answers 200. So no server can read that chain from it, ever.
+ *
+ * The message said "Arbitrum Sepolia history is unavailable", which reads as a fault and sends
+ * you to check the network and retry — the same cost as the stale copy elsewhere in this audit:
+ * a sentence that points at the wrong place. A genuine failure still says that; a 403 says what
+ * is actually true and where indexed history really comes from.
+ */
+test('a challenged indexer is reported as permanent, a real failure is not', needsWdk, async () => {
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../internal');
+  const directory = mkdtempSync(path.join(root, 'wallet-test-'));
+  let service;
+  // Arbitrum's indexer answers the challenge; Ethereum's simply falls over.
+  const transport = async (url, options) => {
+    if (url.includes('arbitrum-sepolia.blockscout')) return new Response('<!DOCTYPE html><title>Just a moment...</title>', { status: 403 });
+    if (url.includes('eth-sepolia.blockscout')) return new Response('nope', { status: 500 });
+    const request = JSON.parse(options.body);
+    const chainId = url.includes('arbitrum') ? '0x66eee' : '0xaa36a7';
+    const result = request.method === 'eth_chainId' ? chainId : request.method === 'eth_getBalance' ? '0x0' : '0x0';
+    return Response.json({ jsonrpc: '2.0', id: request.id, result });
+  };
+  try {
+    service = await createWalletService(directory, { transport });
+    const { errors } = await service.history();
+    const challenged = errors.find(line => line.startsWith('Arbitrum Sepolia'));
+    const failed = errors.find(line => line.startsWith('Ethereum Sepolia'));
+
+    assert.ok(challenged, `no line for the challenged chain: ${JSON.stringify(errors)}`);
+    assert.match(challenged, /permanent rather than a fault to retry/);
+    assert.match(challenged, /backend proxy/, 'it must say where indexed history actually comes from');
+    assert.ok(!/is unavailable\./.test(challenged), `still reads as an outage: ${challenged}`);
+
+    // The ordinary failure keeps the ordinary message — the distinction is the whole point,
+    // and a fix that called every failure permanent would be as wrong in the other direction.
+    assert.ok(failed, `no line for the failing chain: ${JSON.stringify(errors)}`);
+    assert.match(failed, /is unavailable\./);
+    assert.ok(!/permanent/.test(failed), `a transient failure was called permanent: ${failed}`);
+  } finally {
+    service?.dispose();
+    assert.equal(path.dirname(directory), root);
+    assert.match(path.basename(directory), /^wallet-test-/);
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

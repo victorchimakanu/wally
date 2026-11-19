@@ -4,6 +4,7 @@ import { TextInput, View } from 'react-native';
 import { Avatar, WallyAsset } from '../components/WallyAsset';
 import { Address, Button, Card, Group, Label, Note, Row, Screen, useShared } from '../components/ui';
 import { CurrencyChoice } from '../components/ChatCards';
+import { checksumMatches, CHECKSUM_REFUSAL } from '../services/address-checksum';
 import { usePreferences } from '../demo/preferences';
 import { useDemo } from '../demo/store';
 import { fonts, useColors } from '../theme';
@@ -45,6 +46,11 @@ export function AddressBookScreen() {
   const sendable = !!recipient && (wallet.enabled || recipient.network === 'Arbitrum');
   function save() {
     if (!name.trim() || !/^0x[\da-fA-F]{40}$/.test(address.trim()) || /^0x0{40}$/.test(address.trim())) { setError('Enter a name and a complete, non-zero EVM address.'); return; }
+    // A stored address is used again and again, so a bad checksum here is worse than a bad one
+    // typed into Send once: it fails every future transfer to this contact, and nothing on the
+    // Send screen connects that failure back to the saved entry. Checked at the point of
+    // saving, which is the only point where the user still has the source to copy from.
+    if (!checksumMatches(address.trim())) { setError(CHECKSUM_REFUSAL); return; }
     const existing = preferences.recipients.find(item => item.id === editing);
     const next = { id: existing?.id ?? `recipient-${Date.now()}`, name: name.trim(), address: address.trim(), network: existing?.network ?? 'Arbitrum' as const };
     updatePreferences({ recipients: [...preferences.recipients.filter(item => item.id !== editing), next] });

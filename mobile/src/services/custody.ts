@@ -105,6 +105,48 @@ export function custodyNotice(custody: Custody): string | null {
   }
 }
 
+/**
+ * What removing this wallet from the phone does to the money the user has been looking at.
+ *
+ * The Remove screen said one fixed sentence: *"Your money stays on the blockchain. Without your
+ * recovery phrase, nobody can reach it again."* True under `device`, and the whole point of
+ * this module is that `device` is not the only state. With the dev wallet server configured —
+ * which is how every developer runs it, and how this app was audited — the balances on screen
+ * belong to a seed on a computer, the phrase the app can show controls something else, and
+ * that sentence tells the user their phrase is protecting money it has no relationship to.
+ *
+ * `protectsDisplayedFunds()` already answers exactly this question. The sentence now asks it.
+ */
+export function removalConsequence(custody: Custody): string {
+  if (protectsDisplayedFunds(custody)) {
+    return 'Your money stays on the blockchain. Without your recovery phrase, nobody can reach it again.';
+  }
+  switch (moneySource(custody)) {
+    case 'demo':
+      return 'The balances in this preview are not real, so there is nothing here to lose. Removing the wallet clears what this app has stored on this device.';
+    case 'blocked':
+      return 'This build cannot open the wallet stored on this phone, so it cannot tell you what removing it would cost. Do not remove it from a build that cannot read it.';
+    default:
+      return 'The balances you have been seeing belong to the wallet server on your computer, and removing this wallet does not touch them. The recovery phrase this app can show you does not control that money — back up that server’s seed file yourself.';
+  }
+}
+
+/**
+ * Why a browser cannot create or restore a wallet, naming the funds it is actually showing.
+ *
+ * The web stub said "The browser preview runs on demo funds" unconditionally. With the dev
+ * server configured that contradicts the Wallet screen two taps away, which correctly says the
+ * funds are testnet money held by a server on this computer. One of the two had to be wrong,
+ * and it was this one — for the same reason as every other finding in this audit: the sentence
+ * was written rather than derived.
+ */
+export function keystoreUnavailableText(custody: Custody): string {
+  const funds = moneySource(custody) === 'dev-server'
+    ? 'the balances here come from the wallet server on your computer, which holds its own seed'
+    : 'this preview runs on demo funds';
+  return `Creating or restoring a wallet needs the Wally app on a phone — ${funds}.`;
+}
+
 export type SpendDecision =
   | { allowed: true; protectedByBackup: boolean }
   | { allowed: false; reason: string; action: 'create' | 'back-up' | 'blocked' };

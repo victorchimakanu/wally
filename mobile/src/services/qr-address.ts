@@ -20,6 +20,16 @@
  * an unrecoverable burn — so these are rejected by name rather than parsed hopefully.
  */
 import { CHAINS, isAddress, type Chain } from './wallet-api.ts';
+import { checksumMatches } from './address-checksum.ts';
+
+/**
+ * A scanned code whose address fails its own EIP-55 checksum is **damaged**, not mistyped —
+ * nobody hand-types into a QR code. A smudged print, a bad decode or a tampered sticker all
+ * land here, and the last of those is the reason this refuses rather than lowercasing the
+ * address and carrying on: dropping the capitalisation would discard the only evidence that
+ * the code is not what it claims to be.
+ */
+const CORRUPT = 'That code did not scan cleanly — the address does not match its own checksum. Scan it again, or ask for the address as text.';
 
 export type Scanned =
   | {
@@ -46,6 +56,7 @@ export function parseScannedAddress(raw: unknown): Scanned {
   // A bare address, which is what Wally's own receive code contains.
   if (/^0x[\da-fA-F]{40}$/.test(text)) {
     if (!isAddress(text)) return { ok: false, reason: 'That code contains the zero address, which cannot receive funds.' };
+    if (!checksumMatches(text)) return { ok: false, reason: CORRUPT };
     return { ok: true, address: text, chain: null, hadAmount: false };
   }
 
@@ -93,6 +104,7 @@ export function parseScannedAddress(raw: unknown): Scanned {
     return { ok: false, reason: 'That code does not contain a wallet address.' };
   }
   if (!isAddress(address)) return { ok: false, reason: 'That code contains the zero address, which cannot receive funds.' };
+  if (!checksumMatches(address)) return { ok: false, reason: CORRUPT };
 
   return {
     ok: true,

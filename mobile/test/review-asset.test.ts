@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
 import { CHAINS, parseQuote, type LiveQuote } from '../src/services/wallet-api.ts';
+import * as addressChecksum from '../src/services/address-checksum.ts';
 
 /**
  * What the approval screen says you are about to send.
@@ -53,6 +54,9 @@ function renderReview(q: LiveQuote | null): Value {
     '../services/committed-balance.ts': { availableBase: () => ({ base: 0n, pending: false, committed: 0n }), committedBase: () => ({ base: 0n, uncertain: false }) },
     // Stubbed so a clock cannot decide whether these cases pass. quote-clock has its own tests.
     '../services/quote-clock': { monotonicNow: () => 0, quoteExpired: () => false, secondsLeft: () => 30 },
+    // The real module, not a stub. It is pure and cheap, and a stub here could quietly
+    // disagree with the thing it stands for — which is the failure these cases exist to catch.
+    '../services/address-checksum': addressChecksum,
     '../services/address-safety.ts': { addressTrust: () => null, trustWarning: () => '' },
     '../services/chain-safety.ts': { chainOfNetwork: () => null, crossChainWarning: () => '' },
     '../services/transfer-watch.ts': { readWatch: async () => null, watchStatus: () => null, watchTransfer: async () => null },
