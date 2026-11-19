@@ -1,11 +1,11 @@
 # Continuous integration.
 #
 # Nineteen pull requests were merged into this repository with no automated check of any kind.
-# 135 mobile tests, 67 backend tests and a mutation harness that caught seven untested
+# 398 mobile tests, 144 backend tests and a mutation harness that caught seven untested
 # access-control bugs all existed, and all of them ran only when somebody remembered. On a
 # money app that is the cheapest safety net there is and it was not deployed.
 #
-# Three independent jobs, one per thing that can break on its own. They run in parallel and
+# Four independent jobs, one per thing that can break on its own. They run in parallel and
 # none depends on another, so a failure says which part of the repository is broken rather than
 # stopping the first time anything goes wrong.
 #
