@@ -1,4 +1,4 @@
-import { custodyOf, devServerConfigured, splitPermitted, type Custody } from './custody.ts';
+import { custodyOf, devServerConfigured, keystoreUnavailableText, splitPermitted, type Custody } from './custody.ts';
 /**
  * Web has no Bare worklet, so there is no keystore here.
  *
@@ -15,7 +15,9 @@ import type { Keystore } from './wallet-keystore.ts';
 export const keystoreAvailable = false;
 
 export function keystoreUnavailableReason(): string {
-  return 'Creating or restoring a wallet needs the Wally app on a phone. The browser preview runs on demo funds.';
+  // Derived, because this said "runs on demo funds" unconditionally while the Wallet screen
+  // two taps away correctly said the balances come from the wallet server on this computer.
+  return keystoreUnavailableText(custodyOf({ keystoreWallet: false, devServerConfigured, splitPermitted }));
 }
 
 export async function getKeystore(): Promise<Keystore> {

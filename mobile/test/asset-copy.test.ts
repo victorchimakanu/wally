@@ -3,11 +3,12 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { assetPhrase, chainAssetPhrase, tokenAssets } from '../src/services/asset-copy.ts';
+import { assetPhrase, assetSupportAnswer, chainAssetPhrase, tokenAssets } from '../src/services/asset-copy.ts';
+import { COINS } from '../src/services/market-api.ts';
 import { assetNamesOn, displaySymbol, tokensFor } from '../src/services/tokens.ts';
 import { TESTNET_CHAT_PROMPT, CHAT_PROMPT } from '../src/services/qvac.ts';
 import { receiveAdvice } from '../src/services/receive-advice.ts';
-import { liveIntentReply } from '../src/services/live-wallet-chat.ts';
+import { liveIntentReply, quickLiveReply } from '../src/services/live-wallet-chat.ts';
 import { CHAINS, type Chain } from '../src/services/wallet-api.ts';
 
 /**
@@ -148,4 +149,67 @@ test('no source file hand-writes the connected-asset claim', () => {
   assert.deepEqual(offenders, [],
     'These state which assets are connected as a literal. They go stale silently — four already ' +
     'have. Build the sentence from assetPhrase() or chainAssetPhrase() in asset-copy.ts instead.');
+});
+
+/**
+ * "Can I hold Bitcoin here?" has a lookup for an answer, so the model does not get asked.
+ *
+ * Measured against the running QVAC server on 19 Nov 2026, replaying the system prompt exactly
+ * as `qvac.ts` sends it:
+ *
+ * ```
+ * ORIGINAL prompt   USDt 0/5   ETH 5/5   BTC hold 2/5   BTC send 0/5
+ * fixed prompt      USDt 5/5   ETH 5/5   BTC hold 2/5   BTC send 5/5
+ * ```
+ *
+ * Correcting the prompt's stale claim took USDt from 0/5 to 5/5 and left "can I hold Bitcoin"
+ * exactly where it was — so that cell was never a stale-copy problem. It is a small local model
+ * being asked to carry an affirmation and a denial in one 35-word instruction, and three
+ * measured wordings failed to carry both.
+ *
+ * Which assets a wallet holds is a fact the app already has. Sampling it was the mistake.
+ */
+test('whether an asset is supported is answered from the token list, not by the model', () => {
+  // Everything the wallet actually holds answers yes, and names where.
+  for (const chain of CHAIN_LIST) {
+    for (const symbol of assetNamesOn(chain)) {
+      const answer = assetSupportAnswer(`Can I send ${symbol} from this wallet?`);
+      assert.ok(answer, `no deterministic answer for ${symbol}, so the model would be asked`);
+      assert.match(answer, /^Yes\./, `${symbol} is held on ${chain} but the answer was: ${answer}`);
+    }
+  }
+  // An asset the Market screen lists but the wallet cannot hold answers no, and says both
+  // things: not connected, and the price is still there.
+  for (const coin of COINS) {
+    if (connected().some(a => a.symbol.toLowerCase() === coin.symbol.toLowerCase())) continue;
+    const answer = assetSupportAnswer(`Can I hold ${coin.name} in this wallet?`);
+    assert.ok(answer, `${coin.name} is on the Market screen; a user asking about it must not be sampled`);
+    assert.match(answer, /^No\./, answer);
+    assert.match(answer, /Market/, `${coin.name} should still point at its price: ${answer}`);
+  }
+  // Tether's issuer name is an alias, because people say "Tether" and the contract says USDT.
+  assert.match(assetSupportAnswer('Can I send Tether?') ?? '', /^Yes\./);
+});
+
+test('the deterministic answer takes only the questions it can actually answer', () => {
+  // A transfer instruction is not a support question. It must keep reaching the Send path,
+  // which opens the screen empty — chat still initiates nothing.
+  assert.equal(assetSupportAnswer('Send 25 USDt to 0x1111111111111111111111111111111111111111'), null);
+  assert.equal(assetSupportAnswer('transfer 1 ETH to Victor'), null);
+  // A ticker this app has never heard of is a question about language, not about the wallet.
+  // Answering it would mean denying an asset on no evidence.
+  assert.equal(assetSupportAnswer('Can I send FOO?'), null);
+  for (const open of ['How do I use this?', 'Can you explain what a stablecoin is?', 'What is my balance?', 'hello']) {
+    assert.equal(assetSupportAnswer(open), null, open);
+  }
+});
+
+test('the support answer reaches chat, ahead of the model', () => {
+  // The unit above proves the function. This proves the caller, which is the half that twice
+  // in this audit was the thing actually broken.
+  const reply = quickLiveReply('Can I hold Bitcoin in this wallet?');
+  assert.ok(reply, 'quickLiveReply sent it to the model');
+  assert.match(reply.text, /^No\. Bitcoin is not connected/);
+  // And it must not have acquired a tool card: this is a sentence, not a wallet action.
+  assert.equal(reply.tool, undefined);
 });

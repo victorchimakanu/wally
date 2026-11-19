@@ -2,7 +2,7 @@ import type { ChatReply } from '../demo/model.ts';
 import type { WalletIntent, ChatIntent } from './qvac.ts';
 import { CHAINS } from './wallet-api.ts';
 import { displaySymbol } from './tokens.ts';
-import { assetPhrase, tokenAssets } from './asset-copy.ts';
+import { assetPhrase, assetSupportAnswer, tokenAssets } from './asset-copy.ts';
 
 // Re-exported because `test/live-chat-copy.test.ts` asserts these replies against the token
 // list through this module. The list itself now lives in asset-copy.ts, which the Receive
@@ -63,5 +63,10 @@ export function quickLiveReply(text: string): ChatReply | null {
   if (/^(?:(?:what(?:'s|’s| is) my|(?:show|view)(?: me)?(?: my)?) )?(?:(?:Arbitrum|Ethereum|testnet) )?(?:receive )?address$/i.test(request)) return liveIntentReply({ ...base, intent: 'address' });
   if (/^(?:(?:show|view|check)(?: me)?(?: my)? )?(?:transaction |transfer )?history$/i.test(request)) return liveIntentReply({ ...base, intent: 'history' });
   if (/^(?:send|transfer|pay)\b/i.test(request)) return liveIntentReply({ ...base, intent: 'transfer' });
+  // "Can I hold Bitcoin here?" has a lookup for an answer, so it is not sent to the model.
+  // Measured, the model got it right 2 times in 5 — before and after the system prompt was
+  // corrected, so it is not a copy problem. See assetSupportAnswer in asset-copy.ts.
+  const support = assetSupportAnswer(request);
+  if (support) return { text: support };
   return null;
 }

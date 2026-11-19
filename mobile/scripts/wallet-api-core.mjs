@@ -596,8 +596,22 @@ export async function createWalletService(directory, { transport = fetch } = {})
   async function history() {
     const errors = [], items = [];
     await Promise.all(Object.entries(NETWORKS).map(async ([chain, network]) => {
-      try { const response = await transport(`${network.indexer}/api/v2/addresses/${accountInfo.get(chain).address}/transactions`, { signal: AbortSignal.timeout(15000) }); if (!response.ok) throw new Error(); const data = await response.json(); if (!Array.isArray(data.items)) throw new Error(); for (const item of data.items.slice(0, 25)) { if (!/^0x[\da-f]{64}$/i.test(item.hash) || !/^\d+$/.test(String(item.value))) continue; items.push({ hash: item.hash, chain, network: network.name, from: item.from?.hash ?? '', recipient: item.to?.hash ?? '', amount: ethDisplay(item.value), symbol: 'ETH', status: item.status === 'ok' ? 'confirmed' : item.status === 'error' ? 'failed' : 'pending', submittedAt: Date.parse(item.timestamp) || 0, explorerUrl: `${network.explorer}/tx/${item.hash}` }); } }
-      catch { errors.push(`${network.name} history is unavailable. Showing locally tracked submissions where available.`); }
+      try { const response = await transport(`${network.indexer}/api/v2/addresses/${accountInfo.get(chain).address}/transactions`, { signal: AbortSignal.timeout(15000) }); if (!response.ok) { const refused = new Error('indexer refused'); refused.status = response.status; throw refused; } const data = await response.json(); if (!Array.isArray(data.items)) throw new Error(); for (const item of data.items.slice(0, 25)) { if (!/^0x[\da-f]{64}$/i.test(item.hash) || !/^\d+$/.test(String(item.value))) continue; items.push({ hash: item.hash, chain, network: network.name, from: item.from?.hash ?? '', recipient: item.to?.hash ?? '', amount: ethDisplay(item.value), symbol: 'ETH', status: item.status === 'ok' ? 'confirmed' : item.status === 'error' ? 'failed' : 'pending', submittedAt: Date.parse(item.timestamp) || 0, explorerUrl: `${network.explorer}/tx/${item.hash}` }); } }
+      // A 403 here is not an outage. Blockscout puts its Arbitrum Sepolia API behind a bot
+      // challenge — verified 19 Nov 2026: arbitrum-sepolia.blockscout.com answers 403 with a
+      // Cloudflare interstitial while eth-sepolia.blockscout.com answers 200 — so no server
+      // can read that chain from it, ever. Saying "unavailable" invited a developer to retry,
+      // check the network and go looking for a fault, which is the same cost as the stale copy
+      // elsewhere in this audit: a message that sends you to the wrong place.
+      //
+      // The app does not depend on this. With EXPO_PUBLIC_WALLY_PROXY_URL set it reads history
+      // through the backend, which moved to Etherscan on 31 Oct and covers both chains. This
+      // server's list is the fallback, and on Arbitrum it is the journal alone.
+      catch (error) {
+        errors.push(error?.status === 403
+          ? `${network.name} history cannot be read from this development server: its indexer answers a bot challenge for this chain, so this is permanent rather than a fault to retry. Run the backend proxy for indexed history. Transfers submitted from here are still listed.`
+          : `${network.name} history is unavailable. Showing locally tracked submissions where available.`);
+      }
     }));
     await Promise.all(journal.slice(0, 25).map(async record => { try { await receipt(record.chain, record.hash); } catch {} if (!items.some(item => item.hash === record.hash && item.chain === record.chain)) items.push(visibleRecord(record)); }));
     return { version: 1, source: 'Blockscout and local submission receipts', fetchedAt: Date.now(), items: items.sort((a, b) => b.submittedAt - a.submittedAt).slice(0, 50), errors };

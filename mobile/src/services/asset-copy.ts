@@ -30,6 +30,7 @@
  */
 import { CHAINS, type Chain } from './wallet-api.ts';
 import { assetNamesOn, displaySymbol, tokensFor } from './tokens.ts';
+import { COINS } from './market-api.ts';
 
 /** The chains this wallet connects, in display order. */
 export const CHAIN_ORDER = ['arbitrum', 'ethereum'] as const satisfies readonly Chain[];
@@ -63,4 +64,84 @@ export function assetPhrase(): string {
  */
 export function chainAssetPhrase(chain: Chain): string {
   return list(assetNamesOn(chain).map(symbol => `testnet ${symbol}`));
+}
+
+/**
+ * Which asset a sentence is asking about, or null when it names none this app knows.
+ *
+ * Both halves are derived. What the wallet **holds** comes from `tokens.ts` through
+ * `tokenAssets()`, plus native ETH. What it merely **knows the price of** comes from `COINS` in
+ * `market-api.ts`, which is the Market screen's own list. Nothing is written down twice, so
+ * pinning a token or adding a coin moves this with it.
+ *
+ * Null for an unrecognised word rather than a guess: "can I send FOO" from someone who means
+ * nothing in particular should reach the model, not get a confident denial about a ticker this
+ * app has never heard of.
+ */
+export function namedAsset(text: string): { label: string; chain: Chain | null } | null {
+  const words = new Set(text.toLowerCase().match(/[a-z]+/g) ?? []);
+  // Held assets first: a word that matches one of these is answered from the wallet, not from
+  // the price list, even though USDT appears in both.
+  for (const asset of tokenAssets()) {
+    const token = tokensFor(asset.chain).find(entry => entry.symbol === asset.symbol);
+    const aliases = [asset.symbol, displaySymbol(asset.symbol), token?.issuer ?? ''];
+    if (aliases.some(alias => alias && words.has(alias.toLowerCase()))) {
+      return { label: displaySymbol(asset.symbol), chain: asset.chain };
+    }
+  }
+  if (words.has('eth') || words.has('ethereum')) return { label: 'ETH', chain: null };
+  for (const coin of COINS) {
+    if (words.has(coin.symbol.toLowerCase()) || words.has(coin.name.toLowerCase())) {
+      return { label: coin.name, chain: null };
+    }
+  }
+  return null;
+}
+
+/**
+ * The answer to "can I hold / send / use <asset> here", or null when that is not the question.
+ *
+ * ## Why this is not left to the model
+ *
+ * It was, and the model got it wrong. Measured against the running QVAC server on 19 Nov 2026,
+ * with the system prompt replayed exactly as `qvac.ts` sends it:
+ *
+ * ```
+ * ORIGINAL prompt   USDt 0/5   ETH 5/5   BTC hold 2/5   BTC send 0/5
+ * fixed prompt      USDt 5/5   ETH 5/5   BTC hold 2/5   BTC send 5/5
+ * ```
+ *
+ * Fixing the prompt's stale claim moved USDt from 0/5 to 5/5. It did **not** move "can I hold
+ * Bitcoin", which sat at 2/5 before and after — so that cell is not a stale-copy problem at
+ * all. It is a 35-word instruction to a small local model being asked to carry an affirmation
+ * and a denial at once, and three wordings measured in a row failed to carry both.
+ *
+ * Which asset a wallet holds is a **fact the app already has**, in the same list the Send
+ * screen builds its picker from. Sampling it was the mistake. This is the same principle the
+ * whole app is built on — the model reads the sentence, code supplies the values — applied to a
+ * fact rather than to an amount.
+ *
+ * The model still handles everything that is genuinely a question of language. This only takes
+ * the questions that have a lookup for an answer.
+ */
+export function assetSupportAnswer(text: string): string | null {
+  const request = text.trim();
+  // A support question, not a transfer instruction: "send 5 USDt to 0x…" must keep going to the
+  // transfer path, which opens Send. The leading verb is what separates them.
+  if (/^(?:send|transfer|pay)\b/i.test(request)) return null;
+  if (!/\b(?:can|could|does|do|is|are|will)\b/i.test(request)) return null;
+  if (!/\b(?:hold|holds|send|sending|store|keep|use|support|supports|supported|transfer|receive|accept)\b/i.test(request)) return null;
+
+  const asset = namedAsset(request);
+  if (!asset) return null;
+
+  if (asset.chain) {
+    return `Yes. ${asset.label} is connected on ${CHAINS[asset.chain].name}. Use Send to review a transfer — Wally fills in nothing for you.`;
+  }
+  if (asset.label === 'ETH') {
+    return `Yes. testnet ETH is connected on ${list(CHAIN_ORDER.map(chain => CHAINS[chain].name))}. Use Send to review a transfer — Wally fills in nothing for you.`;
+  }
+  // Known to the Market screen, not held by the wallet. Said as two separate facts, because
+  // "you can see its price" is the part a person is usually surprised by.
+  return `No. ${asset.label} is not connected, so this wallet cannot hold or send it. You can still see its price under Market. This wallet holds ${assetPhrase()}.`;
 }

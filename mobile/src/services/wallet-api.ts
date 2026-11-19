@@ -85,8 +85,15 @@ export function normaliseAmount(value: string): string {
  *
  * The fractional limit follows `decimals`: a token with 6 cannot express a seventh place, and
  * silently truncating it would mean sending a different amount from the one on screen.
+ *
+ * **`unit` has no default.** It used to default to `'ETH'`, which only ever reached the user as
+ * a lie: a six-decimal USDt amount refused by a caller that forgot the argument said "Enter an
+ * amount in ETH with up to 6 decimals" — naming the wrong asset in the one sentence whose job
+ * is telling someone what to type. Every production caller already passed it, so the default
+ * was protecting nothing and waiting to mislead. Required now, so forgetting it is a compile
+ * error rather than a wrong message.
  */
-export function toBaseUnits(value: string, decimals: number, unit = 'ETH'): bigint {
+export function toBaseUnits(value: string, decimals: number, unit: string): bigint {
   if (!Number.isInteger(decimals) || decimals < 0 || decimals > 36) {
     throw new Error('A token must declare a whole number of decimals.');
   }

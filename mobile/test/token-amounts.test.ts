@@ -17,7 +17,7 @@ test('the same amount means different integers for different tokens, and that is
   // would send 1,000,000,000,000 times too much.
   assert.equal(toBaseUnits('1', 6, 'USDT'), 1_000_000n);
   assert.equal(toBaseUnits('1', 18, 'ETH'), 10n ** 18n);
-  assert.equal(toBaseUnits('1', 18) / toBaseUnits('1', 6), 10n ** 12n);
+  assert.equal(toBaseUnits('1', 18, 'ETH') / toBaseUnits('1', 6, 'USDT'), 10n ** 12n);
 
   // The ordinary case someone types.
   assert.equal(toBaseUnits('10.50', 6, 'USDT'), 10_500_000n);
@@ -42,7 +42,7 @@ test('the comma rule still applies, at every token scale', () => {
   // A lone comma is a decimal point — the rule from wallet-api.ts, which must not change
   // meaning just because the token did.
   assert.equal(toBaseUnits('1,5', 6, 'USDT'), 1_500_000n);
-  assert.equal(toBaseUnits('1,5', 18), toBaseUnits('1.5', 18));
+  assert.equal(toBaseUnits('1,5', 18, 'ETH'), toBaseUnits('1.5', 18, 'ETH'));
 });
 
 test('zero decimals is a real case and does not produce a stray fraction', () => {
