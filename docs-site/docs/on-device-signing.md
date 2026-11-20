@@ -16,6 +16,17 @@ The pen never leaves your laptop. The note is written and signed in your machine
 
 **The network only ever sees the sealed envelope, never the pen that sealed it.**
 
+:::note On the phone, this is still ahead of us — 8 November 2026
+Everything above describes signing on a laptop, which is what the reference app does. On the
+phone the same job belongs to the WDK Bare worklet behind `wallet-keystore.ts`. That code is
+written and type-checked against WDK's real HRPC types, and **it has never run** — it needs a
+development build on a physical device.
+
+Until it does, the mobile app's balances and sending come from a loopback dev wallet server
+holding its own seed on a developer's computer. It is a scaffold, and it is **a different wallet
+from the one the recovery screens create**.
+:::
+
 ## Why it matters: three arguments
 
 ### 1. There is no vault worth robbing
