@@ -9,6 +9,7 @@ import { useWallet } from '../data/wallet';
 import { useDemo } from '../demo/store';
 import { CHAINS, amountForInput, fetchGasPrice, formatUnits, parseSendAmount, sendableMax, type Chain, type LiveTransaction } from '../services/wallet-api';
 import { recipientProblem } from '../services/address-checksum';
+import { contractRecipientRefusal } from '../services/recipient-safety';
 import { availableBase, committedBase } from '../services/committed-balance.ts';
 import { monotonicNow, quoteExpired, secondsLeft } from '../services/quote-clock';
 import { addressTrust, trustWarning } from '../services/address-safety.ts';
@@ -150,6 +151,12 @@ export function LiveSendScreen() {
       parseSendAmount(amount.trim(), decimals, sending);
       if (state.offline || wallet.offline) throw new Error('Reconnect before reviewing a transfer.');
       setBusy(true);
+      // Sending to a contract is an unrecoverable burn, and until now the only check on the
+      // whole phone path lived in the dev wallet server — which is development-only and goes
+      // away when signing moves on-device. The pinned-token half of this needs no network; see
+      // services/recipient-safety.ts for why an unreachable node does not refuse the send yet.
+      const burn = await contractRecipientRefusal(chain, recipient.trim());
+      if (burn) throw new Error(burn);
       await wallet.prepare({ chain, recipient: recipient.trim(), amount: amount.trim(), ...(token ? { token: sending } : {}) });
       router.push('/review');
     } catch (failure) { setError(failure instanceof Error ? failure.message : 'Could not prepare the transfer.'); }
