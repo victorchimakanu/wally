@@ -5,7 +5,7 @@ import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleShee
 import { Avatar, Lockup, WallyAsset, type AssetName } from './WallyAsset';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useShell } from './shell';
+import { shouldReveal, useShell } from './shell';
 import { fonts, makeStyles, radius, useColors } from '../theme';
 import { useDemo } from '../demo/store';
 import { useWallet } from '../data/wallet';
@@ -149,6 +149,16 @@ export function Screen({ children, title, tab, surface, immersive = false, foote
     return () => cancelAnimationFrame(frame);
     // A new conversation or an explicit send/jump resumes following the latest reply.
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scrollRequest, autoScroll]);
+  // A screen that does NOT follow new content can still ask for something it has just put at
+  // the bottom to be brought into view. The Send screen's refusals live there, below a sticky
+  // footer: measured in a browser on 23 Nov 2026, a refusal rendered at y=692 in a 626px
+  // viewport with 226px of unscrolled content below it. Clicking "Review transfer" appeared to
+  // do nothing at all — the explanation was real, rendered, and off-screen.
+  useEffect(() => {
+    if (!shouldReveal(autoScroll, scrollRequest)) return;
+    const frame = requestAnimationFrame(() => toLatest(true));
+    return () => cancelAnimationFrame(frame);
   }, [scrollRequest, autoScroll]);
   const insets = useSafeAreaInsets();
   const { state, storageError } = useDemo();
