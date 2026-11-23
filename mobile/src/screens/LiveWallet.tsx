@@ -164,7 +164,9 @@ export function LiveSendScreen() {
   }
   // Each warning sits beside the field it is about: the lookalike check under the address, the
   // fee currency beside the balance. Nothing explains the flow; the review screen is the check.
-  return <Screen title={`Send ${sending}`} footer={<Button label={busy ? 'Checking network fee…' : 'Review transfer'} disabled={busy || wallet.offline || state.offline || !balance || balance.balance === null} onPress={() => { void review(); }} />}>
+  // scrollRequest={error}: a refusal renders below the sticky footer, so without this the
+  // button appears to do nothing. See shouldReveal in components/ui.tsx.
+  return <Screen title={`Send ${sending}`} scrollRequest={error} footer={<Button label={busy ? 'Checking network fee…' : 'Review transfer'} disabled={busy || wallet.offline || state.offline || !balance || balance.balance === null} onPress={() => { void review(); }} />}>
     <NetworkChoice value={chain} onChange={next => { wallet.clearQuote(); setChain(next); setAsset('ETH'); setError(''); }} />
     {!!scannedChain && <Note>Switched to {CHAINS[scannedChain].name}, the network the scanned code asked for.</Note>}
     <AssetChoice value={sending} options={assets} onChange={next => { wallet.clearQuote(); setAsset(next); setAmount(''); setError(''); }} />
