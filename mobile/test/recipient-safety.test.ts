@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  contractRecipientRefusal, pinnedTokenContract, pinnedTokenRefusal, recipientKind, CONTRACT_REFUSAL,
+  anyPinnedTokenContract, contractRecipientRefusal, pinnedTokenContract, pinnedTokenRefusal,
+  recipientKind, savedTokenContractRefusal, CONTRACT_REFUSAL,
 } from '../src/services/recipient-safety.ts';
 import { allTokens, tokensFor } from '../src/services/tokens.ts';
 import type { Chain } from '../src/services/wallet-api.ts';
@@ -143,4 +144,42 @@ test('the Send screen refuses before it prepares the transfer', () => {
   assert.notEqual(prepare, -1, 'the Send screen no longer prepares a transfer — this test is stale');
   assert.ok(call < prepare, 'the contract check must run before the transfer is prepared, not after');
   assert.match(src, /if \(burn\) throw new Error\(burn\)/, 'the refusal must stop the send, not just be computed');
+});
+
+/**
+ * The address book, where a bad recipient waits for every future transfer.
+ *
+ * The Send screen refuses a contract now, so a saved one fails at send time rather than burning
+ * anything. That is still the wrong place to find out: the entry keeps failing, and nothing on
+ * the Send screen points back at the saved contact as the cause. The same argument as the
+ * checksum in #63 — catch it at the only moment the user still has the source to copy from.
+ *
+ * Checked across **every** chain's pinned list rather than the entry's own network. A new
+ * contact's `network` is defaulted to Arbitrum, not chosen, so it is not reliable enough to
+ * narrow by — and narrowing by the wrong chain returns "not a token", which is the answer that
+ * lets it be saved.
+ */
+test('a token contract cannot be saved as a contact, whichever chain pinned it', () => {
+  assert.ok(allTokens().length > 0, 'no tokens pinned — delete this case if that is deliberate');
+  for (const token of allTokens()) {
+    const hit = anyPinnedTokenContract(token.address);
+    assert.ok(hit, `${token.symbol} can be saved as a recipient`);
+    assert.match(savedTokenContractRefusal(hit.symbol), /not a wallet/);
+    // Case must not matter, and neither must surrounding space from a paste.
+    assert.ok(anyPinnedTokenContract(token.address.toLowerCase()));
+    assert.ok(anyPinnedTokenContract(`  ${token.address}  `));
+  }
+  assert.equal(anyPinnedTokenContract(WALLET), null, 'an ordinary address must still be savable');
+});
+
+test('the save path refuses before it writes the contact', () => {
+  const src = readFileSync(new URL('../src/screens/Profile.tsx', import.meta.url).pathname, 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+
+  const check = src.indexOf('anyPinnedTokenContract(');
+  const write = src.indexOf('updatePreferences({ recipients: [...');
+  assert.notEqual(check, -1, 'the address book does not check for a token contract');
+  assert.notEqual(write, -1, 'the address book no longer writes recipients — this test is stale');
+  assert.ok(check < write, 'the check must run before the contact is written, not after');
+  assert.match(src, /setError\(savedTokenContractRefusal\(/, 'the refusal must be shown, not just computed');
 });
