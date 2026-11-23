@@ -5,6 +5,7 @@ import { Avatar, WallyAsset } from '../components/WallyAsset';
 import { Address, Button, Card, Group, Label, Note, Row, Screen, useShared } from '../components/ui';
 import { CurrencyChoice } from '../components/ChatCards';
 import { checksumMatches, CHECKSUM_REFUSAL } from '../services/address-checksum';
+import { anyPinnedTokenContract, savedTokenContractRefusal } from '../services/recipient-safety';
 import { usePreferences } from '../demo/preferences';
 import { useDemo } from '../demo/store';
 import { fonts, useColors } from '../theme';
@@ -51,6 +52,13 @@ export function AddressBookScreen() {
     // Send screen connects that failure back to the saved entry. Checked at the point of
     // saving, which is the only point where the user still has the source to copy from.
     if (!checksumMatches(address.trim())) { setError(CHECKSUM_REFUSAL); return; }
+    // Same argument as the checksum above, one step worse: a token contract saved under a name
+    // is a burn address waiting in the list for every future transfer, and the Send screen will
+    // refuse it every time without anything pointing back at the saved entry. Checked across
+    // every chain's pinned list, not just this entry's network — a new contact's network is
+    // defaulted rather than chosen, so it is not reliable enough to narrow by.
+    const burn = anyPinnedTokenContract(address.trim());
+    if (burn) { setError(savedTokenContractRefusal(burn.symbol)); return; }
     const existing = preferences.recipients.find(item => item.id === editing);
     const next = { id: existing?.id ?? `recipient-${Date.now()}`, name: name.trim(), address: address.trim(), network: existing?.network ?? 'Arbitrum' as const };
     updatePreferences({ recipients: [...preferences.recipients.filter(item => item.id !== editing), next] });

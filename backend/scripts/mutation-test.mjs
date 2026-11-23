@@ -29,6 +29,18 @@ const BACKEND = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 
 /** [id, file relative to backend/, find, replace, what the bug would mean] */
 const MUTATIONS = [
+  // CORS: a custom header the preflight omits fails the real request before it arrives, and
+  // the caller sees a network error rather than a status code. This shipped on 19 Nov when
+  // #55 added x-wally-install without listing it, and browsers lost indexed history for four
+  // days. The list is derived from CUSTOM_HEADERS now; these two mutants break that link.
+  ["cors-install-header-unlisted", "src/server.ts",
+   "reply.header(\"Access-Control-Allow-Headers\", [\"Content-Type\", ...CUSTOM_HEADERS].join(\", \"));",
+   "reply.header(\"Access-Control-Allow-Headers\", \"Content-Type, x-wally-key\");",
+   "a browser cannot send the installation id, so history fails and per-install limits do nothing"],
+  ["cors-headers-list-emptied", "src/server.ts",
+   "export const CUSTOM_HEADERS = [KEY_HEADER, INSTALL_HEADER] as const;",
+   "export const CUSTOM_HEADERS = [KEY_HEADER] as const;",
+   "a header the service reads drops out of the preflight unnoticed"],
   // USDt: the arithmetic that is wrong by a factor of a million million when it is wrong
   ["token-decimals-from-record", "src/indexer.ts",
    "    const amount = appSafeAmount(value, token.decimals);",

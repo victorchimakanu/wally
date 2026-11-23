@@ -6,6 +6,7 @@ import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
 import { CHAINS, parseQuote, type LiveQuote } from '../src/services/wallet-api.ts';
 import * as addressChecksum from '../src/services/address-checksum.ts';
+import * as recipientSafety from '../src/services/recipient-safety.ts';
 import { fileURLToPath } from 'node:url';
 
 /**
@@ -58,6 +59,9 @@ function renderReview(q: LiveQuote | null): Value {
     // The real module, not a stub. It is pure and cheap, and a stub here could quietly
     // disagree with the thing it stands for — which is the failure these cases exist to catch.
     '../services/address-checksum': addressChecksum,
+    // Real, like address-checksum above: a stub could quietly disagree with the module it
+    // stands for, which is the failure these cases exist to catch.
+    '../services/recipient-safety': recipientSafety,
     '../services/address-safety.ts': { addressTrust: () => null, trustWarning: () => '' },
     '../services/chain-safety.ts': { chainOfNetwork: () => null, crossChainWarning: () => '' },
     '../services/transfer-watch.ts': { readWatch: async () => null, watchStatus: () => null, watchTransfer: async () => null },
