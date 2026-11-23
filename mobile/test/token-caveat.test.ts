@@ -6,6 +6,7 @@ import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
 import { join } from 'node:path';
 import { TOKENS, allTokens, chainCaveats, tokenCaveat, tokensFor, type Token } from '../src/services/tokens.ts';
+import { fileURLToPath } from 'node:url';
 
 /**
  * The third-party-deployment warning, and the flag behind it.
@@ -23,7 +24,7 @@ import { TOKENS, allTokens, chainCaveats, tokenCaveat, tokensFor, type Token } f
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Value = any;
 const nodeRequire = createRequire(import.meta.url);
-const SRC = new URL('../src/', import.meta.url).pathname;
+const SRC = fileURLToPath(new URL('../src/', import.meta.url));
 
 function sources(dir = SRC): string[] {
   return readdirSync(dir).flatMap(entry => {
@@ -121,7 +122,8 @@ test('the flag is read through tokenCaveat and nowhere else', () => {
   // `token.official ? …` the warning can disagree with itself, which is worse than not having
   // one, so the check is on `official` being touched at all outside its own module.
   const offenders = sources()
-    .filter(path => !path.endsWith('/services/tokens.ts'))
+    // Compared with forward slashes, because `join` uses backslashes on Windows.
+    .filter(path => !path.replace(/\\/g, '/').endsWith('/services/tokens.ts'))
     .filter(path => /\bofficial\b/.test(code(read(path))));
   assert.deepEqual(offenders.map(path => path.slice(SRC.length)), [], 'these read `official` directly instead of calling tokenCaveat()');
 });

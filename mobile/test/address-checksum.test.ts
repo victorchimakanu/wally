@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { toChecksumAddress, checksumMatches, recipientProblem, CHECKSUM_REFUSAL } from '../src/services/address-checksum.ts';
 import { parseScannedAddress } from '../src/services/qr-address.ts';
+import { fileURLToPath } from 'node:url';
 
 /**
  * EIP-55, for addresses a person supplied.
@@ -104,7 +105,7 @@ test('a scanned code whose address fails its checksum is refused', () => {
  * puts it back.
  */
 test('nothing accepts a typed address on shape alone any more', () => {
-  const read = (path: string) => readFileSync(new URL(`../src/${path}`, import.meta.url).pathname, 'utf8')
+  const read = (path: string) => readFileSync(fileURLToPath(new URL(`../src/${path}`, import.meta.url)), 'utf8')
     .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 
   const send = read('screens/LiveWallet.tsx');

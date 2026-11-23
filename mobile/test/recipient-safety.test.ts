@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import {
   anyPinnedTokenContract, contractRecipientRefusal, pinnedTokenContract, pinnedTokenRefusal,
   recipientKind, savedTokenContractRefusal, CONTRACT_REFUSAL,
@@ -135,7 +136,7 @@ test('with no backend configured the network half is skipped, not silently passe
  * and that it happens before the transfer is prepared.
  */
 test('the Send screen refuses before it prepares the transfer', () => {
-  const src = readFileSync(new URL('../src/screens/LiveWallet.tsx', import.meta.url).pathname, 'utf8')
+  const src = readFileSync(fileURLToPath(new URL('../src/screens/LiveWallet.tsx', import.meta.url)), 'utf8')
     .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 
   const call = src.indexOf('await contractRecipientRefusal(');
@@ -173,7 +174,7 @@ test('a token contract cannot be saved as a contact, whichever chain pinned it',
 });
 
 test('the save path refuses before it writes the contact', () => {
-  const src = readFileSync(new URL('../src/screens/Profile.tsx', import.meta.url).pathname, 'utf8')
+  const src = readFileSync(fileURLToPath(new URL('../src/screens/Profile.tsx', import.meta.url)), 'utf8')
     .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 
   const check = src.indexOf('anyPinnedTokenContract(');

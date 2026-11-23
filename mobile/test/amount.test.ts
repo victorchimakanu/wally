@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { wei, normaliseAmount, maxSendable, amountForInput, parseSendAmount } from '../src/services/wallet-api.ts';
+import { fileURLToPath } from 'node:url';
 
 /**
  * Amount parsing decides how much money moves, so every case here is written around the
@@ -218,7 +219,7 @@ test('Max is exact, not rounded down', () => {
  * comes back, however it is spelled.
  */
 test('no display formatter is written into the amount field', () => {
-  const file = new URL('../src/screens/LiveWallet.tsx', import.meta.url).pathname;
+  const file = fileURLToPath(new URL('../src/screens/LiveWallet.tsx', import.meta.url));
   const source = readFileSync(file, 'utf8')
     .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
   const bad = /setAmount\(\s*(formatUnits|formatEth|[^)]*toLocaleString)/.exec(source);

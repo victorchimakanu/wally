@@ -7,6 +7,7 @@ import ts from 'typescript';
 import { CHAINS, parseQuote, type LiveQuote } from '../src/services/wallet-api.ts';
 import * as addressChecksum from '../src/services/address-checksum.ts';
 import * as recipientSafety from '../src/services/recipient-safety.ts';
+import { fileURLToPath } from 'node:url';
 
 /**
  * What the approval screen says you are about to send.
@@ -27,7 +28,7 @@ import * as recipientSafety from '../src/services/recipient-safety.ts';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Value = any;
 const nodeRequire = createRequire(import.meta.url);
-const SRC = new URL('../src/', import.meta.url).pathname;
+const SRC = fileURLToPath(new URL('../src/', import.meta.url));
 const ADDRESS = '0x1111111111111111111111111111111111111111';
 
 /** A real quote, built through the real parser, so the fixture cannot accept what the app won't. */
