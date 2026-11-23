@@ -12,7 +12,20 @@ import { fileURLToPath } from "node:url";
 import { timingSafeEqual } from "node:crypto";
 import { config, onLoopback, trustProxySetting } from "./config.js";
 import { getLogger, scrubSecrets } from "./logger.js";
-import { callerOf, createRateLimiter } from "./ratelimit.js";
+import { callerOf, createRateLimiter, INSTALL_HEADER } from "./ratelimit.js";
+
+/** The shared key callers present. Named once so the reader and the preflight cannot drift. */
+export const KEY_HEADER = "x-wally-key";
+
+/**
+ * Every custom request header this service reads.
+ *
+ * Adding one means the browser will preflight requests that carry it, so it has to appear in
+ * `Access-Control-Allow-Headers` or those requests fail before they arrive. Keeping the list
+ * here, beside the code that reads them, is what stops that being forgotten a third time —
+ * `test/access.test.ts` asserts the preflight lists every entry.
+ */
+export const CUSTOM_HEADERS = [KEY_HEADER, INSTALL_HEADER] as const;
 import { healthRoutes } from "./routes/health.js";
 import { marketRoutes } from "./routes/market.js";
 import { rpcRoutes } from "./routes/rpc.js";
@@ -73,11 +86,21 @@ export function buildServer() {
 
     if (request.method === "OPTIONS") {
       reply.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-      // x-wally-key must be listed: it is a custom header, so the browser preflights every
-      // request carrying it and refuses the request outright if the preflight omits it. The
-      // service *requires* that header off loopback, so leaving it out breaks every browser
-      // request the moment WALLY_APP_KEY is set. Measured 22 Oct 2026.
-      reply.header("Access-Control-Allow-Headers", "Content-Type, x-wally-key");
+      // Every custom header this service reads has to be listed. A custom header makes the
+      // browser preflight the request, and a preflight that omits the header refuses the
+      // request outright — the app sees a network failure, not a 4xx, so nothing in the
+      // response explains it.
+      //
+      // This has now happened twice. `x-wally-key` was missing and broke every browser
+      // request the moment WALLY_APP_KEY was set (22 Oct 2026, #3). The comment that fixed it
+      // sat directly above this line while #55 added `x-wally-install` on 19 Nov and did not
+      // add it here — so from that day, every browser request carrying the installation id
+      // failed. Measured 23 Nov: Activity showed "Failed to fetch" and fell back to the dev
+      // wallet server, losing the indexed history it exists to fetch.
+      //
+      // So the list is no longer written out. It is built from CUSTOM_HEADERS, which is the
+      // same constant the readers below use, and `test/access.test.ts` walks it.
+      reply.header("Access-Control-Allow-Headers", ["Content-Type", ...CUSTOM_HEADERS].join(", "));
       // Cache the preflight so a keyed app does not spend two requests on every call; the
       // rate limiter counts preflights too.
       reply.header("Access-Control-Max-Age", "600");
@@ -101,11 +124,11 @@ export function buildServer() {
     }
 
     if (config.appKey) {
-      const presented = request.headers["x-wally-key"];
+      const presented = request.headers[KEY_HEADER];
       if (typeof presented !== "string" || !keyMatches(presented, config.appKey)) {
         // Log that it happened, never what was presented.
         log.warn({ url: request.url, ip: request.ip }, "rejected a request with a missing or wrong key");
-        return reply.code(401).send({ error: "This service requires a valid x-wally-key header." });
+        return reply.code(401).send({ error: `This service requires a valid ${KEY_HEADER} header.` });
       }
     }
     return;

@@ -205,3 +205,56 @@ describe("rate limiting", () => {
     }
   });
 });
+
+/**
+ * The preflight must list every custom header the service reads.
+ *
+ * This has gone wrong twice. A custom header makes the browser preflight the request, and a
+ * preflight that omits it refuses the request outright — the caller sees a network failure
+ * rather than a status code, so nothing in the response says why.
+ *
+ *  - 22 Oct 2026 (#3): `x-wally-key` was missing, and would have broken every browser request
+ *    the moment WALLY_APP_KEY was set. Caught before deployment.
+ *  - 19 Nov 2026 (#55): `x-wally-install` was added for per-installation rate limiting and not
+ *    added here. **Not caught**, because nothing tested it. Measured in a browser on 23 Nov:
+ *    `/v1/history` failed, Activity showed "Failed to fetch" and fell back to the dev wallet
+ *    server — losing the indexed history the backend exists to fetch — and per-installation
+ *    rate limiting silently did nothing in a browser, because the id never arrived.
+ *
+ * Written over `CUSTOM_HEADERS` rather than over a list repeated here, so a third header is
+ * covered on the commit that adds it.
+ */
+describe("CORS preflight", () => {
+  it("lists every custom header the service reads, so a browser can send them", async () => {
+    const { CUSTOM_HEADERS } = await import("../src/server.js");
+    const app = await serverWith({ ALLOWED_ORIGINS: "http://127.0.0.1:8082", WALLY_APP_KEY: KEY });
+    const reply = await app.inject({
+      method: "OPTIONS",
+      url: "/v1/rpc/arbitrum",
+      headers: { origin: "http://127.0.0.1:8082", "access-control-request-method": "POST" },
+    });
+
+    expect(reply.statusCode).toBe(204);
+    const allowed = String(reply.headers["access-control-allow-headers"] ?? "")
+      .split(",").map(part => part.trim().toLowerCase());
+
+    expect(allowed).toContain("content-type");
+    expect(CUSTOM_HEADERS.length).toBeGreaterThan(1);
+    for (const header of CUSTOM_HEADERS) {
+      expect(allowed, `${header} is read by the service but the preflight omits it`).toContain(header.toLowerCase());
+    }
+    await app.close();
+  });
+
+  it("accepts a request that actually carries them", async () => {
+    // The preflight is a promise about the real request; this is the real request.
+    const app = await serverWith({ ALLOWED_ORIGINS: "http://127.0.0.1:8082", WALLY_APP_KEY: KEY });
+    const reply = await app.inject({
+      method: "GET",
+      url: "/health",
+      headers: { origin: "http://127.0.0.1:8082", "x-wally-key": KEY, "x-wally-install": ID_A },
+    });
+    expect(reply.statusCode).toBe(200);
+    await app.close();
+  });
+});
