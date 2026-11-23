@@ -1,7 +1,7 @@
 # Continuous integration.
 #
 # Nineteen pull requests were merged into this repository with no automated check of any kind.
-# 439 mobile tests, 144 backend tests and a mutation harness that caught seven untested
+# 445 mobile tests, 144 backend tests and a mutation harness that caught seven untested
 # access-control bugs all existed, and all of them ran only when somebody remembered. On a
 # money app that is the cheapest safety net there is and it was not deployed.
 #
