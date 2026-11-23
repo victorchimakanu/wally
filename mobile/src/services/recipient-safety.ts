@@ -41,7 +41,7 @@
  * pinned-token half keeps working in both worlds, which is why it is separate.
  */
 import { backendHeaders, backendOrigin } from './backend.ts';
-import { displaySymbol, tokenAt } from './tokens.ts';
+import { allTokens, displaySymbol, tokenAt } from './tokens.ts';
 import type { Chain } from './wallet-api.ts';
 
 /** What the chain says about an address, or that it could not be asked. */
@@ -86,9 +86,33 @@ export async function recipientKind(
   } catch { return 'unknown'; }
 }
 
+/**
+ * A pinned token contract on **any** supported chain, or null. No network call.
+ *
+ * For the address book, which does not reliably know the chain: a new contact's `network` is
+ * defaulted to Arbitrum rather than chosen, so asking `eth_getCode` there would interrogate the
+ * wrong chain about half the time — and the answer that comes back from the wrong chain is
+ * `wallet`, which is the verdict that lets money move.
+ *
+ * Checking every chain's pinned list sidesteps that completely. An address that is a token
+ * contract anywhere we support has no business being saved as a person, whatever the entry's
+ * network field happens to say. The chain-specific `eth_getCode` check stays on the Send
+ * screen, which does know the chain because the user picked it.
+ */
+export function anyPinnedTokenContract(address: string): { symbol: string } | null {
+  const needle = address.trim().toLowerCase();
+  const token = allTokens().find(entry => entry.address.toLowerCase() === needle);
+  return token ? { symbol: displaySymbol(token.symbol) } : null;
+}
+
 /** Sending a token to its own contract is the burn people actually perform. */
 export function pinnedTokenRefusal(symbol: string): string {
   return `That address is the ${symbol} contract itself, not a wallet. Anything sent there is destroyed and cannot be recovered. Check where you copied it from. Nothing was sent.`;
+}
+
+/** Saving one as a contact, where it would be waiting for every future transfer. */
+export function savedTokenContractRefusal(symbol: string): string {
+  return `That address is the ${symbol} contract, not a wallet. Saving it would leave a recipient that destroys anything sent to it. Check where you copied it from.`;
 }
 
 /** Any other contract. Worded like the wallet server's, which refuses the same thing. */
