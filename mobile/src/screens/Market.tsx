@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Keyboard, Pressable, View } from 'react-native';
 import { Button, Card, Group, Label, Note, Row, Screen, useShared } from '../components/ui';
-import { AssetLogo, AssetRow, Watchlist } from '../components/MarketRows';
+import { AssetLogo, AssetRow } from '../components/MarketRows';
 import { ChatComposer } from '../components/ChatComposer';
 import { WalletToolsModal } from '../components/ChatCards';
 import { COINS, formatPrice, formatChange } from '../services/market-api';
@@ -30,16 +30,17 @@ function AskDock({ topic }: { topic?: string }) {
     <WalletToolsModal visible={tools} onClose={() => setTools(false)} onManual={() => router.push('/send')} />
   </>;
 }
-/** Four tracked assets fit on one screen, so there is nothing to search or filter. */
+/**
+ * Four tracked assets fit on one screen, so there is nothing to search or filter, and no
+ * watchlist group above them: it would repeat rows from the list it sits on. The watchlist
+ * lives on the Wallet; the asset screen is where it is set.
+ */
 export function MarketScreen() {
   const c = useColors();
   const { data, loading, error } = useMarket();
-  const { preferences } = usePreferences();
   const assets = data?.assets ?? [];
-  const watching = assets.some(asset => preferences.saved.includes(asset.symbol));
   return <Screen title="Market" footer={<AskDock />}>
-    <Watchlist />
-    <Group title={watching ? 'All assets' : undefined}>{assets.map(asset => <AssetRow key={asset.symbol} asset={asset} />)}</Group>
+    <Group>{assets.map(asset => <AssetRow key={asset.symbol} asset={asset} />)}</Group>
     {!assets.length && <Label color={c.muted}>{loading ? 'Loading prices…' : error && !data ? 'Market data unavailable' : 'No assets'}</Label>}
     <MarketStatus refresh />
   </Screen>;
