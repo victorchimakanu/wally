@@ -58,6 +58,7 @@
     "test:wallet": "node --test test/wallet-server.test.mjs",
     "wdk:install": "npm install --save-exact @tetherto/wdk @tetherto/pear-wrk-wdk @tetherto/wdk-wallet-evm @tetherto/wdk-wallet-evm-erc-4337 && npm install --save-dev --save-exact @tetherto/wdk-worklet-bundler",
     "wdk:generate": "wdk-worklet-bundler generate",
+    "eas-build-post-install": "npm run wdk:generate",
     "start": "expo start --go",
     "android": "expo start --go --android",
     "ios": "expo start --go --ios",

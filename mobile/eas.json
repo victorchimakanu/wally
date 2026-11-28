@@ -1,19 +1,35 @@
 {
+  "cli": {
+    "version": ">= 27.0.0",
+    "appVersionSource": "local"
+  },
   "build": {
+    "preview": {
+      "distribution": "internal",
+      "android": { "buildType": "apk" },
+      "env": {
+        "EXPO_PUBLIC_WALLY_PROXY_URL": "http://127.0.0.1:8080",
+        "EXPO_PUBLIC_QVAC_MODEL": "wally-llm"
+      }
+    },
     "phone-development": {
       "developmentClient": true,
       "distribution": "internal",
-      "env": { "WALLY_NATIVE_QVAC": "1" },
-      "android": { "buildType": "apk" }
+      "android": { "buildType": "apk" },
+      "env": {
+        "WALLY_NATIVE_QVAC": "1",
+        "EXPO_PUBLIC_WALLY_PROXY_URL": "http://127.0.0.1:8080",
+        "EXPO_PUBLIC_QVAC_MODEL": "wally-llm"
+      }
     },
     "phone-preview": {
       "distribution": "internal",
-      "env": { "WALLY_NATIVE_QVAC": "1" },
-      "android": { "buildType": "apk" }
-    },
-    "preview": {
-      "distribution": "internal",
-      "android": { "buildType": "apk" }
+      "android": { "buildType": "apk" },
+      "env": {
+        "WALLY_NATIVE_QVAC": "1",
+        "EXPO_PUBLIC_WALLY_PROXY_URL": "http://127.0.0.1:8080",
+        "EXPO_PUBLIC_QVAC_MODEL": "wally-llm"
+      }
     }
   }
 }

@@ -429,12 +429,59 @@ unexecuted. To run it: either plug in a phone (`adb install app-release.apk`,
 (`sdkmanager "system-images;android-36;google_apis;x86_64"`, about 1.5 GB) and rebuild with
 `-PreactNativeArchitectures=arm64-v8a,x86_64`.
 
-**The EAS route**, if you would rather not build locally: from `mobile/`,
-`npx eas-cli@latest login` with your Expo account (nothing here was logged in), then
-`npx eas-cli@latest build --platform android --profile preview`. The `preview` profile produces
-an APK for internal distribution; `phone-preview` adds the native model. Put the three
-environment values above into the profile's `env` or as EAS environment variables, or the cloud
-build bakes in nothing and the app runs on demo data.
+**The EAS route, chosen on 28 November 2026.** Everything is configured; the two steps left
+need your Expo account, and nothing here was logged in. From `mobile/`:
+
+```powershell
+npx eas-cli@latest login
+```
+
+```powershell
+npx eas-cli@latest build --platform android --profile preview
+```
+
+What is already in place:
+
+- `eas.json`: the `preview` profile is internal distribution with `android.buildType: apk`, so
+  the artifact is an installable APK rather than a store bundle. Its `env` carries
+  `EXPO_PUBLIC_WALLY_PROXY_URL=http://127.0.0.1:8080` and `EXPO_PUBLIC_QVAC_MODEL=wally-llm`,
+  because gitignored `.env` files are not uploaded and a build without them runs on demo data.
+  `cli.appVersionSource: local` keeps the version in `app.json` (1.0.0; the version code is 1
+  until one is set there). `phone-development` and `phone-preview` carry the same values plus
+  `WALLY_NATIVE_QVAC=1` for the on-device-model variant, which needs an ARM64 phone on Android
+  12 or newer.
+- `package.json`: an `eas-build-post-install` script runs `npm run wdk:generate` on the build
+  machine, after `npm install` and prebuild, because `.wdk/` and `.wdk-bundle/` are gitignored
+  and the native build imports them.
+- The upload is the git checkout minus ignored files: about 30 MB, with no `.env.local`, no
+  seed and no `android/` directory (EAS runs prebuild itself, which is why that directory must
+  stay generated rather than committed). Untracked files that are not ignored travel too; today
+  that is `.playwright-mcp/` and `output/` at the root, which you can delete first.
+- `npx expo-doctor` passes 19 of 21 checks offline. The two failures are a network error on the
+  schema check and seven packages a few patch versions behind within SDK 57, which
+  `npx expo install --check` lists. Neither blocks a build.
+
+What to expect, in order:
+
+1. `login` asks for your Expo credentials, or opens the browser. `npx eas-cli@latest whoami`
+   confirms who you are.
+2. The first `build` links the project: it creates an EAS project for the slug `wally-mobile`
+   under your account and writes its id to `extra.eas.projectId` in `app.json`. The config here
+   is dynamic (`app.config.cjs` spreads `app.json`), so if the CLI says it cannot write the id
+   itself, add `"extra": { "eas": { "projectId": "<the id it prints>" } }` to the `expo` object
+   in `app.json` and run the command again. Commit that change; it is not a secret.
+3. It asks whether to generate a new Android keystore. Say yes: EAS creates and stores it, and
+   every later build signs with the same key, so new APKs install over old ones.
+4. The build queues and runs on the `sdk-57` image (Ubuntu 26.04, JDK 17, NDK r27b, Node 22).
+   The CLI prints the build page link and waits. Expect tens of minutes for a first build, more
+   in the free queue.
+5. When it finishes, the build page has an Install button and a download link, and
+   `npx eas-cli@latest build:list` prints the same link. Install with `adb install <file>.apk`,
+   or open the link on the phone.
+6. On the phone, the app reaches the backend only through `adb reverse tcp:8080 tcp:8080` while
+   the backend runs on this computer (`docker compose -f docker-compose.product.yml --profile
+   live up -d`). Without it the wallet screens say the backend is unreachable; everything else
+   works. Chat in this build is scripted.
 
 ---
 
