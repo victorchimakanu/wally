@@ -186,15 +186,21 @@ export function Screen({ children, title, tab, surface, immersive = false, foote
   const { state, storageError } = useDemo();
   const { wide, gutter, topLevel, layout } = useShell();
   // Desktop: the sidebar navigates, so main sections get a page heading and chat draws its own.
-  // Phone and tablet: Wallet and Chat carry the menu and switch; every other screen is pushed and has Back.
+  // Beside the rail the same holds for the sections it lists: they are destinations there, not
+  // pushed screens, so they take the page heading rather than a centred title with a blank
+  // Back slot. Phone and upright tablet: Wallet and Chat carry the menu and switch; every other
+  // screen is pushed and has Back.
   const header = wide
     ? surface === 'chat' ? null : topLevel || tab === 'wallet' ? <TopBar title={title ?? 'Wallet'} /> : title ? <Header title={title} back={back} /> : null
-    // A section the rail lists is a destination there, not a pushed screen, so it shows no Back.
-    : surface || tab === 'wallet' ? <AppNavigation surface={surface ?? 'wallet'} floating={immersive} /> : title ? <Header title={title} back={back && !(topLevel && layout === 'rail')} /> : null;
+    : surface || tab === 'wallet' ? <AppNavigation surface={surface ?? 'wallet'} floating={immersive} />
+    : title ? topLevel && layout === 'rail' ? <TopBar title={title} /> : <Header title={title} back={back} /> : null;
   // Desktop content sits at the page's left edge: 696 wide for a list, 1104 for the two-column
   // screens, with an `aside` taking the right 384 of those 1104, as the desktop designs lay out.
+  // A tablet on its side reads lists and forms at that same 696, left-aligned: the rail tier is
+  // the desktop without labels. Wallet and Chat lay themselves out across the full width.
   const showAside = wide && !!aside;
-  const column = wide ? (wideContent || showAside ? 1104 : 696) + gutter * 2 : undefined;
+  const railColumn = layout === 'rail' && surface !== 'chat' && tab !== 'wallet';
+  const column = wide ? (wideContent || showAside ? 1104 : 696) + gutter * 2 : railColumn ? 696 + gutter * 2 : undefined;
   // A conversation reads in a centred column, 760 wide at most, however wide the tablet is; the
   // bar above it still spans the window. Desktop already caps it through `column` and the aside.
   const reading = surface === 'chat' && !wide && layout !== 'phone';
