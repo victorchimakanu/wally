@@ -17,6 +17,11 @@ export function clockLabel(timestamp: number): string {
   return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
+/** Just the day, "27 Nov", for a row under Earlier where the hour no longer matters. */
+export function dateLabel(timestamp: number): string {
+  return new Date(timestamp).toLocaleDateString([], { day: 'numeric', month: 'short' });
+}
+
 export type DayGroup<T> = { title: 'Today' | 'Yesterday' | 'Earlier'; items: T[] };
 
 /**

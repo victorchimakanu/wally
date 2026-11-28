@@ -9,11 +9,11 @@ import { TransferRow } from '../components/TransferRow';
 import { Lockup } from '../components/WallyAsset';
 import { Button, Group, Label, Row, Screen, useShared } from '../components/ui';
 import { useShell } from '../components/shell';
-import { money, units, type Transaction } from '../demo/model';
+import { listedChats, money, units, type Transaction } from '../demo/model';
 import { usePreferences } from '../demo/preferences';
 import { useDemo } from '../demo/store';
 import { nameFor, shortAddress } from '../services/transfer-summary';
-import { clockLabel, dayGroups, whenLabel } from '../services/when';
+import { clockLabel, dateLabel, dayGroups, whenLabel } from '../services/when';
 import { makeStyles, useColors } from '../theme';
 import { useWallet } from '../data/wallet';
 import { LiveHistoryScreen } from './LiveWallet';
@@ -104,14 +104,21 @@ function RecentActivity() {
   </Group>;
 }
 
-/** The conversations, newest first; a new one is the first row rather than a button over the list. */
+/**
+ * Conversations by recency, Today, Yesterday and Earlier, each with when it was last touched.
+ * Empty chats are placeholders the composer and New chat leave behind, so they are not listed;
+ * New chat is the one action, a compact primary button rather than a row among the rows.
+ */
 export function ChatsScreen() {
   const { state, newChat } = useDemo();
+  const chats = listedChats(state.chats);
+  const open = (id: string) => router.push({ pathname: '/chat', params: { id } });
   return <Screen title="Chats" tab="chats">
-    <Group>
-      <Row title="New chat" onPress={() => router.push({ pathname: '/chat', params: { id: newChat() } })} />
-      {state.chats.map(chat => <Row key={chat.id} title={chat.title} onPress={() => router.push({ pathname: '/chat', params: { id: chat.id } })} />)}
-    </Group>
+    <Button label="New chat" onPress={() => open(newChat())} style={{ alignSelf: 'flex-start', paddingHorizontal: 28 }} />
+    {dayGroups(chats, chat => chat.updatedAt || undefined).map(group => <Group key={group.title} title={group.title}>
+      {group.items.map(chat => <Row key={chat.id} title={chat.title} value={chat.updatedAt ? (group.title === 'Earlier' ? dateLabel(chat.updatedAt) : clockLabel(chat.updatedAt)) : undefined} onPress={() => open(chat.id)} />)}
+    </Group>)}
+    {!chats.length && <Group><Row title="No chats yet" /></Group>}
   </Screen>;
 }
 

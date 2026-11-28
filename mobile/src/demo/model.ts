@@ -116,3 +116,12 @@ export function scriptedReply(text: string, state: DemoState): ChatReply {
   if (/\bsend\b/i.test(text)) return { text: 'For this scripted preview, include an amount, USDT, and the full recipient address. Try the example below, or use manual send. Only Arbitrum USDT transfers are simulated.' };
   return { text: 'I can show your balance, your receive address, or prepare a demo USDT transfer on Arbitrum. This preview uses scripted replies; a local AI model is not connected.' };
 }
+
+/**
+ * The conversations worth listing: those with a message in them, newest first. A chat with no
+ * messages is the placeholder the composer and New chat leave behind until something is said,
+ * and listing three "New conversation" rows tells nobody anything.
+ */
+export function listedChats(chats: readonly Chat[]): Chat[] {
+  return chats.filter(chat => chat.messages.length > 0).sort((a, b) => b.updatedAt - a.updatedAt);
+}

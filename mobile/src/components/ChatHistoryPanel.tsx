@@ -4,7 +4,7 @@ import { Pressable, ScrollView, TextInput, View } from 'react-native';
 import { Button, Label, Note, useShared } from './ui';
 import { WallyAsset } from './WallyAsset';
 import { useDemo } from '../demo/store';
-import { money, units } from '../demo/model';
+import { listedChats, money, units } from '../demo/model';
 import { fonts, useColors } from '../theme';
 
 /** Figma chat/history-panel populated from device records. */
@@ -16,7 +16,7 @@ export function ChatHistoryPanel({ height, onClose }: { height: number; onClose:
   const [search, setSearch] = useState('');
   const [limit, setLimit] = useState(5);
   const term = search.toLowerCase();
-  const chats = state.chats.filter(chat => (chat.title + chat.messages.map(message => message.text).join(' ')).toLowerCase().includes(term));
+  const chats = listedChats(state.chats).filter(chat => (chat.title + chat.messages.map(message => message.text).join(' ')).toLowerCase().includes(term));
   const transactions = state.transactions.filter(tx => (tx.amount + tx.recipient + tx.status).toLowerCase().includes(term));
   const count = tab === 'Chats' ? chats.length : transactions.length;
   return <View style={{ paddingHorizontal: 28 }}><View style={{ alignSelf: 'flex-end', width: '100%', maxWidth: 384, maxHeight: Math.max(180, Math.min(500, height)), backgroundColor: c.background, borderWidth: 1, borderColor: c.line, borderRadius: 24, padding: 16, gap: 12, boxShadow: `0 10px 25px ${c.shadow}` }}>
