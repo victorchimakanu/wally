@@ -7,6 +7,23 @@ slug: /
 
 # Agentic finance, on device
 
+:::info Where the project actually is — 8 November 2026
+
+This site describes the **reference app**: a Fastify server you talk to in a browser, which is
+where the pattern was worked out. **The product is the mobile app**, in `mobile/`, and it is the
+one being shipped.
+
+What the mobile app does today: real testnet balances and addresses on Arbitrum Sepolia and
+Ethereum Sepolia, a USDt balance and USDt history, indexed activity, live market prices in USD,
+NGN and EUR, native ETH transfers with review and confirmation, wallet creation and recovery,
+app lock, QR recipient scanning, and CSV export of transaction history.
+
+What it does not do yet: send USDt, run the on-device keystore (written, type-checked, never
+executed — it needs a development build on a phone), gasless sponsorship, or mainnet.
+
+The reference app's custodial shape was **rejected** for the product: keys stay on the phone.
+:::
+
 Wally is a self-custodial crypto wallet you talk to. You type plain English. It understands, quotes the cost, asks you to confirm, and executes on-chain.
 
 ```text

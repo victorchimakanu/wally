@@ -1,0 +1,164 @@
+# Dependency update automation.
+#
+# FEATURE-AUDIT §19.6. Until now nothing watched these: Fastify's seven advisories were found
+# by hand, on a day someone happened to look. CI (§19.1) proves a change still builds; this is
+# what proposes the change in the first place.
+#
+# ── The one thing to understand before editing this file ────────────────────────────────────
+#
+# `ignore` applies to security updates as well as version updates. GitHub's documentation is
+# explicit that Dependabot can be configured to "ignore those dependencies when it opens pull
+# requests for version updates and security updates", so an entry naming a dependency and
+# nothing else switches off its security pull requests too — silently, because the advisory
+# still appears on the alerts page and looks handled.
+#
+# The escape is `update-types`, of which the same page says: "`update-types` only affects
+# *version* updates, not *security* updates" and "Security updates will always be created
+# regardless of the `update-types` setting."
+#
+# So every ignore below lists all three semver levels explicitly. That is not verbosity and it
+# is not a style choice — delete those lines to "simplify" and you turn off security updates
+# for the wallet's entire runtime. There is no shorter form that means the same thing.
+#
+#   https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/
+#     manage-your-dependency-security/controlling-dependencies-updated
+#
+# ── Scope ───────────────────────────────────────────────────────────────────────────────────
+#
+# Four npm manifests, not six. `internal/qvac-runtime` and `internal/wallet-api-runtime` are
+# created by install scripts and are gitignored, so Dependabot cannot see them and neither can
+# a reviewer. They are deliberately outside this file rather than forgotten.
+
+version: 2
+
+updates:
+  # ── The workflow actions ──────────────────────────────────────────────────────────────────
+  # Pinned to commit SHAs in ci.yml, which is the right way to pin an action and also the way
+  # that makes a human never notice a new release. Dependabot updates the SHA and rewrites the
+  # trailing `# v5` comment with it.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "ci"
+
+  # ── backend/ — the provider proxy ─────────────────────────────────────────────────────────
+  # The one that §19.6 was written about. Small, server-side, no native build to break, so
+  # everything here gets version updates.
+  - package-ecosystem: npm
+    directory: "/backend"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      # Minor and patch together: individually they are noise, and the backend has its own
+      # tests plus the mutation harness to say whether the batch is safe.
+      backend-routine:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    commit-message:
+      prefix: "backend"
+
+  # ── mobile/ — the Expo app ────────────────────────────────────────────────────────────────
+  #
+  # `npx expo install` exists because `npm install` picks versions that are wrong for the SDK,
+  # and AGENTS.md requires it for exactly that reason. A Dependabot version bump is an
+  # `npm install` by another name, so everything the SDK pins is ignored for version updates
+  # and left to `npx expo install --fix` — while security updates keep flowing, which is the
+  # whole point of the `update-types` lines.
+  #
+  # The Tether and QVAC packages are ignored for a different reason. They are beta releases on
+  # a fast cadence, and CLAUDE.md's first team rule is that nothing unconfirmed against the
+  # QVAC or WDK source goes in. `scripts/dedupe-wdk.mjs` is a correctness requirement rather
+  # than an optimisation — duplicate wallet classes fail the Aave package's `instanceof` check
+  # and `supply()` refuses — so a version bump there is a deliberate human change, not a
+  # weekly PR to skim.
+  - package-ecosystem: npm
+    directory: "/mobile"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      mobile-routine:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    ignore:
+      # Managed by `npx expo install`.
+      - dependency-name: "expo"
+        update-types: ["version-update:semver-major", "version-update:semver-minor", "version-update:semver-patch"]
+      - dependency-name: "expo-*"
+        update-types: ["version-update:semver-major", "version-update:semver-minor", "version-update:semver-patch"]
+      - dependency-name: "@expo/*"
+        update-types: ["version-update:semver-major", "version-update:semver-minor", "version-update:semver-patch"]
+      - dependency-name: "eslint-config-expo"
+        update-types: ["version-update:semver-major", "version-update:semver-minor", "version-update:semver-patch"]
+      # React and React Native versions are chosen by the SDK, not by us. React Native 0.86.3
+      # and React 19.2.3 are pinned exactly in package.json for this reason.
+      - dependency-name: "react"
+        update-types: ["version-update:semver-major", "version-update:semver-minor", "version-update:semver-patch"]
+      - dependency-name: "react-dom"
+        update-types: ["version-update:semver-major", "version-update:semver-minor", "version-update:semver-patch"]
+      - dependency-name: "react-native"
+        update-types: ["version-update:semver-major", "version-update:semver-minor", "version-update:semver-patch"]
+      - dependency-name: "react-native-*"
+        update-types: ["version-update:semver-major", "version-update:semver-minor", "version-update:semver-patch"]
+      - dependency-name: "@react-native-*/*"
+        update-types: ["version-update:semver-major", "version-update:semver-minor", "version-update:semver-patch"]
+      # Not a direct dependency today. Listed because a React Native upgrade adds these, and a
+      # version bump arriving the week it does is exactly the one that would get merged.
+      - dependency-name: "@react-native/*"
+        update-types: ["version-update:semver-major", "version-update:semver-minor", "version-update:semver-patch"]
+      - dependency-name: "@types/react"
+        update-types: ["version-update:semver-major", "version-update:semver-minor", "version-update:semver-patch"]
+      # The wallet and model stack. Beta releases, and a bump is a verified-stack decision.
+      - dependency-name: "@tetherto/*"
+        update-types: ["version-update:semver-major", "version-update:semver-minor", "version-update:semver-patch"]
+      - dependency-name: "@qvac/*"
+        update-types: ["version-update:semver-major", "version-update:semver-minor", "version-update:semver-patch"]
+      - dependency-name: "bare-pack"
+        update-types: ["version-update:semver-major", "version-update:semver-minor", "version-update:semver-patch"]
+    commit-message:
+      prefix: "mobile"
+
+  # ── / — the reference app ─────────────────────────────────────────────────────────────────
+  # Kept for reference and not the product, but CI builds it, so a dependency that breaks it
+  # turns the whole repo red. The WDK packages are ignored for the same reason as in mobile/,
+  # with `scripts/dedupe-wdk.mjs` applying here most of all.
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    groups:
+      reference-routine:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    ignore:
+      - dependency-name: "@tetherto/*"
+        update-types: ["version-update:semver-major", "version-update:semver-minor", "version-update:semver-patch"]
+    commit-message:
+      prefix: "reference"
+
+  # ── docs-site/ — Docusaurus ───────────────────────────────────────────────────────────────
+  # Not shipped to anyone and not in CI. Monthly, so it never competes for attention with a
+  # security update to something that holds money.
+  - package-ecosystem: npm
+    directory: "/docs-site"
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 2
+    groups:
+      docs-routine:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    commit-message:
+      prefix: "docs"

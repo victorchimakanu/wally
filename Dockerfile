@@ -1,3 +1,16 @@
+# ⚠️  THIS BUILDS THE REFERENCE APP, NOT THE BACKEND, AND IT HOLDS A SEED.
+#
+# It packages src/ — the single-user reference server that keeps a wallet seed in its own
+# process and signs on the server. That is the custodial shape the team decided against in
+# docs/ADR-001-key-custody.md: keys stay on the phone.
+#
+# Do NOT reach for this when deploying the mobile backend. That service is backend/, it
+# listens on 8080, and it holds no keys at all. It has no image yet because the deployment
+# shape (systemd vs Docker) is still an open decision — see backend/README.md.
+#
+# Keep using this for local reference-app work. Note that docker-compose.yml beside it points
+# at MAINNET RPCs.
+
 FROM node:22-slim AS base
 WORKDIR /app
 

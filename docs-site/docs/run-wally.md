@@ -6,6 +6,11 @@ sidebar_label: Run Wally
 
 # Run Wally yourself
 
+:::caution This page runs the reference app
+These steps start the browser-based reference app, not the mobile product. To run the phone app,
+follow `docs/RUNNING-LOCALLY.md` in the repository, which is verified end to end.
+:::
+
 Wally is a sample app. It exists so you can read it, run it, and copy the pattern into your own project. The whole codebase is readable in an evening.
 
 ## Prerequisites
