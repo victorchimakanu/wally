@@ -1,0 +1,26 @@
+# Build context for every Dockerfile in this repository (root, backend/, docker/).
+# Keeps secrets, generated trees and other projects' material out of every image.
+.git
+**/node_modules
+**/.env
+**/.env.*
+**/*.db
+**/*.db-shm
+**/*.db-wal
+.wally-seed*
+wdk.config.json
+qvac.config.json
+internal
+exports
+output
+design-audit
+docs-site
+.playwright-mcp
+mobile/android
+mobile/ios
+mobile/dist
+mobile/.expo
+mobile/.wdk
+mobile/.wdk-bundle
+mobile/qvac
+mobile/.claude

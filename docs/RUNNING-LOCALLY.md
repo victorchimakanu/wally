@@ -1,10 +1,12 @@
 # Running Wally locally
 
-How to start the whole thing by hand, one service per terminal. No Docker, no containers.
+How to start the whole thing: by hand, one service per terminal, or with the backend and the
+dev wallet server in containers ([With Docker](#with-docker)).
 
-**Last run end to end on 8 November 2026**, on `correctness`: backend, dev wallet server and
-the app, against real Sepolia nodes, real Etherscan and real CoinGecko. Every step below was
-executed, not remembered.
+**Last run end to end on 28 November 2026**, on `mobile-chat-and-brand`: backend and dev wallet
+server from `docker-compose.product.yml`, the model server and Metro on the host, against real
+Sepolia nodes and real CoinGecko. The 8 November run on `correctness` did the same by hand.
+Every step below was executed, not remembered.
 
 ---
 
@@ -42,6 +44,83 @@ Without it the server exits with that exact command in the error, and the two si
 `npm test` skip with the same hint rather than failing.
 
 Start only what you need. Each lives in its own terminal because each stays in the foreground.
+
+---
+
+## With Docker
+
+`docker-compose.product.yml` at the repository root runs the two servers in containers. It is
+**not** `docker-compose.yml` beside it: that file builds the old reference app, holds a seed and
+points at mainnet RPCs. Everything in the product compose file is Sepolia and loopback.
+
+| Profile | What comes up | Then |
+|---|---|---|
+| `live` | the backend proxy on 8080 and the dev wallet server on 3003 | start the model server and Metro on the host (Terminals 2 and 3 below) |
+| `demo` | the app as a static web export on 8082, on fictional data, with no server behind it | open http://127.0.0.1:8082 |
+
+```bash
+docker compose -f docker-compose.product.yml --profile live up --build -d   # backend + wallet server
+docker compose -f docker-compose.product.yml --profile demo up --build -d   # the app on fictional data
+docker compose -f docker-compose.product.yml --profile live --profile demo down
+```
+
+**What stays on the host, and why.** The model server wants the GPU and a 1 GB model file, so it
+runs on the host (`cd mobile && npm run ai:server`); the backend container reaches it at
+`host.docker.internal:11434`. Metro runs on the host because it watches the source tree and
+serves your browser. The demo profile needs neither: it bakes an unset `EXPO_PUBLIC_WALLY_API_URL`
+into a web export, so the app runs on fictional data and cannot reach a server. Chat in that build
+is scripted by construction (see *Running it with no GUI* below).
+
+**Secrets.** None in the compose file and none in any image. The wallet seed is a bind mount of
+`internal/testnet-wallet/` (gitignored); the first start writes one there if the directory is
+empty. Optional provider keys (`ETHERSCAN_API_KEY`, `COINGECKO_API_KEY`) are read from the shell
+or from a gitignored `.env` beside the compose file.
+
+**Ports.** Metro's port is the browser origin both servers allow, 8082 by default. Running Metro
+elsewhere means `WALLY_WEB_PORT=8086 docker compose -f docker-compose.product.yml --profile live up -d`,
+which sets the backend's `ALLOWED_ORIGINS` and the wallet server's `WALLY_API_ORIGINS` together.
+By hand, set those two variables yourself.
+
+**Why each server has a `-port` sidecar.** Both bind `127.0.0.1` on purpose, the wallet server
+refuses any peer that is not loopback, and the backend registers its development-only model
+passthrough (the one chat needs in a browser) only when bound to loopback. A published Docker port
+arrives from the bridge gateway (`172.17.0.1`, measured here), which both would refuse, and Docker
+Desktop's host networking was not enabled on this machine. So a small `socat` container shares each
+server's network namespace and forwards the published port to `127.0.0.1` inside it. Each server
+sees exactly what it sees on a laptop, and no guard is loosened.
+
+**Measured on 28 November 2026** (Windows 11, Docker Desktop 4.99, Metro on 8086 because stale
+Metros held 8082 to 8085):
+
+- `curl http://127.0.0.1:8080/health` answered from the container; `/v1/market` with a browser
+  `Origin` header came back `200` with `access-control-allow-origin` set, and `403` until
+  `WALLY_WEB_PORT` matched Metro's port, which is the allowlist doing its job.
+- The wallet server handed out a session cookie and a snapshot: the same address on Arbitrum
+  Sepolia and Ethereum Sepolia, derived from the seed that was already in
+  `internal/testnet-wallet/wallet.seed` (created 7 October; no new seed was generated).
+- `/v1/models` through the backend listed `wally-llm` as `ready`, so the container reaches the
+  host's model server.
+- In the app at 375 px: the wallet card showed both chains and the USDT row (all zero, this wallet
+  has never been funded), Receive showed the address and QR, Settings → Connection named
+  *Wally backend* for both market data and Activity, and Activity said each chain needs
+  `ETHERSCAN_API_KEY`, which was not set.
+- Chat, asked *"Hi, my name is Ada. Tell me one fun fact about octopuses, in a single
+  sentence."*: first text after 1.8 s, the full reply after 17.7 s, the model server itself
+  reporting 15.1 s on the CPU. The question deliberately avoids wallet words: *"why does sending
+  ETH cost a fee"* is answered in 3.6 s from `asset-copy.ts` without any inference, and a stale
+  reading of that as a model reply is easy. The same question asked while Gradle and a Docker
+  build were saturating the CPU hit the app's 90-second timeout and showed *That took too long*,
+  which is the correct failure. The GPU profile (`npm run ai:server:vulkan`) failed to start three
+  times that afternoon with *Worker did not establish IPC before the RPC initialization timeout*,
+  each time while the machine was loaded; it is not known whether it works idle today.
+- Send with `0.001` ETH to a test address stopped at the quote with *Not enough testnet ETH. Fund
+  this address from a faucet before sending.* The review screen needs a funded wallet; funding
+  needs a faucet account, which was not created.
+- The `demo` profile built in 13 minutes (`npm ci` plus the web export inside the image; the
+  final image is 96 MB) and served on `WALLY_DEMO_PORT=8087` because a Metro held 8082. Deep
+  links answer `200`. At 375 px: the welcome, the wallet card with the fictional 1,250 USDt and
+  a *Demo* badge, and the scripted balance reply in chat. The only host the page contacted
+  besides itself was `api.coingecko.com`, the documented market fallback when no proxy is set.
 
 ---
 
@@ -192,6 +271,10 @@ Set this in `mobile/.env.local` and restart Metro:
 EXPO_PUBLIC_WALLY_API_URL=http://127.0.0.1:3003
 ```
 
+The server answers only the browser origins `http://127.0.0.1:8082` and `http://localhost:8082`
+unless `WALLY_API_ORIGINS` lists others, comma separated, the way the backend's `ALLOWED_ORIGINS`
+does. The compose file sets both from `WALLY_WEB_PORT`.
+
 A fresh wallet is empty. Open **Receive** in the app, copy the address, and request funds from
 a Sepolia faucet for the network you picked. Testnet ETH has no monetary value.
 
@@ -257,6 +340,102 @@ Expo Go cannot run native QVAC or the WDK worklet. Those need a development buil
 build-tools. Java is already installed at `/usr/bin/java`, so the JDK blocker noted in the
 10 October readiness document no longer applies; build-tools are still missing.
 
+### Building an installable release APK on this machine (28 November 2026)
+
+`npm run export:android` is a JavaScript bundle, not an APK. On Windows 11 with the Microsoft
+JDK 21 at `JAVA_HOME`, the Android SDK under `%LOCALAPPDATA%\Android\Sdk` (platform 36,
+build-tools 36, NDK 27.1; Gradle fetched NDK 27.0.12077973 on its own) and 26 GB of free disk,
+this is the host build. **Read the path-length item below before running it: on this checkout
+it stops at the native compile.** No APK came out of this machine on 28 November; what was
+tried, and where each route stops, is recorded below so the next attempt starts there.
+
+```powershell
+cd mobile
+$env:EXPO_NO_DOTENV = "1"                                   # do not bake .env.local into the APK
+$env:EXPO_PUBLIC_WALLY_PROXY_URL = "http://127.0.0.1:8080"  # the backend, reached through adb reverse
+Remove-Item Env:EXPO_PUBLIC_WALLY_API_URL -ErrorAction SilentlyContinue   # no dev wallet server on a phone
+$env:NODE_OPTIONS = "--dns-result-order=ipv4first"
+npx expo prebuild --platform android --clean --no-install   # regenerates android/ as com.wally.app, "Wally"
+"sdk.dir=C:/Users/<you>/AppData/Local/Android/Sdk" | Set-Content android/local.properties
+cd android
+.\gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a --no-daemon --max-workers=2
+```
+
+When it completes, the APK is at `mobile/android/app/build/outputs/apk/release/app-release.apk`.
+
+**The Docker recipe.** `docker/android-release.Dockerfile` does the same steps on Linux, where
+the path limit does not exist: Debian's JDK 17, the pinned Android command-line tools with the
+licences accepted inside the image, `npm ci`, `npm run wdk:generate`, `expo prebuild`, and Gradle
+with two workers and a smaller heap because Docker Desktop's VM has about 6 GB. It bakes in the
+same three environment values. From the repository root:
+
+```powershell
+docker build --target apk --output type=local,dest=mobile/dist/apk-docker -f docker/android-release.Dockerfile .
+```
+
+The APK is written to `mobile/dist/apk-docker/app-release.apk` and nothing else leaves the image.
+**Not verified end to end.** On 28 November the image got through the SDK install, `npm ci`,
+`wdk:generate` and `prebuild`, then Gradle's configuration phase failed with *Process 'command
+'node'' finished with non-zero exit value 1* and no further detail (plain console). A rerun with
+`--stacktrace` to capture the failing command never completed: BuildKit stalled exporting the
+multi-gigabyte image, the system drive filled to 3 GB free, and Docker Desktop stopped. Budget
+disk before trying again: the `deps` stage alone is several gigabytes inside Docker's disk image,
+and that image does not shrink on its own when layers are pruned.
+
+Why each line is the way it is:
+
+- `EXPO_NO_DOTENV=1`. Gradle's bundling step runs `expo export:embed`, which reads `.env.local`
+  exactly as Metro does. Without this, the live-mode `EXPO_PUBLIC_WALLY_API_URL=http://127.0.0.1:3003`
+  is compiled into a phone build that then points at the phone's own loopback.
+- No `EXPO_PUBLIC_WALLY_API_URL` puts the app on the keystore path: the WDK worklet, not the dev
+  wallet server. That path requires `EXPO_PUBLIC_WALLY_PROXY_URL` (the worklet needs a chain to
+  talk to), and `127.0.0.1:8080` works on a USB phone and on an emulator alike once
+  `adb reverse tcp:8080 tcp:8080` is in place and the backend is running.
+- `WALLY_NATIVE_QVAC` unset: no native model in this build, so chat on the phone is scripted (the
+  HTTP adapter is `__DEV__`-only). The `phone-preview` profile in `eas.json` is the variant with
+  the model; it needs an ARM64 phone on Android 12 or newer.
+- `arm64-v8a` only. The prebuild default is four ABIs, each a full native compile. Phones are
+  arm64, and the x86_64 emulator image is not installed here in any case.
+- `local.properties` is a Java properties file, where a backslash escapes the next character:
+  `sdk.dir=C:\Users\...` is read as `C:UserskfdosAppData...` and the Android Gradle plugin fails
+  while configuring `:app` with *The filename, directory name, or volume label syntax is
+  incorrect*. Forward slashes work. (`expo run:android` writes this file for you, but it insists
+  on a connected device or a bootable emulator, which this machine has neither of.)
+- Signing is the debug keystore that prebuild generates (`android/app/debug.keystore`), which is
+  what the generated `build.gradle` uses for release. Installable, not store-ready.
+- `--no-daemon --max-workers=2`. The first attempt crashed the Gradle JVM with *insufficient
+  memory for the Java Runtime Environment* while four Metros and two other projects' servers
+  were running; two workers fit inside what was left. The second attempt failed on the
+  `local.properties` escape above, the third lost DNS to `dl.google.com` 31 minutes in and
+  resumed from the Gradle cache.
+- **The path-length limit, which is where the host build stops.** CMake mirrors the absolute
+  path of each source file under `android/app/.cxx`, so an object for
+  `react-native-gesture-handler`'s codegen lands at a path about 390 characters long, and
+  `:app:buildCMakeRelWithDebInfo[arm64-v8a]` fails with `ninja: error: Stat(...)`. Windows caps
+  paths at 260 unless `LongPathsEnabled` is set in the registry (it is `0` on this machine; the
+  change needs an administrator), and the SDK's CMake 3.22.1 ships ninja 1.10.2, which is not
+  long-path aware even then, so a newer `cmake;3.30+` would have to be installed and pinned as
+  well. Moving the checkout to `C:\w` is not enough on its own: the mirrored source path alone is
+  over 290 characters. The Docker recipe above sidesteps all of it.
+
+**What this build verifies, and what it does not.** It proves the native project compiles and
+packages with the WDK worklet runtime (`react-native-bare-kit`) and the generated `.wdk-bundle`
+inside, with the ring icon's adaptive-icon layers from `mobile/assets/`. It does **not** prove
+the app launches: no Android device was attached and the `Wally_API_36` virtual device cannot
+boot because its system image is missing (`system-images/android-36` is empty). So the icon on
+a launcher, the first run of `wallet-keystore.ts` over the worklet, and the recovery flow remain
+unexecuted. To run it: either plug in a phone (`adb install app-release.apk`,
+`adb reverse tcp:8080 tcp:8080`, start the backend, open Wally), or install an emulator image
+(`sdkmanager "system-images;android-36;google_apis;x86_64"`, about 1.5 GB) and rebuild with
+`-PreactNativeArchitectures=arm64-v8a,x86_64`.
+
+**The EAS route**, if you would rather not build locally: from `mobile/`,
+`npx eas-cli@latest login` with your Expo account (nothing here was logged in), then
+`npx eas-cli@latest build --platform android --profile preview`. The `preview` profile produces
+an APK for internal distribution; `phone-preview` adds the native model. Put the three
+environment values above into the profile's `env` or as EAS environment variables, or the cloud
+build bakes in nothing and the app runs on demo data.
+
 ---
 
 ## Running it with no GUI, and driving it
@@ -281,6 +460,10 @@ Metro and no file watchers.
 ```bash
 cd mobile && npm run export:web          # bundles the whole app into dist/web
 ```
+
+The `demo` profile of `docker-compose.product.yml` does exactly this inside an image and serves
+the result on 8082 with nginx and the SPA fallback, so on a machine with Docker the rest of this
+section is optional.
 
 Then serve `dist/web` on **port 8082** with SPA fallback — every unknown path must return
 `index.html`, or deep links 404:
@@ -378,7 +561,7 @@ something broke.
 | **Metro dies with `ENOSPC: System limit for number of file watchers reached`** | Not a project problem. Something else is holding your inotify watches — on this machine it was two VS Code file-watcher processes holding 62,776 of 65,536, because VS Code watches `node_modules` unless told not to. Three ways out: add `files.watcherExclude` for `**/node_modules/**` to VS Code settings, raise the limit with `sudo sysctl fs.inotify.max_user_watches=524288`, or close a VS Code window to free about 30,000. Diagnose with `cat /proc/[0-9]*/fdinfo/* 2>/dev/null \| grep -c '^inotify wd:'` |
 | **You need a browser but Metro will not start** | Build a static export instead — it uses no file watchers at all: `npm run export:web`, then serve `dist/web` on **port 8082** with SPA fallback (every unknown path returns `index.html`). 8082 matters: both the backend's `ALLOWED_ORIGINS` and the wallet server's origin allowlist name it. **Chat will be scripted in this build and cannot be fixed by starting anything** — `__DEV__` is false in an export, so the app never calls the model. Everything else works |
 | **First load shows "balance could not be refreshed", then works on Refresh** | A cold start, not a fault. WDK derives the accounts on the first request and the public Sepolia RPCs are slow; at least one chain usually misses the first attempt. The same happens to the first market fetch after the backend starts. Both recover on the next call. It is listed here because the app's first paint reports a problem that is not there |
-| **Everything renders but nothing loads data** | **You are serving the app on a port other than 8082.** Both allowlists name `8082` and nothing else — `ALLOWED_ORIGINS` in `backend/.env.local`, and the hardcoded `origins` in `mobile/scripts/wallet-api-server.mjs`. The app reports this as *"The local wallet API could not be reached"*, which reads like the server is down when it is in fact refusing you. Serve on 8082, or add your port to both |
+| **Everything renders but nothing loads data** | **You are serving the app on a port other than 8082.** Both allowlists name `8082` by default — `ALLOWED_ORIGINS` in `backend/.env.local`, and `WALLY_API_ORIGINS` for `mobile/scripts/wallet-api-server.mjs`. The app reports this as *"The local wallet API could not be reached"*, which reads like the server is down when it is in fact refusing you. Serve on 8082, or set both variables to your port and restart the two servers (`WALLY_WEB_PORT` does both under compose) |
 | App loads but nothing talks to anything on a phone | Missing `adb reverse` — see above |
 | Changed `.env.local`, nothing happened | Metro caches env at startup. Restart it |
 | Port already in use | `ss -lptn 'sport = :8080'` to find the process, then `kill` that PID |

@@ -1,0 +1,100 @@
+# Runs the PRODUCT locally: the backend proxy and the loopback dev wallet server in containers,
+# with the QVAC model server and Metro on the host. docs/RUNNING-LOCALLY.md walks through it.
+#
+# This is NOT docker-compose.yml beside it. That file builds the old reference app, holds a
+# seed and points at MAINNET RPCs. Everything here is Sepolia testnet and loopback only.
+#
+#   docker compose -f docker-compose.product.yml --profile live up --build -d   # backend 8080 + wallet 3003
+#   docker compose -f docker-compose.product.yml --profile demo up --build -d   # the app on fictional data, 8082
+#   docker compose -f docker-compose.product.yml --profile live --profile demo down
+#
+# Secrets: none in this file and none in any image. The wallet seed lives in the bind mount
+# internal/testnet-wallet (gitignored); the first start writes one there if none exists.
+# Optional provider keys come from the shell or a gitignored .env beside this file:
+#   ETHERSCAN_API_KEY   indexed Activity (one free key covers both chains)
+#   COINGECKO_API_KEY   raises the market rate limit
+#   WALLY_DEMO_PORT     where the demo profile serves the app (default 8082)
+#   WALLY_WEB_PORT      where Metro listens on the host (default 8082); both servers only answer
+#                       that browser origin
+#
+# Why each server has a "-port" sidecar: both bind 127.0.0.1 on purpose, and the wallet server
+# also refuses any peer that is not loopback. A published Docker port arrives from the bridge
+# gateway, which they would both refuse, and the backend registers its development-only model
+# passthrough only when bound to loopback. The sidecar shares the server's network namespace
+# and forwards the published port to 127.0.0.1 inside it, so each server sees exactly what it
+# sees on a laptop. No guard is loosened.
+
+name: wally-product
+
+x-web-origins: &web-origins
+  http://127.0.0.1:${WALLY_WEB_PORT:-8082},http://localhost:${WALLY_WEB_PORT:-8082}
+
+services:
+  backend:
+    profiles: [live]
+    build: ./backend
+    environment:
+      HOST: 127.0.0.1
+      PORT: "8080"
+      LOG_LEVEL: info
+      ALLOWED_ORIGINS: *web-origins
+      # The model server runs on the host (it wants the GPU). Both chains and the indexer keep
+      # the public Sepolia defaults from backend/.env.example unless overridden here.
+      QVAC_URL: http://host.docker.internal:11434
+      ETHERSCAN_API_KEY: ${ETHERSCAN_API_KEY:-}
+      COINGECKO_API_KEY: ${COINGECKO_API_KEY:-}
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    ports:
+      - "127.0.0.1:8080:18080"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  backend-port:
+    profiles: [live]
+    image: alpine/socat:1.8.0.0
+    network_mode: service:backend
+    command: TCP-LISTEN:18080,fork,reuseaddr TCP:127.0.0.1:8080
+    depends_on: [backend]
+    restart: unless-stopped
+
+  wallet-server:
+    profiles: [live]
+    build:
+      context: .
+      dockerfile: docker/wallet-server.Dockerfile
+    environment:
+      WALLY_API_PORT: "3003"
+      WALLY_API_ORIGINS: *web-origins
+    volumes:
+      # The seed and the transaction journal. Gitignored; back it up if you fund the wallet.
+      - ./internal/testnet-wallet:/app/internal/testnet-wallet
+    ports:
+      - "127.0.0.1:3003:13003"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3003/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  wallet-port:
+    profiles: [live]
+    image: alpine/socat:1.8.0.0
+    network_mode: service:wallet-server
+    command: TCP-LISTEN:13003,fork,reuseaddr TCP:127.0.0.1:3003
+    depends_on: [wallet-server]
+    restart: unless-stopped
+
+  web-demo:
+    profiles: [demo]
+    build:
+      context: .
+      dockerfile: docker/web-demo.Dockerfile
+    ports:
+      - "127.0.0.1:${WALLY_DEMO_PORT:-8082}:8082"
+    restart: unless-stopped

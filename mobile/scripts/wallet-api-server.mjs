@@ -70,8 +70,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
   const port = Number(process.env.WALLY_API_PORT ?? 3003);
   if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('Invalid local wallet API port.');
+  // Browser origins allowed to call this server, comma separated. Defaults to Metro on 8082, the
+  // port the backend's ALLOWED_ORIGINS names too; set both when Metro runs elsewhere.
+  const origins = (process.env.WALLY_API_ORIGINS ?? '').split(',').map(value => value.trim()).filter(Boolean);
   const service = await createWalletService(path.join(root, 'internal/testnet-wallet'));
-  const server = createWalletApi(service, { port });
+  const server = createWalletApi(service, origins.length ? { port, origins } : { port });
   server.listen(port, '127.0.0.1', () => console.log(`WDK testnet API: http://127.0.0.1:${port} · wallet keys remain on this computer · seed saved privately under internal/testnet-wallet`));
   for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => { server.close(); service.dispose(); process.exit(0); });
 }
