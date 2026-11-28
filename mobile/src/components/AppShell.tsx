@@ -6,6 +6,7 @@ import { Label } from './ui';
 import { ShellContext, gutterFor, layoutFor } from './shell';
 import type { AssetName } from './WallyAsset';
 import { useDemo } from '../demo/store';
+import { listedChats } from '../demo/model';
 import { usePreferences } from '../demo/preferences';
 import { type Palette, makeStyles, useColors } from '../theme';
 
@@ -61,6 +62,8 @@ function Sidebar({ active, pathname, width }: NavigationProps & { width: number 
   const { state, newChat } = useDemo();
   const { preferences } = usePreferences();
   const open = useOpenSection();
+  // The same conversations the Chats list shows: ones with a message, newest first, no placeholders.
+  const recent = listedChats(state.chats).slice(0, 8);
   return <View style={[s.sidebar, { width: width >= 1400 ? 240 : 224 }]}>
     <Lockup size={104} style={{ marginLeft: 6, marginBottom: 12 }} />
     <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }} contentContainerStyle={{ gap: 2 }}>
@@ -75,9 +78,9 @@ function Sidebar({ active, pathname, width }: NavigationProps & { width: number 
           </Pressable>;
         })}
       </View>
-      {!!state.chats.length && <View style={{ gap: 2, marginTop: 18 }}>
+      {!!recent.length && <View style={{ gap: 2, marginTop: 18 }}>
         <Label size={12} weight="medium" color={c.muted} style={{ paddingHorizontal: 10, marginBottom: 4 }}>Recent chats</Label>
-        {state.chats.slice(0, 8).map(chat => <Pressable key={chat.id} accessibilityRole="button" accessibilityLabel={`Open chat ${chat.title}`} onPress={() => router.replace({ pathname: '/chat', params: { id: chat.id } })} style={rowStyle(c, s.chatRow)}>
+        {recent.map(chat => <Pressable key={chat.id} accessibilityRole="button" accessibilityLabel={`Open chat ${chat.title}`} onPress={() => router.replace({ pathname: '/chat', params: { id: chat.id } })} style={rowStyle(c, s.chatRow)}>
           <Label size={14} numberOfLines={1}>{chat.title}</Label>
         </Pressable>)}
         <Pressable accessibilityRole="button" accessibilityLabel="See all chats" onPress={() => router.push('/chats')} style={rowStyle(c, s.chatRow)}>
