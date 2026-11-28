@@ -73,7 +73,8 @@ export function CustodyGuard() {
 export function WalletStatus() {
   const shared = useShared();
   const wallet = useWallet();
-  return <View style={{ gap: 4 }}><View style={shared.between}><Note>{wallet.loading ? 'Updating balances…' : wallet.snapshot ? `${wallet.stale ? 'Saved' : 'Updated'} ${new Date(wallet.snapshot.fetchedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Connecting to the wallet…'}</Note><LinkButton label="Refresh" accessibilityLabel="Refresh balances" disabled={wallet.loading || wallet.offline} onPress={() => { void wallet.refresh(); }} /></View>{!!wallet.error && <Note error>{wallet.error}</Note>}</View>;
+  // "Connecting…" only while nothing has been heard; once the server has refused, say so.
+  return <View style={{ gap: 4 }}><View style={shared.between}><Note>{wallet.loading ? 'Updating balances…' : wallet.snapshot ? `${wallet.stale ? 'Saved' : 'Updated'} ${new Date(wallet.snapshot.fetchedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : wallet.error ? 'Not connected' : 'Connecting to the wallet…'}</Note><LinkButton label="Refresh" accessibilityLabel="Refresh balances" disabled={wallet.loading || wallet.offline} onPress={() => { void wallet.refresh(); }} /></View>{!!wallet.error && <Note error>{wallet.error}</Note>}</View>;
 }
 /** Figma network/icon-fallback: a tinted letter mark per network. */
 function NetworkMark({ chain }: { chain: Chain }) {
@@ -168,7 +169,12 @@ export function LiveReceiveCard() {
   const advice = receiveAdvice(chain, CHAINS[chain].name, addresses, key => CHAINS[key].name);
   return <Card style={{ gap: 16 }}>
     <NetworkChoice value={chain} onChange={next => { setChain(next); setNotice(''); setCopied(false); }} />
-    {balance ? <><QrTile><Image source={{ uri: balance.qr }} contentFit="contain" accessibilityLabel={`QR code for ${balance.address}`} style={{ width: 168, height: 168 }} /></QrTile><ReceiveAddress value={balance.address} onCopy={() => { void copy(); }} /><View style={shared.row}><Button label={copied ? 'Copied' : 'Copy address'} style={shared.flex} onPress={() => { void copy(); }} /><Button accent label="Share" style={shared.flex} onPress={() => { void Share.share({ message: `Wally ${CHAINS[chain].name} testnet ETH address: ${balance.address}. Testnet only.` }).catch(() => setNotice('Sharing is unavailable. You can copy the address.')); }} /></View></> : <WalletStatus />}
+    {balance ? <><QrTile><Image source={{ uri: balance.qr }} contentFit="contain" accessibilityLabel={`QR code for ${balance.address}`} style={{ width: 168, height: 168 }} /></QrTile><ReceiveAddress value={balance.address} onCopy={() => { void copy(); }} /><View style={shared.row}><Button label={copied ? 'Copied' : 'Copy address'} style={shared.flex} onPress={() => { void copy(); }} /><Button accent label="Share" style={shared.flex} onPress={() => { void Share.share({ message: `Wally ${CHAINS[chain].name} testnet ETH address: ${balance.address}. Testnet only.` }).catch(() => setNotice('Sharing is unavailable. You can copy the address.')); }} /></View></> : <>
+      {/* No address yet: the card keeps its shape, with the tile empty and the actions waiting. */}
+      <QrTile><View style={{ width: 168, height: 168 }} /></QrTile>
+      <WalletStatus />
+      <View style={shared.row}><Button label="Copy address" style={shared.flex} disabled onPress={() => {}} /><Button accent label="Share" style={shared.flex} disabled onPress={() => {}} /></View>
+    </>}
     {/* Derived from the addresses, never asserted. The fixed version of this line claimed the
         same address works on both networks, which held only while the dev server derived one
         EOA for both. Arbitrum's real account is a Safe addressed by the account factory. */}
