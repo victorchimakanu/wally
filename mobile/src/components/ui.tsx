@@ -195,6 +195,10 @@ export function Screen({ children, title, tab, surface, immersive = false, foote
   // screens, with an `aside` taking the right 384 of those 1104, as the desktop designs lay out.
   const showAside = wide && !!aside;
   const column = wide ? (wideContent || showAside ? 1104 : 696) + gutter * 2 : undefined;
+  // A conversation reads in a centred column, 760 wide at most, however wide the tablet is; the
+  // bar above it still spans the window. Desktop already caps it through `column` and the aside.
+  const reading = surface === 'chat' && !wide && layout !== 'phone';
+  const readingColumn = (padding: number) => reading ? { width: '100%' as const, maxWidth: 760 + padding * 2, alignSelf: 'center' as const } : null;
   return <View style={[s.screen, column !== undefined && { width: '100%', maxWidth: column, alignSelf: 'flex-start' }, { paddingTop: Platform.OS === 'web' ? 0 : insets.top }]}>
     <View style={[s.flex, { minHeight: 0 }, showAside && { flexDirection: 'row' }]}>
     <KeyboardAvoidingView style={[s.flex, { minHeight: 0 }]} onLayout={event => onViewportHeightChange?.(event.nativeEvent.layout.height)} behavior={Platform.OS === 'ios' ? 'padding' : Platform.OS === 'android' ? 'height' : undefined}>
@@ -208,13 +212,13 @@ export function Screen({ children, title, tab, surface, immersive = false, foote
         // Offsets passed during our own glide are not the user leaving the latest message.
         if (!near && Date.now() - gliding.current < 800) return;
         if (near !== following.current) { following.current = near; onNearBottomChange?.(near); }
-      }} onContentSizeChange={() => { if (autoScroll && following.current) toLatest(); }} onLayout={() => { if (autoScroll && following.current) toLatest(false); }} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" showsVerticalScrollIndicator={false} contentContainerStyle={[s.content, { paddingHorizontal: gutter }, contentStyle]}>
+      }} onContentSizeChange={() => { if (autoScroll && following.current) toLatest(); }} onLayout={() => { if (autoScroll && following.current) toLatest(false); }} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" showsVerticalScrollIndicator={false} contentContainerStyle={[s.content, { paddingHorizontal: gutter }, readingColumn(gutter), contentStyle]}>
         {storageError ? <Note error>{storageError}</Note> : null}
         {state.offline && tab && <Pill tone="warning">Offline</Pill>}
         {children}
       </ScrollView>
       {immersive && <View style={[s.fade, { height: wide ? 40 : 72 }]}>{FADE_STEPS.map(opacity => <View key={opacity} style={{ flex: 1, backgroundColor: c.background, opacity }} />)}</View>}
-      {footer && <View style={[s.footer, { paddingHorizontal: gutter - 8 }]}>{footer}</View>}
+      {footer && <View style={[s.footer, { paddingHorizontal: gutter - 8 }, readingColumn(gutter - 8)]}>{footer}</View>}
     </KeyboardAvoidingView>
     {showAside && <ScrollView style={{ width: 384 + gutter, flexGrow: 0 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingTop: 120, paddingRight: gutter, paddingBottom: 24, gap: 16 }}>{aside}</ScrollView>}
     </View>
