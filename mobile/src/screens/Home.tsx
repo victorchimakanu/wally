@@ -6,6 +6,7 @@ import { WalletOverview } from '../components/WalletOverview';
 import { Watchlist } from '../components/MarketRows';
 import { Lockup, WallyAsset } from '../components/WallyAsset';
 import { Button, Card, Group, Label, Row, Screen, useShared } from '../components/ui';
+import { useShell } from '../components/shell';
 import { useDemo } from '../demo/store';
 import { fonts, makeStyles, useColors } from '../theme';
 import { useWallet } from '../data/wallet';
@@ -29,17 +30,35 @@ export function WelcomeScreen() {
 
 export function WalletScreen() {
   const shared = useShared();
+  const { wide, tablet } = useShell();
   const { setDraft } = useDemo();
-  // Two actions, not a grid of shortcuts: Market and Chat already have their own tabs.
+  const send = () => { setDraft({ recipient: '', amount: '' }); router.push('/send'); };
+  const receive = () => router.push('/receive');
+  // The guard sits above the overview, not below it. In a refused split this screen falls back
+  // to the demo wallet, which is safe but silent — the real balances simply vanish with no
+  // explanation. The card says which wallet is missing and why.
+  const overview = <><CustodyGuard /><WalletOverview /></>;
+  // Two actions, not a grid of shortcuts: Market and Chat already have their own places.
+  // Wider windows follow the designs: the overview keeps its phone width in a left column. On
+  // desktop the watchlist fills the rest; an upright tablet stacks the actions beside the card.
+  if (wide) return <Screen tab="wallet" wideContent contentStyle={{ gap: 24 }}>
+    <View style={{ flexDirection: 'row', gap: 24, alignItems: 'flex-start' }}>
+      <View style={{ width: 384, gap: 24 }}>{overview}<View style={shared.row}><Button label="Send" style={shared.flex} onPress={send} /><Button accent label="Receive" style={shared.flex} onPress={receive} /></View></View>
+      <View style={{ flex: 1, minWidth: 0 }}><Watchlist /></View>
+    </View>
+  </Screen>;
+  if (tablet) return <Screen tab="wallet" contentStyle={{ gap: 24 }}>
+    <View style={{ flexDirection: 'row', gap: 24, alignItems: 'flex-start' }}>
+      <View style={{ width: 384, gap: 24 }}>{overview}</View>
+      <View style={{ flex: 1, minWidth: 0, gap: 12 }}><Button label="Send" onPress={send} /><Button accent label="Receive" onPress={receive} /></View>
+    </View>
+    <Watchlist />
+  </Screen>;
   return <Screen tab="wallet" contentStyle={{ gap: 24 }}>
-    {/* Above the overview, not below it. In a refused split this screen falls back to the demo
-        wallet, which is safe but silent — the real balances simply vanish with no explanation.
-        The card says which wallet is missing and why. */}
-    <CustodyGuard />
-    <WalletOverview />
+    {overview}
     <View style={shared.row}>
-      <Button label="Send" style={shared.flex} onPress={() => { setDraft({ recipient: '', amount: '' }); router.push('/send'); }} />
-      <Button accent label="Receive" style={shared.flex} onPress={() => router.push('/receive')} />
+      <Button label="Send" style={shared.flex} onPress={send} />
+      <Button accent label="Receive" style={shared.flex} onPress={receive} />
     </View>
     <Watchlist />
   </Screen>;

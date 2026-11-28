@@ -62,12 +62,14 @@ export function Note({ children, error = false }: React.PropsWithChildren<{ erro
   const s = useStyles();
   return <Label size={12} color={error ? c.error : c.muted} accessibilityLiveRegion={error ? 'polite' : 'none'} style={error ? s.error : undefined}>{children}</Label>;
 }
-/** Title bar for pushed screens: a back button and one centred title, nothing under it. */
+/** Title bar for pushed screens: a back button and one centred title. A tablet adds the avatar on the right, as its designs do. */
 export function Header({ title, back = true }: { title: string; back?: boolean }) {
   const s = useStyles();
-  return <View style={s.header}>
-    {back && <Pressable accessibilityLabel="Go back" accessibilityRole="button" onPress={() => router.canGoBack() ? router.back() : router.replace('/wallet')} style={s.back}><View style={{ transform: [{ rotate: '180deg' }] }}><WallyAsset name="afc43.svg" /></View></Pressable>}
-    <View style={{ flex: 1, alignItems: 'center', paddingRight: back ? 50 : 0 }}><Label weight="semibold" size={16} accessibilityRole="header" numberOfLines={1}>{title}</Label></View>
+  const { tablet, gutter } = useShell();
+  return <View style={[s.header, { paddingHorizontal: gutter }]}>
+    {back ? <Pressable accessibilityLabel="Go back" accessibilityRole="button" onPress={() => router.canGoBack() ? router.back() : router.replace('/wallet')} style={s.back}><View style={{ transform: [{ rotate: '180deg' }] }}><WallyAsset name="afc43.svg" /></View></Pressable> : tablet ? <View style={s.back} /> : null}
+    <View style={{ flex: 1, alignItems: 'center' }}><Label weight="semibold" size={16} accessibilityRole="header" numberOfLines={1}>{title}</Label></View>
+    {tablet ? <Pressable accessibilityRole="button" accessibilityLabel="View profile" onPress={() => router.push('/profile')} style={s.back}><Avatar size={40} /></Pressable> : back ? <View style={{ width: 50 }} /> : null}
   </View>;
 }
 /** Testnet or demo, said once in the header instead of on a strip under every screen. */
@@ -77,11 +79,13 @@ export function NetworkBadge() {
     <Pill tone="warning">{wallet.enabled ? 'Testnet' : 'Demo'}</Pill>
   </View>;
 }
-/** Title bar for the main sections on wide windows, where the sidebar carries the network badge. */
+/** The desktop page heading: the section's name at the content's left edge, the network badge beside it. */
 export function TopBar({ title }: { title: string }) {
   const s = useStyles();
-  return <View style={s.topBar}>
-    <Label size={26} weight="semibold" accessibilityRole="header" style={{ lineHeight: 32 }}>{title}</Label>
+  const { gutter } = useShell();
+  return <View style={[s.topBar, { paddingHorizontal: gutter }]}>
+    <Label size={25} weight="semibold" accessibilityRole="header" style={{ lineHeight: 31 }}>{title}</Label>
+    <NetworkBadge />
   </View>;
 }
 /**
@@ -93,6 +97,7 @@ export function AppNavigation({ surface, floating = false }: { surface: 'wallet'
   const c = useColors();
   const s = useStyles();
   const shared = useShared();
+  const { tablet, gutter } = useShell();
   const [open, setOpen] = useState(false);
   const { state, newChat } = useDemo();
   const { preferences } = usePreferences();
@@ -101,10 +106,11 @@ export function AppNavigation({ surface, floating = false }: { surface: 'wallet'
   function go(path: '/wallet' | '/chats' | '/history' | '/market' | '/settings' | '/profile' | '/address-book') { setOpen(false); router.push(path); }
   const menu = <Pressable accessibilityRole="button" accessibilityLabel="Open app menu" onPress={() => setOpen(true)} style={[s.menu, floating && s.floatingShadow]}><WallyAsset name="f3b34.svg" /></Pressable>;
   return <>
-    {floating ? <Animated.View entering={FadeIn.duration(200)} style={s.floatingMenu}>{menu}</Animated.View> : <View style={s.navigation}>
+    {floating ? <Animated.View entering={FadeIn.duration(200)} style={s.floatingMenu}>{menu}</Animated.View> : <View style={[s.navigation, { paddingHorizontal: gutter - 8 }]}>
       {menu}
       <View style={s.segment}>{(['wallet', 'chat'] as const).map(value => <Pressable key={value} accessibilityRole="tab" accessibilityLabel={value === 'wallet' ? 'Wallet' : 'Chat'} accessibilityState={{ selected: surface === value }} onPress={() => value === 'wallet' ? router.replace('/wallet') : chat()} style={[s.segmentButton, surface === value && { backgroundColor: c.raised }]}><Label size={17} weight={surface === value ? 'semibold' : 'regular'}>{value === 'wallet' ? 'Wallet' : 'Chat'}</Label></Pressable>)}</View>
       <NetworkBadge />
+      {tablet && <Pressable accessibilityRole="button" accessibilityLabel="View profile" onPress={() => router.push('/profile')} style={s.iconButton}><Avatar size={40} /></Pressable>}
     </View>}
     <Modal transparent visible={open} animationType="fade" onRequestClose={() => setOpen(false)}>
       <View style={s.modal}>
@@ -129,7 +135,7 @@ export function AppNavigation({ surface, floating = false }: { surface: 'wallet'
 /** Messages fade out under the chat's title bar instead of sliding beneath a hard edge. */
 // Stepped bands rather than a gradient style, which is still experimental on native.
 const FADE_STEPS = [1, .86, .7, .54, .38, .24, .12, .04];
-export function Screen({ children, title, tab, surface, immersive = false, footer, back = true, contentStyle, autoScroll = false, fixedHeader, scrollRequest, onScrollActivity, onNearBottomChange, onViewportHeightChange }: React.PropsWithChildren<{ title?: string; tab?: 'wallet' | 'chats' | 'settings'; surface?: 'wallet' | 'chat'; immersive?: boolean; footer?: React.ReactNode; back?: boolean; contentStyle?: StyleProp<ViewStyle>; autoScroll?: boolean; fixedHeader?: React.ReactNode; scrollRequest?: string | number; onScrollActivity?: () => void; onNearBottomChange?: (near: boolean) => void; onViewportHeightChange?: (height: number) => void }>) {
+export function Screen({ children, title, tab, surface, immersive = false, footer, back = true, contentStyle, autoScroll = false, fixedHeader, aside, wideContent = false, scrollRequest, onScrollActivity, onNearBottomChange, onViewportHeightChange }: React.PropsWithChildren<{ title?: string; tab?: 'wallet' | 'chats' | 'settings'; surface?: 'wallet' | 'chat'; immersive?: boolean; footer?: React.ReactNode; back?: boolean; contentStyle?: StyleProp<ViewStyle>; autoScroll?: boolean; fixedHeader?: React.ReactNode; /** Desktop only: a 384-wide column to the right of the content. */ aside?: React.ReactNode; /** Desktop only: two-column content, 1104 wide instead of the 696 a list reads best at. */ wideContent?: boolean; scrollRequest?: string | number; onScrollActivity?: () => void; onNearBottomChange?: (near: boolean) => void; onViewportHeightChange?: (height: number) => void }>) {
   const c = useColors();
   const s = useStyles();
   const scroll = useRef<ScrollView>(null);
@@ -162,13 +168,18 @@ export function Screen({ children, title, tab, surface, immersive = false, foote
   }, [scrollRequest, autoScroll]);
   const insets = useSafeAreaInsets();
   const { state, storageError } = useDemo();
-  const { wide, topLevel } = useShell();
-  // Wide: the sidebar navigates, so main sections get a plain title bar and chat draws its own.
-  // Phone: Wallet and Chat carry the menu and switch; every other screen is pushed and has Back.
+  const { wide, gutter, topLevel } = useShell();
+  // Desktop: the sidebar navigates, so main sections get a page heading and chat draws its own.
+  // Phone and tablet: Wallet and Chat carry the menu and switch; every other screen is pushed and has Back.
   const header = wide
     ? surface === 'chat' ? null : topLevel || tab === 'wallet' ? <TopBar title={title ?? 'Wallet'} /> : title ? <Header title={title} back={back} /> : null
     : surface || tab === 'wallet' ? <AppNavigation surface={surface ?? 'wallet'} floating={immersive} /> : title ? <Header title={title} back={back} /> : null;
-  return <View style={[s.screen, (wide || surface === 'chat') && { width: '100%', maxWidth: surface === 'chat' ? 928 : 760, alignSelf: 'center' }, { paddingTop: Platform.OS === 'web' ? 0 : insets.top }]}>
+  // Desktop content sits at the page's left edge: 696 wide for a list, 1104 for the two-column
+  // screens, with an `aside` taking the right 384 of those 1104, as the desktop designs lay out.
+  const showAside = wide && !!aside;
+  const column = wide ? (wideContent || showAside ? 1104 : 696) + gutter * 2 : undefined;
+  return <View style={[s.screen, column !== undefined && { width: '100%', maxWidth: column, alignSelf: 'flex-start' }, { paddingTop: Platform.OS === 'web' ? 0 : insets.top }]}>
+    <View style={[s.flex, { minHeight: 0 }, showAside && { flexDirection: 'row' }]}>
     <KeyboardAvoidingView style={[s.flex, { minHeight: 0 }]} onLayout={event => onViewportHeightChange?.(event.nativeEvent.layout.height)} behavior={Platform.OS === 'ios' ? 'padding' : Platform.OS === 'android' ? 'height' : undefined}>
       {header}
       {fixedHeader}
@@ -180,14 +191,16 @@ export function Screen({ children, title, tab, surface, immersive = false, foote
         // Offsets passed during our own glide are not the user leaving the latest message.
         if (!near && Date.now() - gliding.current < 800) return;
         if (near !== following.current) { following.current = near; onNearBottomChange?.(near); }
-      }} onContentSizeChange={() => { if (autoScroll && following.current) toLatest(); }} onLayout={() => { if (autoScroll && following.current) toLatest(false); }} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" showsVerticalScrollIndicator={false} contentContainerStyle={[s.content, contentStyle]}>
+      }} onContentSizeChange={() => { if (autoScroll && following.current) toLatest(); }} onLayout={() => { if (autoScroll && following.current) toLatest(false); }} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" showsVerticalScrollIndicator={false} contentContainerStyle={[s.content, { paddingHorizontal: gutter }, contentStyle]}>
         {storageError ? <Note error>{storageError}</Note> : null}
         {state.offline && tab && <Pill tone="warning">Offline</Pill>}
         {children}
       </ScrollView>
       {immersive && <View style={[s.fade, { height: wide ? 40 : 72 }]}>{FADE_STEPS.map(opacity => <View key={opacity} style={{ flex: 1, backgroundColor: c.background, opacity }} />)}</View>}
-      {footer && <View style={s.footer}>{footer}</View>}
+      {footer && <View style={[s.footer, { paddingHorizontal: gutter - 8 }]}>{footer}</View>}
     </KeyboardAvoidingView>
+    {showAside && <ScrollView style={{ width: 384 + gutter, flexGrow: 0 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingTop: 120, paddingRight: gutter, paddingBottom: 24, gap: 16 }}>{aside}</ScrollView>}
+    </View>
     {Platform.OS !== 'web' && <View style={{ height: insets.bottom }} />}
   </View>;
 }
@@ -253,7 +266,7 @@ export const useShared = makeStyles(c => ({
 }));
 const useStyles = makeStyles(c => ({
   flex: { flex: 1 }, screen: { flex: 1, backgroundColor: c.background }, content: { flexGrow: 1, paddingHorizontal: 28, paddingTop: 16, paddingBottom: 24, gap: 24 },
-  topBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 28, paddingTop: 32, paddingBottom: 4, minHeight: 64 },
+  topBar: { flexDirection: 'row', alignItems: 'center', gap: 16, paddingHorizontal: 28, paddingTop: 48, paddingBottom: 30 },
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 28, paddingTop: 12, paddingBottom: 4, minHeight: 64 },
   back: { width: 50, minHeight: 50, alignItems: 'center', justifyContent: 'center' },
   button: { minHeight: 56, borderRadius: radius.button, paddingHorizontal: 20, paddingVertical: 15, alignItems: 'center', justifyContent: 'center' }, center: { textAlign: 'center' },

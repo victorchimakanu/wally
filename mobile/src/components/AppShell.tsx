@@ -2,19 +2,21 @@ import React from 'react';
 import { router, usePathname } from 'expo-router';
 import { Pressable, ScrollView, useWindowDimensions, View, type PressableStateCallbackType, type ViewStyle } from 'react-native';
 import { Avatar, Lockup, WallyAsset } from './WallyAsset';
-import { Button, Label, NetworkBadge } from './ui';
-import { ShellContext, WIDE_LAYOUT } from './shell';
+import { Label } from './ui';
+import { ShellContext, gutterFor, layoutFor } from './shell';
 import type { AssetName } from './WallyAsset';
 import { useDemo } from '../demo/store';
 import { usePreferences } from '../demo/preferences';
 import { type Palette, makeStyles, useColors } from '../theme';
 
-type Section = { path: '/wallet' | '/chat' | '/history' | '/market' | '/settings'; label: string; icon: AssetName };
+type Section = { path: '/wallet' | '/chat' | '/market' | '/history' | '/address-book' | '/settings'; label: string; icon: AssetName };
+/** The order the sidebar and rail list them in, from the WallyUI shared navigation. */
 const SECTIONS: Section[] = [
   { path: '/wallet', label: 'Wallet', icon: 'bfa3b.svg' },
   { path: '/chat', label: 'Chat', icon: '49ec3.svg' },
-  { path: '/history', label: 'Activity', icon: 'b1b14.svg' },
   { path: '/market', label: 'Market', icon: '56a25.svg' },
+  { path: '/history', label: 'Activity', icon: 'b1b14.svg' },
+  { path: '/address-book', label: 'Address book', icon: '9a2cd.svg' },
   { path: '/settings', label: 'Settings', icon: 'f2470.svg' },
 ];
 /** Screens reached from a section keep that section highlighted. */
@@ -23,7 +25,7 @@ const OWNER: Record<string, Section['path']> = {
   '/chats': '/chat', '/clear-chats': '/chat',
   '/transaction': '/history', '/export-data': '/history',
   '/asset': '/market',
-  '/preferences': '/settings', '/profile': '/settings', '/address-book': '/settings', '/licences': '/settings', '/problems': '/settings',
+  '/preferences': '/settings', '/profile': '/settings', '/licences': '/settings', '/problems': '/settings',
   '/recovery-phrase': '/settings', '/reset-wallet': '/settings', '/phone-performance': '/settings',
 };
 /** Onboarding stands on its own, without app navigation. */
@@ -40,49 +42,74 @@ function useOpenSection() {
 /** Hover is web-only and missing from React Native's types; pressed covers touch. */
 const rowStyle = (c: Palette, base: ViewStyle, selected = false) => (state: PressableStateCallbackType) => [base, selected ? { backgroundColor: c.tint } : (state as PressableStateCallbackType & { hovered?: boolean }).hovered || state.pressed ? { backgroundColor: c.toggle } : null];
 
-function Sidebar({ active, pathname }: { active: Section['path'] | undefined; pathname: string }) {
+type NavigationProps = { active: Section['path'] | undefined; pathname: string };
+
+/** Desktop: the lockup, the sections with their names, recent chats, and the profile at the foot. */
+function Sidebar({ active, pathname, width }: NavigationProps & { width: number }) {
   const c = useColors();
   const s = useStyles();
-  const { state, newChat } = useDemo();
+  const { state } = useDemo();
   const { preferences } = usePreferences();
   const open = useOpenSection();
-  return <View style={s.sidebar}>
-    <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 20, paddingBottom: 16 }}>
-      <View style={[s.between, { paddingHorizontal: 8, paddingTop: 8 }]}><Lockup size={112} /><NetworkBadge /></View>
-      <Button label="New chat" onPress={() => router.replace({ pathname: '/chat', params: { id: newChat() } })} />
-      <View accessibilityRole="tablist" style={{ gap: 2 }}>
+  return <View style={[s.sidebar, { width: width >= 1400 ? 240 : 224 }]}>
+    <Lockup size={126} style={{ marginBottom: 8 }} />
+    <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }} contentContainerStyle={{ gap: 12 }}>
+      <View accessibilityRole="tablist" style={{ gap: 4 }}>
         {SECTIONS.map(section => {
           const selected = active === section.path;
           return <Pressable key={section.path} accessibilityRole="tab" accessibilityLabel={section.label} accessibilityState={{ selected }} onPress={() => { if (pathname !== section.path) open(section.path); }} style={rowStyle(c, s.sideRow, selected)}>
-            <WallyAsset name={section.icon} size={22} /><Label size={15} weight={selected ? 'semibold' : 'medium'}>{section.label}</Label>
+            <WallyAsset name={section.icon} size={24} /><Label size={16} weight="medium">{section.label}</Label>
           </Pressable>;
         })}
       </View>
-      {!!state.chats.length && <View style={{ gap: 2 }}>
-        <Label size={12} weight="medium" color={c.muted} style={{ paddingHorizontal: 12, marginBottom: 4 }}>Recent chats</Label>
+      {!!state.chats.length && <View style={{ gap: 2, paddingTop: 8 }}>
+        <Label size={12} weight="medium" color={c.muted} style={{ paddingHorizontal: 8, marginBottom: 6 }}>Recent chats</Label>
         {state.chats.slice(0, 6).map(chat => <Pressable key={chat.id} accessibilityRole="button" accessibilityLabel={`Open chat ${chat.title}`} onPress={() => router.replace({ pathname: '/chat', params: { id: chat.id } })} style={rowStyle(c, s.chatRow)}>
-          <Label size={14} numberOfLines={1}>{chat.title}</Label>
+          <Label size={16} numberOfLines={1}>{chat.title}</Label>
         </Pressable>)}
       </View>}
     </ScrollView>
     <Pressable accessibilityRole="button" accessibilityLabel="View profile" onPress={() => router.push('/profile')} style={s.profile}>
-      <Avatar size={36} /><Label weight="semibold" numberOfLines={1} style={{ flex: 1 }}>{preferences.name}</Label>
+      <Avatar size={40} /><Label size={16} numberOfLines={1} style={{ flex: 1 }}>{preferences.name}</Label>
     </Pressable>
   </View>;
 }
 
-/** The app's frame: a sidebar on wide windows. Phones navigate from the Wallet/Chat bar's drawer. */
+/** Tablet on its side: the same sections as icons only, the profile at the foot. */
+function Rail({ active, pathname }: NavigationProps) {
+  const c = useColors();
+  const s = useStyles();
+  const open = useOpenSection();
+  return <View style={s.rail}>
+    <View accessibilityRole="tablist" style={{ gap: 24, alignItems: 'center' }}>
+      {SECTIONS.map(section => {
+        const selected = active === section.path;
+        return <Pressable key={section.path} accessibilityRole="tab" accessibilityLabel={section.label} accessibilityState={{ selected }} onPress={() => { if (pathname !== section.path) open(section.path); }} style={rowStyle(c, s.railItem, selected)}>
+          <WallyAsset name={section.icon} size={24} />
+        </Pressable>;
+      })}
+    </View>
+    <View style={{ flex: 1 }} />
+    <Pressable accessibilityRole="button" accessibilityLabel="View profile" onPress={() => router.push('/profile')}><Avatar size={40} /></Pressable>
+  </View>;
+}
+
+/**
+ * The app's frame. A desktop window gets the sidebar, a tablet on its side the rail; phones and
+ * upright tablets navigate from the Wallet/Chat bar's menu, which the screens draw themselves.
+ */
 export function AppShell({ children }: React.PropsWithChildren) {
   const s = useStyles();
   const { width } = useWindowDimensions();
   const pathname = usePathname();
-  const wide = width >= WIDE_LAYOUT;
+  const layout = layoutFor(width);
   const onboarding = ONBOARDING.includes(pathname);
   const topLevel = SECTIONS.some(section => section.path === pathname);
   const active = SECTIONS.find(section => section.path === pathname)?.path ?? OWNER[pathname];
-  return <ShellContext value={{ wide, topLevel }}>
-    <View style={[s.frame, wide && { flexDirection: 'row' }]}>
-      {wide && !onboarding && <Sidebar active={active} pathname={pathname} />}
+  const navigation = onboarding ? null : layout === 'desktop' ? <Sidebar active={active} pathname={pathname} width={width} /> : layout === 'rail' ? <Rail active={active} pathname={pathname} /> : null;
+  return <ShellContext value={{ layout, gutter: gutterFor(layout, width), topLevel }}>
+    <View style={[s.frame, !!navigation && { flexDirection: 'row' }]}>
+      {navigation}
       <View style={s.main}>{children}</View>
     </View>
   </ShellContext>;
@@ -90,9 +117,10 @@ export function AppShell({ children }: React.PropsWithChildren) {
 
 const useStyles = makeStyles(c => ({
   frame: { flex: 1, backgroundColor: c.background }, main: { flex: 1, minWidth: 0, minHeight: 0 },
-  between: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
-  sidebar: { width: 272, borderRightWidth: 1, borderColor: c.line, backgroundColor: c.surface, paddingHorizontal: 16, paddingTop: 20, paddingBottom: 16 },
-  sideRow: { flexDirection: 'row', alignItems: 'center', gap: 14, minHeight: 44, paddingHorizontal: 12, borderRadius: 14 },
-  chatRow: { minHeight: 36, justifyContent: 'center', paddingHorizontal: 12, borderRadius: 12 },
-  profile: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, borderRadius: 16, backgroundColor: c.background },
+  sidebar: { borderRightWidth: 1, borderColor: c.line, backgroundColor: c.surface, padding: 20, gap: 12 },
+  sideRow: { flexDirection: 'row', alignItems: 'center', gap: 16, height: 52, paddingHorizontal: 8, borderRadius: 20 },
+  chatRow: { minHeight: 40, justifyContent: 'center', paddingHorizontal: 8, borderRadius: 12 },
+  profile: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 8 },
+  rail: { width: 88, borderRightWidth: 1, borderColor: c.line, backgroundColor: c.surface, paddingVertical: 24, paddingHorizontal: 16, alignItems: 'center' },
+  railItem: { width: 56, height: 56, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
 }));

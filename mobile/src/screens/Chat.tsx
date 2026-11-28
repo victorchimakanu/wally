@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Keyboard, Pressable, View } from 'react-native';
-import { Button, Card, Label, LinkButton, Note, Screen, useShared } from '../components/ui';
+import { Button, Card, Label, LinkButton, NetworkBadge, Note, Screen, useShared } from '../components/ui';
+import { WalletOverview } from '../components/WalletOverview';
 import { useShell } from '../components/shell';
 import { ChatComposer, type ChatSuggestion } from '../components/ChatComposer';
 import { DraftChatCard, InlineChatTool, ToolStateCard, WalletToolsModal } from '../components/ChatCards';
@@ -26,7 +27,7 @@ function Conversation({ id, prompt, topic }: { id: string; prompt?: string; topi
   const c = useColors();
   const shared = useShared();
   const wallet = useWallet();
-  const { wide } = useShell();
+  const { wide, gutter } = useShell();
   const { data: market } = useMarket();
   const { state, ai, quote, cancelAi, sendMessage, prepare, cancel, confirm, setDraft, newChat, discardDraft, updateChatDraft, update } = useDemo();
   const busy = ai.status === 'working' && ai.busyChatId === id;
@@ -87,8 +88,10 @@ function Conversation({ id, prompt, topic }: { id: string; prompt?: string; topi
   // Once a conversation starts the chat takes the screen: on a phone the bar above gives way to a
   // floating menu button, and older messages fade out under it.
   const immersive = messages.length > 0;
-  const toolbar = wide || !immersive ? <><View style={[shared.row, { justifyContent: wide ? 'space-between' : 'flex-end', paddingLeft: 28, paddingRight: 18, paddingTop: wide ? 28 : 0, minHeight: wide ? 60 : 44 }]}>{wide && <Label size={26} weight="semibold" accessibilityRole="header" style={{ lineHeight: 30 }}>Chat</Label>}<View style={shared.row}><Pressable accessibilityRole="button" accessibilityLabel="Open chat history" accessibilityState={{ expanded: history }} onPress={() => { Keyboard.dismiss(); setHistory(!history); }} style={{ padding: 8 }}><WallyAsset name="49ec3.svg" /></Pressable><Pressable accessibilityRole="button" accessibilityLabel="Start a new chat" onPress={() => router.replace({ pathname: '/chat', params: { id: newChat() } })} style={{ padding: 8 }}><WallyAsset name="b64e9.svg" /></Pressable></View></View>{history && <ChatHistoryPanel height={viewportHeight * .5} onClose={() => setHistory(false)} />}</> : undefined;
-  return <Screen surface="chat" immersive={immersive} autoScroll fixedHeader={toolbar} scrollRequest={`${id}:${lastRequest?.id ?? 'empty'}:${jump}`} onScrollActivity={wake} onNearBottomChange={setNearLatest} onViewportHeightChange={setViewportHeight} contentStyle={{ justifyContent: 'flex-end', paddingTop: !wide && immersive ? 76 : 8, paddingBottom: 16, gap: 24 }} footer={<>
+  const toolbar = wide || !immersive ? <><View style={[shared.row, { justifyContent: wide ? 'space-between' : 'flex-end', paddingLeft: gutter, paddingRight: gutter - 10, paddingTop: wide ? 48 : 0, minHeight: wide ? 64 : 44 }]}>{wide && <Label size={25} weight="semibold" accessibilityRole="header" style={{ lineHeight: 31 }}>Chat</Label>}<View style={shared.row}>{wide && <NetworkBadge />}<Pressable accessibilityRole="button" accessibilityLabel="Open chat history" accessibilityState={{ expanded: history }} onPress={() => { Keyboard.dismiss(); setHistory(!history); }} style={{ padding: 8 }}><WallyAsset name="49ec3.svg" /></Pressable><Pressable accessibilityRole="button" accessibilityLabel="Start a new chat" onPress={() => router.replace({ pathname: '/chat', params: { id: newChat() } })} style={{ padding: 8 }}><WallyAsset name="b64e9.svg" /></Pressable></View></View>{history && <ChatHistoryPanel height={viewportHeight * .5} onClose={() => setHistory(false)} />}</> : undefined;
+  // Desktop keeps the wallet in view beside the conversation, as the desktop chat design does.
+  const aside = wide ? <><WalletOverview /><Button secondary label="Chats and transactions" onPress={() => { Keyboard.dismiss(); setHistory(!history); }} /></> : undefined;
+  return <Screen surface="chat" immersive={immersive} autoScroll fixedHeader={toolbar} aside={aside} scrollRequest={`${id}:${lastRequest?.id ?? 'empty'}:${jump}`} onScrollActivity={wake} onNearBottomChange={setNearLatest} onViewportHeightChange={setViewportHeight} contentStyle={{ justifyContent: 'flex-end', paddingTop: !wide && immersive ? 76 : 8, paddingBottom: 16, gap: 24 }} footer={<>
     {!nearLatest && <Pressable accessibilityRole="button" accessibilityLabel="Jump to latest request" onPress={() => setJump(value => value + 1)} style={{ alignSelf: 'center', paddingHorizontal: 16, paddingVertical: 8, backgroundColor: c.tint, borderRadius: 20 }}><Label size={12}>Latest request ↓</Label></Pressable>}
     <ChatComposer value={input} onChange={setInput} onSend={() => send()} onStop={cancelAi} onTools={() => { Keyboard.dismiss(); setTools(true); }} onPrivacy={() => router.push({ pathname: '/preferences', params: { panel: 'model' } })} busy={busy} paused={state.aiPaused || !chat || (requestBlocked && !busy)} privacy={privacy} suggestions={history ? [] : suggestions} idle={idle} compact={viewportHeight < 520} />
     {state.aiPaused && <View style={[shared.row, { justifyContent: 'center', gap: 16 }]}><Label size={13} color={c.muted}>Chat is paused</Label><LinkButton label="Resume" onPress={() => update({ aiPaused: false })} /></View>}
