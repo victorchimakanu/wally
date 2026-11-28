@@ -113,8 +113,12 @@ export function AppNavigation({ surface, floating = false }: { surface: 'wallet'
   const { state, newChat } = useDemo();
   const { preferences } = usePreferences();
   const insets = useSafeAreaInsets();
-  function chat(fresh = false) { const id = fresh ? newChat() : state.chats[0]?.id ?? newChat(); setOpen(false); router.replace({ pathname: '/chat', params: { id } }); }
+  function chat() { const id = state.chats[0]?.id ?? newChat(); setOpen(false); router.replace({ pathname: '/chat', params: { id } }); }
   function go(path: '/wallet' | '/chats' | '/history' | '/market' | '/settings' | '/profile' | '/address-book') { setOpen(false); router.push(path); }
+  // The drawer is the shared-components list: the six sections in the sidebar's order, then the
+  // profile. New chat and history live in the composer's Tools sheet, so the drawer has no second
+  // door to either.
+  const DRAWER = [['Wallet', 'bfa3b.svg', '/wallet'], ['Chats', '49ec3.svg', '/chats'], ['Market', '56a25.svg', '/market'], ['Activity', 'b1b14.svg', '/history'], ['Address book', '9a2cd.svg', '/address-book'], ['Settings', 'f2470.svg', '/settings']] as const;
   // The phone's bar is sized for thumbs. A tablet has room, so its switch and menu button shrink
   // to the Tablet · Home board's proportions instead of reading as oversized controls.
   const compact = tablet;
@@ -134,13 +138,7 @@ export function AppNavigation({ surface, floating = false }: { surface: 'wallet'
         <View accessibilityViewIsModal style={[s.drawer, { paddingTop: Math.max(insets.top, 24) + 32, paddingBottom: Math.max(insets.bottom, 20) }]}>
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 16 }}>
             <View style={shared.between}><Lockup size={120} /><Pressable accessibilityRole="button" accessibilityLabel="Close app menu" onPress={() => setOpen(false)} style={s.iconButton}><WallyAsset name="9e528.svg" /></Pressable></View>
-            <Button label="New chat" onPress={() => chat(true)} />
-            <View>{([['Wallet', 'bfa3b.svg', '/wallet'], ['Chats', '49ec3.svg', '/chats'], ['Activity', 'b1b14.svg', '/history'], ['Market', '56a25.svg', '/market']] as const).map(([label, icon, path]) => <Pressable key={path} accessibilityRole="button" onPress={() => go(path)} style={s.drawerRow}><WallyAsset name={icon} size={24} /><Label size={16} weight="medium">{label}</Label></Pressable>)}</View>
-            {!!state.chats.length && <Label size={12} color={c.muted}>Recent chats</Label>}
-            {state.chats.slice(0, 3).map(item => <Pressable key={item.id} accessibilityRole="button" onPress={() => { setOpen(false); router.push({ pathname: '/chat', params: { id: item.id } }); }} style={{ paddingVertical: 8 }}><Label numberOfLines={1}>{item.title}</Label></Pressable>)}
-            <Divider />
-            <Pressable accessibilityRole="button" onPress={() => go('/address-book')} style={s.drawerRow}><WallyAsset name="9a2cd.svg" /><Label>Address book</Label></Pressable>
-            <Pressable accessibilityRole="button" onPress={() => go('/settings')} style={s.drawerRow}><WallyAsset name="f2470.svg" /><Label>Settings</Label></Pressable>
+            <View>{DRAWER.map(([label, icon, path]) => <Pressable key={path} accessibilityRole="button" onPress={() => go(path)} style={s.drawerRow}><WallyAsset name={icon} size={24} /><Label size={16} weight="medium">{label}</Label></Pressable>)}</View>
             <Pressable accessibilityRole="button" accessibilityLabel="View profile" onPress={() => go('/profile')} style={[s.drawerRow, { backgroundColor: c.tint, borderRadius: 22, padding: 16 }]}><Avatar size={44} /><Label weight="semibold">{preferences.name}</Label></Pressable>
           </ScrollView>
         </View>
@@ -151,7 +149,7 @@ export function AppNavigation({ surface, floating = false }: { surface: 'wallet'
 /** Messages fade out under the chat's title bar instead of sliding beneath a hard edge. */
 // Stepped bands rather than a gradient style, which is still experimental on native.
 const FADE_STEPS = [1, .86, .7, .54, .38, .24, .12, .04];
-export function Screen({ children, title, tab, surface, immersive = false, footer, back = true, contentStyle, autoScroll = false, fixedHeader, aside, wideContent = false, scrollRequest, onScrollActivity, onNearBottomChange, onViewportHeightChange }: React.PropsWithChildren<{ title?: string; tab?: 'wallet' | 'chats' | 'settings'; surface?: 'wallet' | 'chat'; immersive?: boolean; footer?: React.ReactNode; back?: boolean; contentStyle?: StyleProp<ViewStyle>; autoScroll?: boolean; fixedHeader?: React.ReactNode; /** Desktop only: a 384-wide column to the right of the content. */ aside?: React.ReactNode; /** Desktop only: two-column content, 1104 wide instead of the 696 a list reads best at. */ wideContent?: boolean; scrollRequest?: string | number; onScrollActivity?: () => void; onNearBottomChange?: (near: boolean) => void; onViewportHeightChange?: (height: number) => void }>) {
+export function Screen({ children, title, tab, surface, immersive = false, footer, back = true, contentStyle, autoScroll = false, fixedHeader, aside, wideContent = false, centered = false, scrollRequest, onScrollActivity, onNearBottomChange, onViewportHeightChange }: React.PropsWithChildren<{ title?: string; tab?: 'wallet' | 'chats' | 'settings'; surface?: 'wallet' | 'chat'; immersive?: boolean; footer?: React.ReactNode; back?: boolean; contentStyle?: StyleProp<ViewStyle>; autoScroll?: boolean; fixedHeader?: React.ReactNode; /** Desktop only: a 384-wide column to the right of the content. */ aside?: React.ReactNode; /** Desktop only: two-column content, 1104 wide instead of the 696 a list reads best at. */ wideContent?: boolean; /** One phone-wide column, centred: for a screen with no navigation beside it, such as the welcome. */ centered?: boolean; scrollRequest?: string | number; onScrollActivity?: () => void; onNearBottomChange?: (near: boolean) => void; onViewportHeightChange?: (height: number) => void }>) {
   const c = useColors();
   const s = useStyles();
   const scroll = useRef<ScrollView>(null);
@@ -200,12 +198,12 @@ export function Screen({ children, title, tab, surface, immersive = false, foote
   // the desktop without labels. Wallet and Chat lay themselves out across the full width.
   const showAside = wide && !!aside;
   const railColumn = layout === 'rail' && surface !== 'chat' && tab !== 'wallet';
-  const column = wide ? (wideContent || showAside ? 1104 : 696) + gutter * 2 : railColumn ? 696 + gutter * 2 : undefined;
+  const column = centered ? 384 + gutter * 2 : wide ? (wideContent || showAside ? 1104 : 696) + gutter * 2 : railColumn ? 696 + gutter * 2 : undefined;
   // A conversation reads in a centred column, 760 wide at most, however wide the tablet is; the
   // bar above it still spans the window. Desktop already caps it through `column` and the aside.
   const reading = surface === 'chat' && !wide && layout !== 'phone';
   const readingColumn = (padding: number) => reading ? { width: '100%' as const, maxWidth: 760 + padding * 2, alignSelf: 'center' as const } : null;
-  return <View style={[s.screen, column !== undefined && { width: '100%', maxWidth: column, alignSelf: 'flex-start' }, { paddingTop: Platform.OS === 'web' ? 0 : insets.top }]}>
+  return <View style={[s.screen, column !== undefined && { width: '100%', maxWidth: column, alignSelf: centered ? 'center' : 'flex-start' }, { paddingTop: Platform.OS === 'web' ? 0 : insets.top }]}>
     <View style={[s.flex, { minHeight: 0 }, showAside && { flexDirection: 'row' }]}>
     <KeyboardAvoidingView style={[s.flex, { minHeight: 0 }]} onLayout={event => onViewportHeightChange?.(event.nativeEvent.layout.height)} behavior={Platform.OS === 'ios' ? 'padding' : Platform.OS === 'android' ? 'height' : undefined}>
       {header}

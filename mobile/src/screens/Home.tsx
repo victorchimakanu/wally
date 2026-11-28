@@ -24,7 +24,8 @@ export function WelcomeScreen() {
   const wallet = useWallet();
   const { state, update } = useDemo();
   if (state.welcomed) return <Redirect href="/wallet" />;
-  return <Screen contentStyle={{ paddingTop: 10 }} footer={<Button label={wallet.enabled ? 'Open testnet wallet' : 'Try the demo'} onPress={() => { update({ welcomed: true }); router.replace('/wallet'); }} />}>
+  // One phone-wide column, centred on anything wider: the welcome has no navigation beside it.
+  return <Screen centered contentStyle={{ paddingTop: 10 }} footer={<Button label={wallet.enabled ? 'Open testnet wallet' : 'Try the demo'} onPress={() => { update({ welcomed: true }); router.replace('/wallet'); }} />}>
     <Lockup size={118} style={{ alignSelf: 'flex-start' }} />
     <View style={s.illustration} accessibilityLabel="Wallet with a Send 25 USDT conversation bubble">
       <View style={s.illustratedWallet}><Lockup onBrand size={84} style={{ alignSelf: 'flex-start' }} /><Label size={40} color={c.onBrand} weight="semibold" style={{ marginTop: 12 }}>₮</Label></View>
