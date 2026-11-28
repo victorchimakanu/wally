@@ -9,7 +9,7 @@ import { ChatComposer, type ChatSuggestion } from '../components/ChatComposer';
 import { DraftChatCard, InlineChatTool, ToolStateCard, WalletToolsModal } from '../components/ChatCards';
 import { ChatHistoryPanel } from '../components/ChatHistoryPanel';
 import { ThinkingIndicator } from '../components/ThinkingIndicator';
-import { Lockup, WallyAsset } from '../components/WallyAsset';
+import { Lockup } from '../components/WallyAsset';
 import { draftStatus, type Message } from '../demo/model';
 import { useDemo } from '../demo/store';
 import { useColors } from '../theme';
@@ -91,7 +91,9 @@ function Conversation({ id, prompt, topic }: { id: string; prompt?: string; topi
   const immersive = messages.length > 0;
   // History and new chat live in the composer's tools sheet, where the drawer and sidebar also
   // offer them; only the desktop heading row shows them inline, beside the badge.
-  const toolbar = wide || history ? <>{wide && <View style={[shared.row, { justifyContent: 'space-between', paddingLeft: gutter, paddingRight: gutter - 10, paddingTop: 48, minHeight: 64 }]}><Label size={25} weight="semibold" accessibilityRole="header" style={{ lineHeight: 31 }}>Chat</Label><View style={shared.row}><NetworkBadge /><Pressable accessibilityRole="button" accessibilityLabel="Open chat history" accessibilityState={{ expanded: history }} onPress={() => { Keyboard.dismiss(); setHistory(!history); }} style={{ padding: 8 }}><WallyAsset name="49ec3.svg" /></Pressable><Pressable accessibilityRole="button" accessibilityLabel="Start a new chat" onPress={() => router.replace({ pathname: '/chat', params: { id: newChat() } })} style={{ padding: 8 }}><WallyAsset name="b64e9.svg" /></Pressable></View></View>}{history && <ChatHistoryPanel height={viewportHeight * .5} onClose={() => setHistory(false)} />}</> : undefined;
+  // The desktop heading carries only the badge: New chat and the chats list are in the sidebar,
+  // and the history panel opens from the aside's button.
+  const toolbar = wide || history ? <>{wide && <View style={[shared.row, { justifyContent: 'space-between', paddingHorizontal: gutter, paddingTop: 48, minHeight: 64 }]}><Label size={25} weight="semibold" accessibilityRole="header" style={{ lineHeight: 31 }}>Chat</Label><NetworkBadge /></View>}{history && <ChatHistoryPanel height={viewportHeight * .5} onClose={() => setHistory(false)} />}</> : undefined;
   // Desktop keeps the wallet in view beside the conversation, as the desktop chat design does.
   const aside = wide ? <><WalletOverview /><Button secondary label="Chats and transactions" onPress={() => { Keyboard.dismiss(); setHistory(!history); }} /></> : undefined;
   // The stack's slide does not run on the web, so the conversation eases in on its own rather
@@ -104,8 +106,9 @@ function Conversation({ id, prompt, topic }: { id: string; prompt?: string; topi
     {state.offline && <Card style={{ backgroundColor: c.warningTint }}><Label weight="semibold">You’re offline</Label><Note>Drafts are available. Reconnect before reviewing a transfer.</Note></Card>}
     {!chat && <><Label>This conversation is no longer available.</Label><Button label="Start a new chat" onPress={() => router.replace({ pathname: '/chat', params: { id: newChat() } })} /></>}
     {chat?.messages.length === 0 && <View style={{ flex: 1, justifyContent: 'center', gap: 20 }}><Lockup size={150} style={{ alignSelf: 'center' }} /><Label size={28} weight="semibold" style={shared.center}>What can I help with?</Label></View>}
-    {turns.map((turn, index) => <View key={turn[0].id} style={{ gap: 12 }}>{turn.map(message => message.role === 'user' ? <View key={message.id} accessibilityLabel="Your request" style={{ alignSelf: 'flex-end', maxWidth: '83%', backgroundColor: c.tint, borderRadius: 24, paddingHorizontal: 16, paddingVertical: 14 }}><Label size={16} style={{ lineHeight: 22, overflowWrap: 'anywhere' } as never}>{message.text}</Label></View> : <View key={message.id} style={{ gap: 12 }}>
-      <Label size={16} style={{ lineHeight: 22 }}>{message.text}</Label>
+    {/* One reading size for both voices, 16 on 24: a pale bubble for what you said, plain text for the reply. */}
+    {turns.map((turn, index) => <View key={turn[0].id} style={{ gap: 12 }}>{turn.map(message => message.role === 'user' ? <View key={message.id} accessibilityLabel="Your request" style={{ alignSelf: 'flex-end', maxWidth: '80%', backgroundColor: c.tint, borderRadius: 24, paddingHorizontal: 16, paddingVertical: 12 }}><Label size={16} style={{ lineHeight: 24, overflowWrap: 'anywhere' } as never}>{message.text}</Label></View> : <View key={message.id} style={{ gap: 12 }}>
+      <Label size={16} style={{ lineHeight: 24 }}>{message.text}</Label>
       {message.draft && (wallet.enabled ? <Card><Label weight="semibold">Saved demo draft</Label><Note>This fictional USDt draft cannot be submitted to the connected testnet wallet.</Note><Button secondary label="Open testnet Send" onPress={() => manual()} /></Card> : <DraftChatCard message={message} quote={quote?.origin?.chatId === id && quote.origin.messageId === message.id ? quote : null} now={now} editRequest={editRequest.id === message.id ? editRequest.sequence : 0} onReview={() => review(message)} onCancelReview={cancel} onConfirm={sendTransfer} onEdit={draft => updateChatDraft({ chatId: id, messageId: message.id }, draft)} />)}
       {message.tool && <InlineChatTool tool={message.tool} onRetry={retry} onManual={manual} onAsk={send} />}
     </View>)}
