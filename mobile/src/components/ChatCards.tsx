@@ -131,12 +131,18 @@ export function InlineChatTool({ tool, onRetry, onManual, onAsk }: { tool: ChatT
   return <ToolStateCard kind={tool.kind} onAction={tool.kind === 'timeout' ? onRetry : tool.kind === 'insufficient' || tool.kind === 'blocked' ? () => onManual() : () => router.push('/wallet')} />;
 }
 
-/** Wallet tools behind the composer's + button. */
-/** The composer's tools sheet. In a conversation it also holds the chat's own actions. */
+/**
+ * The composer's tools sheet, behind its + button: a list of places, one row each, with no
+ * title and no Close row — tapping outside or the system Back dismisses it. In a conversation
+ * it also holds the chat's own actions.
+ */
 export function WalletToolsModal({ visible, onClose, onManual, onNewChat, onHistory }: { visible: boolean; onClose: () => void; onManual: () => void; onNewChat?: () => void; onHistory?: () => void }) {
   const c = useColors();
-  return <Modal transparent visible={visible} animationType="fade" onRequestClose={onClose}><View style={{ flex: 1, backgroundColor: c.overlay, justifyContent: 'center', alignItems: 'center', padding: 24 }}><Pressable accessibilityRole="button" accessibilityLabel="Dismiss tools" onPress={onClose} style={StyleSheet.absoluteFill} /><Card style={{ width: '100%', maxWidth: 384 }}><Label size={18} weight="bold">Tools</Label>
-    {onNewChat && <Button secondary label="New chat" onPress={() => { onClose(); onNewChat(); }} />}
-    {onHistory && <Button secondary label="Chat history" onPress={() => { onClose(); onHistory(); }} />}
-    <Button secondary label="Manual send" onPress={() => { onClose(); onManual(); }} /><Button secondary label="Receive address" onPress={() => { onClose(); router.push('/receive'); }} /><Button secondary label="Close" onPress={onClose} /></Card></View></Modal>;
+  const go = (action: () => void) => () => { onClose(); action(); };
+  return <Modal transparent visible={visible} animationType="fade" onRequestClose={onClose}><View style={{ flex: 1, backgroundColor: c.overlay, justifyContent: 'center', alignItems: 'center', padding: 24 }}><Pressable accessibilityRole="button" accessibilityLabel="Dismiss tools" onPress={onClose} style={StyleSheet.absoluteFill} /><View accessibilityViewIsModal style={{ width: '100%', maxWidth: 384 }}><Group>
+    {onNewChat && <Row title="New chat" onPress={go(onNewChat)} />}
+    {onHistory && <Row title="Chat history" onPress={go(onHistory)} />}
+    <Row title="Manual send" onPress={go(onManual)} />
+    <Row title="Receive address" onPress={go(() => router.push('/receive'))} />
+  </Group></View></View></Modal>;
 }
