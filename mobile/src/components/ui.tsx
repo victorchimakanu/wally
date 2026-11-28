@@ -136,11 +136,12 @@ export function AppNavigation({ surface, floating = false }: { surface: 'wallet'
       <View style={s.modal}>
         <Pressable accessibilityRole="button" accessibilityLabel="Dismiss app menu" onPress={() => setOpen(false)} style={StyleSheet.absoluteFill} />
         <View accessibilityViewIsModal style={[s.drawer, { paddingTop: Math.max(insets.top, 24) + 32, paddingBottom: Math.max(insets.bottom, 20) }]}>
-          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 16 }}>
+          <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }} contentContainerStyle={{ gap: 16 }}>
             <View style={shared.between}><Lockup size={120} /><Pressable accessibilityRole="button" accessibilityLabel="Close app menu" onPress={() => setOpen(false)} style={s.iconButton}><WallyAsset name="9e528.svg" /></Pressable></View>
             <View>{DRAWER.map(([label, icon, path]) => <Pressable key={path} accessibilityRole="button" onPress={() => go(path)} style={s.drawerRow}><WallyAsset name={icon} size={24} /><Label size={16} weight="medium">{label}</Label></Pressable>)}</View>
-            <Pressable accessibilityRole="button" accessibilityLabel="View profile" onPress={() => go('/profile')} style={[s.drawerRow, { backgroundColor: c.tint, borderRadius: 22, padding: 16 }]}><Avatar size={44} /><Label weight="semibold">{preferences.name}</Label></Pressable>
           </ScrollView>
+          {/* The account sits at the foot of the drawer, as it does in the rail and the sidebar. */}
+          <Pressable accessibilityRole="button" accessibilityLabel="View profile" onPress={() => go('/profile')} style={[s.drawerRow, { backgroundColor: c.tint, borderRadius: 22, padding: 16, marginTop: 16 }]}><Avatar size={44} /><Label weight="semibold">{preferences.name}</Label></Pressable>
         </View>
       </View>
     </Modal>
