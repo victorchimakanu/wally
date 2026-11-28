@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { liveTransferSummary, nameFor, shortAddress } from '../src/services/transfer-summary.ts';
-import { whenLabel } from '../src/services/when.ts';
+import { clockLabel, dayGroups, whenLabel } from '../src/services/when.ts';
 
 const me = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 const victor = '0x1111111111111111111111111111111111111111';
@@ -45,4 +45,15 @@ test('whenLabel says Today and Yesterday by calendar day, and dates anything old
   const older = whenLabel(new Date(2026, 10, 26, 11, 24).getTime(), now);
   assert.doesNotMatch(older, /^(Today|Yesterday)/);
   assert.match(older, /26/);
+  assert.equal(clockLabel(new Date(2026, 10, 28, 9, 5).getTime()), new Date(2026, 10, 28, 9, 5).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+});
+
+test('dayGroups splits a newest-first list under Today, Yesterday and Earlier, keeping its order', () => {
+  const now = new Date(2026, 10, 28, 9, 0).getTime();
+  const at = (item: { t?: number }) => item.t;
+  const items = [{ t: now - 60e3 }, { t: new Date(2026, 10, 28, 0, 5).getTime() }, { t: new Date(2026, 10, 27, 23, 55).getTime() }, { t: new Date(2026, 10, 20).getTime() }, {}];
+  const groups = dayGroups(items, at, now);
+  assert.deepEqual(groups.map(group => [group.title, group.items.length]), [['Today', 2], ['Yesterday', 1], ['Earlier', 2]]);
+  assert.deepEqual(groups[0].items, items.slice(0, 2));
+  assert.deepEqual(dayGroups([], at, now), []);
 });

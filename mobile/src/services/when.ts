@@ -12,6 +12,31 @@ export function whenLabel(timestamp: number, now = Date.now()): string {
   return `${date.toLocaleDateString([], { day: 'numeric', month: 'short' })}, ${time}`;
 }
 
+/** Just the time, for a row that already sits under a Today or Yesterday heading. */
+export function clockLabel(timestamp: number): string {
+  return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+export type DayGroup<T> = { title: 'Today' | 'Yesterday' | 'Earlier'; items: T[] };
+
+/**
+ * A newest-first list split under Today, Yesterday and Earlier, as the activity boards group
+ * it. Consecutive items share a heading, so the list's own order is kept; an item with no time
+ * (a record older than the field) goes under Earlier.
+ */
+export function dayGroups<T>(items: readonly T[], at: (item: T) => number | undefined, now = Date.now()): DayGroup<T>[] {
+  const today = startOfDay(new Date(now));
+  const groups: DayGroup<T>[] = [];
+  for (const item of items) {
+    const time = at(item);
+    const days = time === undefined ? Infinity : Math.round((today - startOfDay(new Date(time))) / 86_400_000);
+    const title = days <= 0 ? 'Today' : days === 1 ? 'Yesterday' : 'Earlier';
+    const last = groups.at(-1);
+    if (last?.title === title) last.items.push(item); else groups.push({ title, items: [item] });
+  }
+  return groups;
+}
+
 function startOfDay(date: Date): number {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
 }

@@ -64,9 +64,9 @@ function renderBalances({ tokens = true }: { tokens?: boolean } = {}): Value {
     '../services/market-api': { formatPrice: () => '' },
     '../services/fiat-value': { fiatDisplayable: () => false, fiatTotal: () => null, fiatValue: () => null },
     '../demo/preferences': { usePreferences: () => ({ preferences: { recipients: [] } }) },
-    './WalletCard': { WalletCard: 'WalletCard' },
+    './WalletCard': { WalletCard: 'WalletCard' }, './TransferRow': { TransferRow: 'TransferRow' },
     '../services/transfer-summary': { liveTransferSummary: () => ({ headline: '', meta: '' }) },
-    '../services/when': { whenLabel: () => '' },
+    '../services/when': { whenLabel: () => '', clockLabel: () => '', dayGroups: () => [] },
     '../theme': { colors: {}, fonts: {}, radius: {}, useColors: () => ({}), useTheme: () => ({ palette: {}, dark: false }) },
   };
   const source = readFileSync(join(SRC, 'components/WalletData.tsx'), 'utf8');

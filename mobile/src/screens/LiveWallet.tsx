@@ -4,7 +4,8 @@ import * as Linking from 'expo-linking';
 import { Pressable, TextInput, View } from 'react-native';
 import { Address, Button, Card, Detail, Divider, Label, LinkButton, Note, Pill, Screen, useShared } from '../components/ui';
 import { tokenCaveat, tokensFor } from '../services/tokens';
-import { AssetChoice, LiveActivityCard, LiveReceiveCard, NetworkChoice, WalletStatus } from '../components/WalletData';
+import { AssetChoice, LiveActivityList, LiveReceiveCard, NetworkChoice, WalletStatus } from '../components/WalletData';
+import { SearchField } from '../components/SearchField';
 import { useWallet } from '../data/wallet';
 import { useDemo } from '../demo/store';
 import { CHAINS, amountForInput, fetchGasPrice, formatUnits, parseSendAmount, sendableMax, type Chain, type LiveTransaction } from '../services/wallet-api';
@@ -242,7 +243,11 @@ export function LiveHistoryScreen() {
   const c = useColors();
   const shared = useShared();
   const [search, setSearch] = useState(''), [filter, setFilter] = useState('All');
-  return <Screen title="Activity"><TextInput accessibilityLabel="Search activity" style={shared.input} placeholder="Search" placeholderTextColor={c.muted} value={search} onChangeText={setSearch} /><View style={shared.row}>{['All', 'Sent', 'Received'].map(value => <Pressable key={value} accessibilityRole="tab" accessibilityState={{ selected: filter === value }} onPress={() => setFilter(value)} style={{ flex: 1, alignItems: 'center', paddingVertical: 12, backgroundColor: filter === value ? c.tint : c.surface, borderRadius: 18 }}><Label>{value}</Label></Pressable>)}</View><LiveActivityCard search={search} filter={filter} /></Screen>;
+  return <Screen title="Activity">
+    <SearchField accessibilityLabel="Search activity" value={search} onChange={setSearch} />
+    <View style={shared.row}>{['All', 'Sent', 'Received'].map(value => <Pressable key={value} accessibilityRole="tab" accessibilityState={{ selected: filter === value }} onPress={() => setFilter(value)} style={{ flex: 1, alignItems: 'center', paddingVertical: 12, backgroundColor: filter === value ? c.tint : c.surface, borderRadius: 18 }}><Label>{value}</Label></Pressable>)}</View>
+    <LiveActivityList search={search} filter={filter} />
+  </Screen>;
 }
 /**
  * "It never arrived" — the deliberate way out of a transfer the chain cannot settle.

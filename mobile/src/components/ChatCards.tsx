@@ -14,7 +14,7 @@ import { DEMO_ADDRESS, FEE, draftStatus, money, units, type ChatTool, type Draft
 import { useDemo } from '../demo/store';
 import { usePreferences } from '../demo/preferences';
 import { useColors } from '../theme';
-import { LiveActivityCard, LiveReceiveCard, LiveWalletOverview } from './WalletData';
+import { LiveActivityList, LiveReceiveCard, LiveWalletOverview } from './WalletData';
 
 function Field({ label, value }: { label: string; value: string }) {
   const c = useColors();
@@ -118,7 +118,7 @@ export function InlineChatTool({ tool, onRetry, onManual, onAsk }: { tool: ChatT
   const { preferences } = usePreferences();
   if (tool.kind === 'live-balances') return <LiveWalletOverview inline />;
   if (tool.kind === 'live-receive') return <LiveReceiveCard />;
-  if (tool.kind === 'live-activity') return <LiveActivityCard compact />;
+  if (tool.kind === 'live-activity') return <LiveActivityList compact />;
   if (tool.kind === 'live-send') return <Card><Label size={18} weight="semibold">Send on testnet</Label><Button label="Open Send" onPress={() => router.push('/send')} /></Card>;
   if (tool.kind === 'balances') return <WalletOverview balance={tool.balance} snapshot transactionId={tool.transactionId} />;
   if (tool.kind === 'receive') return <ReceiveChatCard />;

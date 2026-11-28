@@ -1,19 +1,20 @@
-import { CustodyGuard } from '../components/WalletData';
-import React, { useEffect, useState } from 'react';
+import { CustodyGuard, LiveActivityList } from '../components/WalletData';
+import React, { useState } from 'react';
 import { Redirect, router } from 'expo-router';
-import { Pressable, TextInput, View } from 'react-native';
+import { Pressable, View } from 'react-native';
 import { WalletOverview } from '../components/WalletOverview';
 import { Watchlist } from '../components/MarketRows';
+import { SearchField } from '../components/SearchField';
 import { TransferRow } from '../components/TransferRow';
-import { Lockup, WallyAsset } from '../components/WallyAsset';
-import { Button, Card, Group, Label, Row, Screen, useShared } from '../components/ui';
+import { Lockup } from '../components/WallyAsset';
+import { Button, Group, Label, Row, Screen, useShared } from '../components/ui';
 import { useShell } from '../components/shell';
-import { money, units } from '../demo/model';
+import { money, units, type Transaction } from '../demo/model';
 import { usePreferences } from '../demo/preferences';
 import { useDemo } from '../demo/store';
-import { liveTransferSummary, nameFor, shortAddress } from '../services/transfer-summary';
-import { whenLabel } from '../services/when';
-import { fonts, makeStyles, useColors } from '../theme';
+import { nameFor, shortAddress } from '../services/transfer-summary';
+import { clockLabel, dayGroups, whenLabel } from '../services/when';
+import { makeStyles, useColors } from '../theme';
 import { useWallet } from '../data/wallet';
 import { LiveHistoryScreen } from './LiveWallet';
 
@@ -83,33 +84,21 @@ function ActionTile({ label, accent = false, disabled = false, onPress }: { labe
 
 const DEMO_STATUS = { pending: 'Pending', confirmed: 'Confirmed', failed: 'Failed' } as const;
 
+/** A demo transfer as a transfer row: the saved name when there is one, the state, the amount, and when. */
+function DemoTransferRow({ tx, when }: { tx: Transaction; when: string }) {
+  const { preferences } = usePreferences();
+  return <TransferRow title={`To ${nameFor(tx.recipient, preferences.recipients) ?? shortAddress(tx.recipient)}`} meta={`${DEMO_STATUS[tx.status]} · Arbitrum`} amount={`${tx.status === 'failed' ? '' : '−'}${money(units(tx.amount) ?? 0)} USDt`} when={when} failed={tx.status === 'failed'} onPress={() => router.push({ pathname: '/transaction', params: { id: tx.id } })} />;
+}
+
 /** The latest three transfers as a list, the full list one row further. */
 function RecentActivity() {
   const wallet = useWallet();
-  return wallet.enabled ? <LiveRecentActivity /> : <DemoRecentActivity />;
-}
-function DemoRecentActivity() {
   const { state } = useDemo();
-  const { preferences } = usePreferences();
+  if (wallet.enabled) return <LiveActivityList compact />;
   const latest = state.transactions.slice(0, 3);
   return <Group title="Recent activity">
-    {latest.map(tx => <TransferRow key={tx.id} title={`To ${nameFor(tx.recipient, preferences.recipients) ?? shortAddress(tx.recipient)}`} meta={`${DEMO_STATUS[tx.status]} · Arbitrum`} amount={`${tx.status === 'failed' ? '' : '−'}${money(units(tx.amount) ?? 0)} USDt`} when={whenLabel(tx.submittedAt)} failed={tx.status === 'failed'} onPress={() => router.push({ pathname: '/transaction', params: { id: tx.id } })} />)}
+    {latest.map(tx => <DemoTransferRow key={tx.id} tx={tx} when={whenLabel(tx.submittedAt)} />)}
     {!latest.length && <Row title="No transfers yet" />}
-    <Row title="View all" onPress={() => router.push('/history')} />
-  </Group>;
-}
-function LiveRecentActivity() {
-  const wallet = useWallet();
-  const { preferences } = usePreferences();
-  const { refreshHistory } = wallet;
-  useEffect(() => { void refreshHistory(); }, [refreshHistory]);
-  const owned = wallet.snapshot?.balances.map(item => item.address) ?? [];
-  const items = wallet.history?.items.slice(0, 3) ?? [];
-  // One line for the states with no rows; the card's tab already carries the error and Refresh.
-  const empty = items.length ? null : wallet.history ? 'No transfers yet' : wallet.historyLoading ? 'Loading…' : wallet.error || wallet.historyError ? 'Not connected' : 'Not loaded yet';
-  return <Group title="Recent activity">
-    {items.map(item => { const summary = liveTransferSummary(item, owned, preferences.recipients); return <TransferRow key={`${item.chain}:${item.hash}`} title={summary.title} meta={summary.meta} amount={summary.amount} when={item.submittedAt ? whenLabel(item.submittedAt) : undefined} failed={summary.failed} onPress={() => router.push({ pathname: '/transaction', params: { chain: item.chain, hash: item.hash } })} />; })}
-    {!!empty && <Row title={empty} />}
     <Row title="View all" onPress={() => router.push('/history')} />
   </Group>;
 }
@@ -127,21 +116,23 @@ export function HistoryScreen() {
   if (wallet.blocked) return <Screen title="Activity"><CustodyGuard /></Screen>;
   return wallet.enabled ? <LiveHistoryScreen /> : <DemoHistoryScreen />;
 }
-/** Demo transfers are all outgoing, so there is nothing to filter: search and the list. */
+/**
+ * Demo transfers are all outgoing, so there is nothing to filter: search, then the rows under
+ * Today, Yesterday and Earlier. An empty history is one plain row, not a card with a button:
+ * Send is on the Wallet, one tap away.
+ */
 function DemoHistoryScreen() {
-  const c = useColors();
-  const s = useStyles();
-  const shared = useShared();
   const { state } = useDemo();
+  const { preferences } = usePreferences();
   const [search, setSearch] = useState('');
-  const transactions = state.transactions.filter(tx => `${tx.recipient} ${tx.amount} ${tx.status}`.toLowerCase().includes(search.toLowerCase()));
-  if (!state.transactions.length) return <Screen title="Activity"><Card><Label size={18} weight="semibold">No transfers yet</Label><Button label="Send" onPress={() => router.push('/send')} /></Card></Screen>;
+  const term = search.toLowerCase();
+  const transactions = state.transactions.filter(tx => `${tx.recipient} ${nameFor(tx.recipient, preferences.recipients) ?? ''} ${tx.amount} ${DEMO_STATUS[tx.status]}`.toLowerCase().includes(term));
   return <Screen title="Activity">
-    <View style={[shared.row, shared.input]}><WallyAsset name="ddc2c.svg" /><TextInput accessibilityLabel="Search activity" placeholder="Search" placeholderTextColor={c.muted} value={search} onChangeText={setSearch} style={{ flex: 1, fontFamily: fonts.regular, fontSize: 16, color: c.ink }} /></View>
-    <Group>{transactions.map(tx => <Pressable key={tx.id} accessibilityRole="button" accessibilityLabel={`${tx.status === 'confirmed' ? 'Sent' : tx.status === 'pending' ? 'Sending' : 'Failed'} ${tx.amount} USDt to ${tx.recipient}`} onPress={() => router.push({ pathname: '/transaction', params: { id: tx.id } })} style={({ pressed }) => [s.activity, pressed && { backgroundColor: c.toggle }]}>
-      <View style={shared.flex}><Label numberOfLines={1}>To {tx.recipient.slice(0, 6)}…{tx.recipient.slice(-4)}</Label>{tx.status !== 'confirmed' && <Label size={13} color={tx.status === 'failed' ? c.error : c.muted}>{tx.status === 'pending' ? 'Pending' : 'Failed'}</Label>}</View>
-      <View style={{ alignItems: 'flex-end' }}><Label>−{tx.amount} USDt</Label><Label size={13} color={c.muted}>{new Date(tx.submittedAt).toLocaleDateString()}</Label></View>
-    </Pressable>)}</Group>
+    {state.transactions.length > 0 && <SearchField accessibilityLabel="Search activity" value={search} onChange={setSearch} />}
+    {dayGroups(transactions, tx => tx.submittedAt).map(group => <Group key={group.title} title={group.title}>
+      {group.items.map(tx => <DemoTransferRow key={tx.id} tx={tx} when={group.title === 'Earlier' ? whenLabel(tx.submittedAt) : clockLabel(tx.submittedAt)} />)}
+    </Group>)}
+    {!transactions.length && <Group><Row title={state.transactions.length ? 'No matches' : 'No transfers yet'} /></Group>}
   </Screen>;
 }
 
@@ -149,5 +140,4 @@ const useStyles = makeStyles(c => ({
   illustration: { width: 300, maxWidth: '100%', height: 244, borderRadius: 40, backgroundColor: c.tint, alignSelf: 'center', marginTop: 26, marginBottom: 12 },
   illustratedWallet: { position: 'absolute', top: 39, left: 32, width: 228, height: 146, borderRadius: 24, backgroundColor: c.brand, paddingHorizontal: 20, paddingTop: 15 },
   bubble: { position: 'absolute', right: 15, bottom: 32, width: 202, minHeight: 70, borderRadius: 22, backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center' },
-  activity: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 64, paddingHorizontal: 16, paddingVertical: 10 },
 }));

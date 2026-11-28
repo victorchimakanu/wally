@@ -4,8 +4,9 @@ import { router } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
 import { createClipboardSafety, copyNotice } from '../services/clipboard-safety.ts';
 import { Pressable, Share, View } from 'react-native';
-import { Button, Card, Group, Label, LinkButton, Note, Pill, QrTile, ReceiveAddress, useShared } from './ui';
+import { Button, Card, Group, Label, LinkButton, Note, Pill, QrTile, ReceiveAddress, Row, useShared } from './ui';
 import { WalletCard, type WalletTab } from './WalletCard';
+import { TransferRow } from './TransferRow';
 import { useWallet } from '../data/wallet';
 import { usePreferences } from '../demo/preferences';
 import { custodyNotice } from '../services/custody';
@@ -16,6 +17,7 @@ import { tokenCaveat, tokensFor } from '../services/tokens.ts';
 import { fiatDisplayable, fiatTotal } from '../services/fiat-value';
 import { formatPrice } from '../services/market-api';
 import { liveTransferSummary } from '../services/transfer-summary';
+import { clockLabel, dayGroups, whenLabel } from '../services/when';
 import { useMarket } from '../data/market';
 import { useColors } from '../theme';
 
@@ -173,17 +175,46 @@ export function LiveReceiveCard() {
     <Note error={advice.chainSpecific}>{advice.text}</Note>{!!notice && <Note error>{notice}</Note>}
   </Card>;
 }
-export function LiveActivityCard({ compact = false, search = '', filter = 'All' }: { compact?: boolean; search?: string; filter?: string }) {
-  const c = useColors();
+/**
+ * The live wallet's transfers as transfer rows, grouped under Today, Yesterday and Earlier.
+ * `compact` is the three latest in one group with a View all row, for the Wallet and for a
+ * chat answer; the Activity screen passes its search and filter and gets the whole list with
+ * Load older. States with no rows are one plain row; errors are said once, under the list.
+ */
+export function LiveActivityList({ compact = false, search = '', filter = 'All' }: { compact?: boolean; search?: string; filter?: string }) {
   const shared = useShared();
   const wallet = useWallet();
+  const { preferences } = usePreferences();
   const { refreshHistory } = wallet;
   useEffect(() => { void refreshHistory(); }, [refreshHistory]);
-  const addresses = wallet.snapshot?.balances.map(item => item.address.toLowerCase()) ?? [];
-  const matches = wallet.history?.items.filter(item => {
-    const sent = !!item.from && addresses.includes(item.from.toLowerCase());
-    const received = !!item.recipient && addresses.includes(item.recipient.toLowerCase());
-    return (filter === 'All' || filter === 'Sent' && sent || filter === 'Received' && received) && `${item.hash} ${item.recipient} ${item.from} ${item.amount} ${item.symbol ?? 'ETH'} ${item.status} ${CHAINS[item.chain].name}`.toLowerCase().includes(search.toLowerCase());
-  }) ?? [];
-  return <Card>{compact && <Label size={18} weight="semibold">Activity</Label>}{wallet.historyLoading && <Note>Loading…</Note>}{!!wallet.historyError && <Note error>{wallet.historyError}</Note>}{wallet.history?.errors.map(error => <Note key={error} error>{error}</Note>)}{(compact ? matches.slice(0, 3) : matches).map(item => { const sent = !!item.from && addresses.includes(item.from.toLowerCase()); const address = sent ? item.recipient : item.from; return <Pressable key={`${item.chain}:${item.hash}`} accessibilityRole="button" onPress={() => router.push({ pathname: '/transaction', params: { chain: item.chain, hash: item.hash } })} style={{ gap: 4, paddingVertical: 12, borderBottomWidth: 1, borderColor: c.line }}><View style={shared.between}><Label>{sent ? 'Sent' : 'Received'} {item.amount ?? '—'} {item.symbol ?? 'ETH'}</Label><Label size={12} color={item.status === 'failed' || item.status === 'superseded' ? c.error : c.muted}>{item.status === 'superseded' ? 'never arrived' : item.status}</Label></View><Note>{CHAINS[item.chain].name} · {address ? `${address.slice(0, 8)}…${address.slice(-6)}` : item.hash.slice(0, 12)}</Note></Pressable>; })}{!matches.length && !wallet.historyLoading && <Note>{wallet.history ? 'No transactions' : 'Not loaded yet'}</Note>}{wallet.history && <Note>{wallet.offline || wallet.historyError ? 'Saved' : 'Updated'} {new Date(wallet.history.fetchedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Note>}{wallet.history && historyGap(wallet.history.source) && <Note>{historyGap(wallet.history.source)}</Note>}{!compact && wallet.historyHasMore && <>{(!!search || filter !== 'All') && <Note>Search and filters cover the {wallet.history?.items.length ?? 0} transactions loaded so far, not your whole history.</Note>}<LinkButton label={wallet.historyLoadingMore ? 'Loading…' : 'Load older'} accessibilityLabel="Load older activity" disabled={wallet.historyLoadingMore || wallet.historyLoading || wallet.offline} onPress={() => { void wallet.loadMoreHistory(); }} /></>}<LinkButton label="Refresh" accessibilityLabel="Refresh activity" disabled={wallet.historyLoading || wallet.offline} onPress={() => { void wallet.refreshHistory(); }} />{compact && <Button secondary label="View all" onPress={() => router.push('/history')} />}</Card>;
+  const owned = wallet.snapshot?.balances.map(item => item.address) ?? [];
+  const entries = (wallet.history?.items ?? []).map(item => ({ item, summary: liveTransferSummary(item, owned, preferences.recipients) }));
+  const term = search.toLowerCase();
+  const matches = entries.filter(({ item, summary }) => (filter === 'All' || (filter === 'Sent') === summary.sent)
+    && `${item.hash} ${item.recipient ?? ''} ${item.from ?? ''} ${summary.title} ${item.amount ?? ''} ${item.symbol ?? 'ETH'} ${summary.meta}`.toLowerCase().includes(term));
+  const shown = compact ? matches.slice(0, 3) : matches;
+  const row = ({ item, summary }: (typeof entries)[number], when?: string) => <TransferRow key={`${item.chain}:${item.hash}`} title={summary.title} meta={summary.meta} amount={summary.amount} when={when} failed={summary.failed} onPress={() => router.push({ pathname: '/transaction', params: { chain: item.chain, hash: item.hash } })} />;
+  const status = !wallet.history ? (wallet.historyLoading ? 'Loading…' : wallet.error || wallet.historyError ? 'Not connected' : 'Not loaded yet')
+    : matches.length ? null : search || filter !== 'All' ? 'No matches' : 'No transfers yet';
+  const time = wallet.history ? new Date(wallet.history.fetchedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+  const stamp = [wallet.history && `${wallet.offline || wallet.historyError ? 'Saved' : 'Updated'} ${time}`, wallet.history && historyGap(wallet.history.source)].filter(Boolean).join(' · ');
+  const refresh = <LinkButton label="Refresh" accessibilityLabel="Refresh activity" disabled={wallet.historyLoading || wallet.offline} onPress={() => { void wallet.refreshHistory(); }} />;
+  if (compact) return <Group title="Recent activity">
+    {shown.map(entry => row(entry, entry.item.submittedAt ? whenLabel(entry.item.submittedAt) : undefined))}
+    {!!status && <Row title={status} />}
+    <Row title="View all" onPress={() => router.push('/history')} />
+  </Group>;
+  return <>
+    {dayGroups(shown, entry => entry.item.submittedAt).map(group => <Group key={group.title} title={group.title}>
+      {group.items.map(entry => row(entry, entry.item.submittedAt === undefined ? undefined : group.title === 'Earlier' ? whenLabel(entry.item.submittedAt) : clockLabel(entry.item.submittedAt)))}
+    </Group>)}
+    {!!status && <Group><Row title={status} /></Group>}
+    {!!wallet.historyError && <Note error>{wallet.historyError}</Note>}
+    {wallet.history?.errors.map(error => <Note key={error} error>{error}</Note>)}
+    <View style={shared.between}><Note>{stamp}</Note>{refresh}</View>
+    {wallet.historyHasMore && <>
+      {(!!search || filter !== 'All') && <Note>Search and filters cover the {wallet.history?.items.length ?? 0} transactions loaded so far, not your whole history.</Note>}
+      <LinkButton label={wallet.historyLoadingMore ? 'Loading…' : 'Load older'} accessibilityLabel="Load older activity" disabled={wallet.historyLoadingMore || wallet.historyLoading || wallet.offline} onPress={() => { void wallet.loadMoreHistory(); }} />
+    </>}
+  </>;
 }
