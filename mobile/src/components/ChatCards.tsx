@@ -116,7 +116,7 @@ export function InlineChatTool({ tool, onRetry, onManual, onAsk }: { tool: ChatT
   const { state } = useDemo();
   const { data: market } = useMarket();
   const { preferences } = usePreferences();
-  if (tool.kind === 'live-balances') return <LiveWalletOverview onActivity={() => onAsk('Show my transaction history')} />;
+  if (tool.kind === 'live-balances') return <LiveWalletOverview inline />;
   if (tool.kind === 'live-receive') return <LiveReceiveCard />;
   if (tool.kind === 'live-activity') return <LiveActivityCard compact />;
   if (tool.kind === 'live-send') return <Card><Label size={18} weight="semibold">Send on testnet</Label><Button label="Open Send" onPress={() => router.push('/send')} /></Card>;

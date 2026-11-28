@@ -9,34 +9,37 @@ import ts from 'typescript';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
  type Value = any;
 const require = createRequire(import.meta.url);
-function fixture(width: number) {
+const VICTOR = '0x1111111111111111111111111111111111111111';
+function fixture(width: number, transactions: Value[] = []) {
   const hooks: Value[] = [];
   let cursor = 0;
   const stack = ['/wallet'];
-  const calls: string[] = [];
   const router = {
-    navigate: (route: string) => { calls.push(route); if (stack.at(-1) !== route) stack.push(route); },
+    navigate: (route: string) => { if (stack.at(-1) !== route) stack.push(route); },
     push: (route: string) => stack.push(route),
     canGoBack: () => stack.length > 1,
     back: () => { stack.pop(); },
     replace: (route: string) => { stack[stack.length - 1] = route; },
   };
-  const state = { balance: 2090000000, offline: false, transactions: [] };
+  const state = { balance: 2090000000, offline: false, transactions };
   const mocks: Record<string, Value> = {
     react: { useState: (initial: Value) => { const index = cursor++; if (!(index in hooks)) hooks[index] = initial; return [hooks[index], (next: Value) => { hooks[index] = typeof next === 'function' ? next(hooks[index]) : next; }]; } },
     'react-native': { Pressable: 'Pressable', View: 'View', useWindowDimensions: () => ({ width }), StyleSheet: { create: (value: Value) => value } },
     'expo-router': { router }, 'expo-image': { Image: 'Image' },
     './WallyAsset': { WallyAsset: 'WallyAsset', Avatar: 'Avatar', Lockup: 'Lockup' },
-    './ui': { Label: 'Label', Button: 'Button', Card: 'Card', Detail: 'Detail', useShared: () => ({}) },
+    './ui': { Label: 'Label', Button: 'Button', Card: 'Card', Detail: 'Detail', LinkButton: 'LinkButton', useShared: () => ({}) },
     '../demo/store': { useDemo: () => ({ state }) },
     '../data/wallet': { useWallet: () => ({ enabled: false }) },
-    '../demo/preferences': {}, 'react-native-safe-area-context': {},
+    '../demo/preferences': { usePreferences: () => ({ preferences: { recipients: [{ name: 'Victor', address: VICTOR }] } }) },
+    'react-native-safe-area-context': {},
     './shell': { useShell: () => ({ wide: false, topLevel: false }) },
     '../data/market': { useMarket: () => ({ data: { assets: [{ symbol: 'USDT', price: 1, currency: 'USD' }] }, currency: 'USD' }) },
     '../services/fiat-value': { fiatValue: (amount: string, symbol: string, assets: Value[], currency: string) => ({ amount: Number(amount) * assets[0].price, currency }) },
     '../services/market-api': { formatPrice: (amount: number, currency: string) => `${currency} ${amount}` },
+    '../services/transfer-summary': { nameFor: (address: string, recipients: Value[]) => recipients.find(entry => entry.address === address)?.name ?? null },
+    '../services/when': { whenLabel: () => 'Today, 10:42' },
     'react-native-reanimated': { __esModule: true, default: { View: 'Animated.View' }, FadeIn: { duration: () => ({}) } },
-    '../demo/model': { money: (amount: number) => String(amount) },
+    '../demo/model': { money: (amount: number) => (amount / 1_000_000).toFixed(2), units: (amount: string) => Number(amount) * 1_000_000 },
     '../theme': { useColors: () => ({}), useTheme: () => ({ palette: {}, dark: false }), makeStyles: (factory: (c: Value) => Value) => () => factory({}), fonts: {}, radius: {} },
     './WalletData': { LiveWalletOverview: 'LiveWalletOverview' },
   };
@@ -47,9 +50,17 @@ function fixture(width: number) {
     runInNewContext(code, { module, exports: module.exports, require: (name: string) => name in mocks ? mocks[name] : name === 'react/jsx-runtime' ? require(name) : (/\.(svg|png)$/.test(name)) ? {} : (() => { throw new Error(`Unexpected dependency: ${name}`); })() });
     return module.exports;
   }
+  // The real card, so the tests see what the overview actually puts on screen.
+  mocks['./WalletCard'] = load('../src/components/WalletCard.tsx');
   const component = load('../src/components/WalletOverview.tsx');
-  function render(): Value { cursor = 0; const element = component.WalletOverview(); return element.type(element.props); }
-  return { render, hooks, stack, calls, load };
+  function render(props: Value = {}): Value {
+    cursor = 0;
+    let element = component.WalletOverview(props);
+    // Function components stand in for their output until a host element is reached.
+    while (typeof element?.type === 'function') element = element.type(element.props);
+    return element;
+  }
+  return { render, hooks, stack, load };
 }
 function find(tree: Value, label: string): Value {
   if (!tree || typeof tree !== 'object') return undefined;
@@ -58,46 +69,45 @@ function find(tree: Value, label: string): Value {
   for (const child of Array.isArray(children) ? children.flat(Infinity) : [children]) { const found = find(child, label); if (found) return found; }
 }
 
-test('767px notifications navigate repeatedly without inline expansion or duplicate mocked routes, then shared Back returns to wallet', () => {
-  const f = fixture(767);
-  const notification = find(f.render(), 'View notifications');
-  assert.ok(notification);
-  assert.equal(notification.props.accessibilityState, undefined);
-  notification.props.onPress(); notification.props.onPress();
-  assert.deepEqual(f.calls, ['/notifications', '/notifications']);
-  assert.deepEqual(f.stack, ['/wallet', '/notifications']);
-  assert.equal(f.hooks[2], false);
-  const header = f.load('../src/components/ui.tsx').Header({ title: 'Notifications' });
-  find(header, 'Go back').props.onPress();
-  assert.deepEqual(f.stack, ['/wallet']);
-});
-
-for (const width of [768, 1280]) test(`${width}px notifications expand and collapse inline without routing`, () => {
+for (const width of [375, 767, 1280]) test(`${width}px: the card's tab opens Activity, at every width and never inline`, () => {
   const f = fixture(width);
-  let activity = find(f.render(), 'Toggle recent activity');
-  assert.equal(activity.props.accessibilityState.expanded, false);
-  activity.props.onPress();
-  activity = find(f.render(), 'Toggle recent activity');
-  assert.equal(activity.props.accessibilityState.expanded, true);
-  activity.props.onPress();
-  assert.equal(find(f.render(), 'Toggle recent activity').props.accessibilityState.expanded, false);
-  assert.deepEqual(f.calls, []);
+  const tab = find(f.render(), 'No activity yet');
+  assert.ok(tab, 'the tab says there is nothing yet');
+  assert.equal(tab.props.accessibilityState, undefined);
+  tab.props.onPress();
+  assert.deepEqual(f.stack, ['/wallet', '/history']);
 });
 
-for (const width of [767, 768, 1280]) test(`${width}px wallet expansion stays independent of notification taps`, () => {
+for (const width of [375, 767, 1280]) test(`${width}px: expanding the balances stays independent of the tab`, () => {
   const f = fixture(width);
   find(f.render(), 'Expand wallet balances').props.onPress();
   assert.equal(find(f.render(), 'Collapse wallet balances').props.accessibilityState.expanded, true);
-  find(f.render(), width < 768 ? 'View notifications' : 'Toggle recent activity').props.onPress();
+  find(f.render(), 'No activity yet').props.onPress();
   assert.equal(find(f.render(), 'Collapse wallet balances').props.accessibilityState.expanded, true);
   find(f.render(), 'Collapse wallet balances').props.onPress();
   assert.equal(find(f.render(), 'Expand wallet balances').props.accessibilityState.expanded, false);
 });
 
-test('shared Back handles a directly opened notification route with no prior screen', () => {
+test('the tab names the latest transfer, with the saved recipient and its state', () => {
+  const f = fixture(375, [{ id: 'tx-1', recipient: VICTOR, amount: '25', status: 'pending', submittedAt: 0 }]);
+  const tab = find(f.render(), 'Sending 25.00 USDt to Victor. Pending · Arbitrum');
+  assert.ok(tab, 'the tab reads as a sentence about the transfer');
+  tab.props.onPress();
+  assert.deepEqual(f.stack, ['/wallet', '/history']);
+});
+
+test('the chat answer is the bare card: no avatar, no tab, the same figures', () => {
+  const f = fixture(375);
+  const tree = f.render({ snapshot: true, balance: 2090000000 });
+  assert.equal(find(tree, 'View profile'), undefined);
+  assert.equal(find(tree, 'No activity yet'), undefined);
+  assert.ok(find(tree, 'About USD 2090'));
+});
+
+test('shared Back handles a directly opened Activity route with no prior screen', () => {
   const f = fixture(767);
-  f.stack[0] = '/notifications';
-  find(f.load('../src/components/ui.tsx').Header({ title: 'Notifications' }), 'Go back').props.onPress();
+  f.stack[0] = '/history';
+  find(f.load('../src/components/ui.tsx').Header({ title: 'Activity' }), 'Go back').props.onPress();
   assert.deepEqual(f.stack, ['/wallet']);
 });
 

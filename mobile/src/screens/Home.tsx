@@ -1,13 +1,18 @@
-import { CustodyGuard, LiveActivityCard } from '../components/WalletData';
-import React, { useState } from 'react';
+import { CustodyGuard } from '../components/WalletData';
+import React, { useEffect, useState } from 'react';
 import { Redirect, router } from 'expo-router';
 import { Pressable, TextInput, View } from 'react-native';
 import { WalletOverview } from '../components/WalletOverview';
 import { Watchlist } from '../components/MarketRows';
+import { TransferRow } from '../components/TransferRow';
 import { Lockup, WallyAsset } from '../components/WallyAsset';
-import { Button, Card, Group, Label, LinkButton, Row, Screen, useShared } from '../components/ui';
+import { Button, Card, Group, Label, Row, Screen, useShared } from '../components/ui';
 import { useShell } from '../components/shell';
+import { money, units } from '../demo/model';
+import { usePreferences } from '../demo/preferences';
 import { useDemo } from '../demo/store';
+import { liveTransferSummary, nameFor, shortAddress } from '../services/transfer-summary';
+import { whenLabel } from '../services/when';
 import { fonts, makeStyles, useColors } from '../theme';
 import { useWallet } from '../data/wallet';
 import { LiveHistoryScreen } from './LiveWallet';
@@ -28,68 +33,85 @@ export function WelcomeScreen() {
   </Screen>;
 }
 
+/**
+ * The balance leads at every width: the card with its tab, the two actions as tiles under it,
+ * and the custody line as a footnote. Wider windows put recent activity beside that column;
+ * desktop stacks the watchlist under the activity, as the desktop board does, and tablets run
+ * it full width below. The same order everywhere: card, actions, activity, watchlist.
+ */
 export function WalletScreen() {
   const shared = useShared();
   const { wide, tablet } = useShell();
+  const wallet = useWallet();
   const { setDraft } = useDemo();
   const send = () => { setDraft({ recipient: '', amount: '' }); router.push('/send'); };
   const receive = () => router.push('/receive');
-  // The guard sits above the overview, not below it. In a refused split this screen falls back
-  // to the demo wallet, which is safe but silent — the real balances simply vanish with no
-  // explanation. The card says which wallet is missing and why.
-  const overview = <><CustodyGuard /><WalletOverview /></>;
-  // Two actions, not a grid of shortcuts: Market and Chat already have their own places.
-  // Wider windows follow the designs: the overview keeps its phone width in a left column. On
-  // desktop the watchlist fills the rest; an upright tablet stacks the actions beside the card.
+  // A refused split is the one notice that goes above the card: this screen then falls back to
+  // the demo wallet, and the real balances would otherwise vanish without a word.
+  // Sending needs the wallet server; while it is unreachable the Send tile goes grey, as the
+  // quick tools' Offline variant does, and Receive stays available.
+  const disconnected = wallet.enabled && (!wallet.snapshot || wallet.offline);
+  const hero = <View style={{ gap: 24 }}>
+    {!!wallet.blocked && <CustodyGuard />}
+    <WalletOverview />
+    <View style={shared.row}><ActionTile label="Send" disabled={disconnected} onPress={send} /><ActionTile label="Receive" accent onPress={receive} /></View>
+    {!wallet.blocked && <CustodyGuard />}
+  </View>;
   if (wide) return <Screen tab="wallet" wideContent contentStyle={{ gap: 24 }}>
     <View style={{ flexDirection: 'row', gap: 24, alignItems: 'flex-start' }}>
-      <View style={{ width: 384, gap: 24 }}>{overview}<View style={shared.row}><Button label="Send" style={shared.flex} onPress={send} /><Button accent label="Receive" style={shared.flex} onPress={receive} /></View></View>
-      <View style={{ flex: 1, minWidth: 0 }}><Watchlist /></View>
+      <View style={{ width: 384 }}>{hero}</View>
+      <View style={{ flex: 1, minWidth: 0, gap: 24 }}><RecentActivity /><Watchlist /></View>
     </View>
   </Screen>;
-  // A tablet follows the Tablet · Home board: the card keeps its column, the actions sit beside
-  // it as two tiles with recent activity under them, and the watchlist runs the full width.
   if (tablet) return <Screen tab="wallet" contentStyle={{ gap: 24 }}>
     <View style={{ flexDirection: 'row', gap: 24, alignItems: 'flex-start' }}>
-      <View style={{ width: 384, gap: 24 }}>{overview}</View>
-      <View style={{ flex: 1, minWidth: 0, gap: 24 }}>
-        <View style={shared.row}><ActionTile label="Send" onPress={send} /><ActionTile label="Receive" accent onPress={receive} /></View>
-        <RecentActivity />
-      </View>
+      <View style={{ width: 384 }}>{hero}</View>
+      <View style={{ flex: 1, minWidth: 0 }}><RecentActivity /></View>
     </View>
     <Watchlist />
   </Screen>;
-  return <Screen tab="wallet" contentStyle={{ gap: 24 }}>
-    {overview}
-    <View style={shared.row}>
-      <Button label="Send" style={shared.flex} onPress={send} />
-      <Button accent label="Receive" style={shared.flex} onPress={receive} />
-    </View>
-    <Watchlist />
-  </Screen>;
+  return <Screen tab="wallet" contentStyle={{ gap: 24 }}>{hero}<Watchlist /></Screen>;
 }
 
-/** The wallet's two actions as tiles, the primary in ink and the accent in yellow like the buttons. */
-function ActionTile({ label, accent = false, onPress }: { label: string; accent?: boolean; onPress: () => void }) {
+/** The two quick actions from the Home boards: Send in ink, Receive in yellow, 104 tall; a disabled tile goes grey. */
+function ActionTile({ label, accent = false, disabled = false, onPress }: { label: string; accent?: boolean; disabled?: boolean; onPress: () => void }) {
   const c = useColors();
-  return <Pressable accessibilityRole="button" accessibilityLabel={label} onPress={onPress} style={({ pressed }) => [{ flex: 1, minHeight: 112, borderRadius: 24, padding: 20, justifyContent: 'flex-end', backgroundColor: accent ? c.yellow : c.brand }, pressed && { opacity: 0.85 }]}>
-    <Label size={18} weight="semibold" color={accent ? c.onAccent : c.onBrand}>{label}</Label>
+  return <Pressable accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ disabled }} disabled={disabled} onPress={onPress} style={({ pressed }) => [{ flex: 1, minHeight: 104, borderRadius: 24, padding: 20, justifyContent: 'flex-end', backgroundColor: disabled ? c.toggle : accent ? c.yellow : c.brand }, pressed && { opacity: 0.85 }]}>
+    <Label size={18} weight="semibold" color={disabled ? c.muted : accent ? c.onAccent : c.onBrand}>{label}</Label>
   </Pressable>;
 }
 
-/** The latest three transfers, with the full list one tap away. Live wallets reuse the activity card. */
+const DEMO_STATUS = { pending: 'Pending', confirmed: 'Confirmed', failed: 'Failed' } as const;
+
+/** The latest three transfers as a list, the full list one row further. */
 function RecentActivity() {
-  const c = useColors();
-  const shared = useShared();
   const wallet = useWallet();
+  return wallet.enabled ? <LiveRecentActivity /> : <DemoRecentActivity />;
+}
+function DemoRecentActivity() {
   const { state } = useDemo();
-  if (wallet.enabled) return <LiveActivityCard compact />;
+  const { preferences } = usePreferences();
   const latest = state.transactions.slice(0, 3);
-  const short = (address: string) => `${address.slice(0, 6)}…${address.slice(-4)}`;
-  return <Card>
-    <View style={shared.between}><Label size={18} weight="semibold">Recent activity</Label><LinkButton label="View all" onPress={() => router.push('/history')} /></View>
-    {latest.length === 0 ? <Label size={14} color={c.muted}>No transfers yet.</Label> : <Group>{latest.map(item => <Row key={item.id} title={`To ${short(item.recipient)}`} value={`${item.status === 'failed' ? '' : '−'}${item.amount} USDt`} onPress={() => router.push('/history')} />)}</Group>}
-  </Card>;
+  return <Group title="Recent activity">
+    {latest.map(tx => <TransferRow key={tx.id} title={`To ${nameFor(tx.recipient, preferences.recipients) ?? shortAddress(tx.recipient)}`} meta={`${DEMO_STATUS[tx.status]} · Arbitrum`} amount={`${tx.status === 'failed' ? '' : '−'}${money(units(tx.amount) ?? 0)} USDt`} when={whenLabel(tx.submittedAt)} failed={tx.status === 'failed'} onPress={() => router.push({ pathname: '/transaction', params: { id: tx.id } })} />)}
+    {!latest.length && <Row title="No transfers yet" />}
+    <Row title="View all" onPress={() => router.push('/history')} />
+  </Group>;
+}
+function LiveRecentActivity() {
+  const wallet = useWallet();
+  const { preferences } = usePreferences();
+  const { refreshHistory } = wallet;
+  useEffect(() => { void refreshHistory(); }, [refreshHistory]);
+  const owned = wallet.snapshot?.balances.map(item => item.address) ?? [];
+  const items = wallet.history?.items.slice(0, 3) ?? [];
+  // One line for the states with no rows; the card's tab already carries the error and Refresh.
+  const empty = items.length ? null : wallet.history ? 'No transfers yet' : wallet.historyLoading ? 'Loading…' : wallet.error || wallet.historyError ? 'Not connected' : 'Not loaded yet';
+  return <Group title="Recent activity">
+    {items.map(item => { const summary = liveTransferSummary(item, owned, preferences.recipients); return <TransferRow key={`${item.chain}:${item.hash}`} title={summary.title} meta={summary.meta} amount={summary.amount} when={item.submittedAt ? whenLabel(item.submittedAt) : undefined} failed={summary.failed} onPress={() => router.push({ pathname: '/transaction', params: { chain: item.chain, hash: item.hash } })} />; })}
+    {!!empty && <Row title={empty} />}
+    <Row title="View all" onPress={() => router.push('/history')} />
+  </Group>;
 }
 
 export function ChatsScreen() {

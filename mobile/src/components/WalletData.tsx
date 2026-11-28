@@ -5,7 +5,9 @@ import * as Clipboard from 'expo-clipboard';
 import { createClipboardSafety, copyNotice } from '../services/clipboard-safety.ts';
 import { Pressable, Share, View } from 'react-native';
 import { Button, Card, Group, Label, LinkButton, Note, Pill, QrTile, ReceiveAddress, useShared } from './ui';
+import { WalletCard, type WalletTab } from './WalletCard';
 import { useWallet } from '../data/wallet';
+import { usePreferences } from '../demo/preferences';
 import { custodyNotice } from '../services/custody';
 import { receiveAdvice } from '../services/receive-advice';
 import { historyGap } from '../services/history-source';
@@ -13,6 +15,7 @@ import { CHAINS, formatEth, type Chain } from '../services/wallet-api';
 import { tokenCaveat, tokensFor } from '../services/tokens.ts';
 import { fiatDisplayable, fiatTotal } from '../services/fiat-value';
 import { formatPrice } from '../services/market-api';
+import { liveTransferSummary } from '../services/transfer-summary';
 import { useMarket } from '../data/market';
 import { useColors } from '../theme';
 
@@ -58,9 +61,11 @@ export function CustodyGuard() {
     <Note>Remove the wallet from this phone in Settings, or unset EXPO_PUBLIC_WALLY_API_URL and rebuild. Funds on both are untouched.</Note>
   </Card>;
 
+  // Not a card: one quiet line in the warning colour under the wallet, so the balance stays
+  // the thing you look at and the caveat is still said on every screen that shows money.
   const notice = wallet.custody ? custodyNotice(wallet.custody) : null;
   if (!notice) return null;
-  return <Card style={{ backgroundColor: c.warningTint, borderColor: c.warningTint }}><Label>{notice}</Label></Card>;
+  return <Label size={13} color={c.warning} style={{ paddingHorizontal: 4 }}>{notice}</Label>;
 }
 
 export function WalletStatus() {
@@ -84,13 +89,17 @@ function caveatFor(chain: Chain, symbol: string): string | null {
   return token ? tokenCaveat(token) : null;
 }
 
-/** Figma home/wallet-overview + wallet/network-balances: one total, then each network's balance. */
-/** `onActivity` adds an Activity button, for chat; on the Wallet screen Activity is its own tab. */
-export function LiveWalletOverview({ onActivity }: { onActivity?: () => void } = {}) {
-  const c = useColors();
+/**
+ * The live wallet on the shared card: the ETH total, what it is worth or how fresh it is, and
+ * a tab that says the latest thing worth knowing — the last transfer, or why the total is a
+ * dash and how to retry. Behind the title's chevron, each network and token in its own units.
+ * `inline` is the chat's answer: the bare card with the balances always shown under it.
+ */
+export function LiveWalletOverview({ inline = false }: { inline?: boolean } = {}) {
   const shared = useShared();
   const wallet = useWallet();
   const market = useMarket();
+  const { preferences } = usePreferences();
   const balances = wallet.snapshot?.balances ?? [];
   // What the balances are worth in the chosen currency. Testnet tokens are worth nothing and
   // the app says so, so until the wallet reports a mainnet the figure says it is priced as if
@@ -102,30 +111,35 @@ export function LiveWalletOverview({ onActivity }: { onActivity?: () => void } =
   // total and then label the result ETH. Apples into oranges, presented as apples.
   const nativeKnown = balances.filter(item => item.symbol === 'ETH' && item.balanceWei !== null);
   const total = nativeKnown.length ? formatEth(nativeKnown.reduce((sum, item) => sum + BigInt(item.balanceWei!), 0n)) : null;
-  // Tokens are listed in their own units, never folded into a single number.
-  const tokenBalances = balances.filter(item => item.symbol !== 'ETH');
-  const synced = wallet.snapshot ? `${wallet.stale ? 'Saved' : 'Updated'} ${new Date(wallet.snapshot.fetchedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Connecting to the wallet…';
+  const time = wallet.snapshot ? new Date(wallet.snapshot.fetchedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+  const networks = new Set(balances.map(item => item.chain)).size;
+  // Under the figure: its worth while the wallet is fresh, otherwise how old it is; with no
+  // snapshot at all, the one word that explains the dash.
+  const line = !wallet.snapshot ? (wallet.loading ? 'Connecting…' : 'Not connected')
+    : wallet.stale ? `Saved ${time}` : priced ?? `${networks} network${networks === 1 ? '' : 's'}`;
+  const refresh = { label: 'Refresh', onPress: () => { void wallet.refresh(); }, disabled: wallet.loading || wallet.offline };
+  const activity = () => router.push('/history');
+  const latest = wallet.history?.items[0];
+  const summary = latest ? liveTransferSummary(latest, balances.map(item => item.address), preferences.recipients) : null;
+  const tab: WalletTab = wallet.error ? { title: wallet.snapshot ? `Saved ${time}` : 'Not connected', meta: wallet.error, action: refresh, alert: true }
+    : !wallet.snapshot ? { title: 'Connecting to the wallet…' }
+    : summary ? { title: summary.headline, meta: summary.meta, onPress: activity }
+    : { title: 'No activity yet', onPress: activity };
   const chainName = (chain: Chain) => chain === 'arbitrum' ? 'Arbitrum' : 'Ethereum';
-  const balanceRow = (item: (typeof balances)[number], title: string) => <View key={`${item.chain}:${item.symbol}`} style={{ paddingHorizontal: 16, paddingVertical: 12, gap: 6 }}>
-    <View style={shared.row}><NetworkMark chain={item.chain} /><Label size={16} weight="medium" style={shared.flex}>{title}</Label><View style={{ alignItems: 'flex-end', flexShrink: 1 }}><Label size={16} weight="semibold">{item.balance === null ? 'Unavailable' : `${item.balance} ${item.symbol}`}</Label>{!!item.error && <Label size={12} color={c.error}>Could not refresh</Label>}</View></View>
+  // Tokens are listed in their own units, never folded into the ETH total; an error is said
+  // once, under the row it belongs to.
+  const row = (item: (typeof balances)[number]) => <View key={`${item.chain}:${item.symbol}`} style={{ paddingHorizontal: 16, paddingVertical: 12, gap: 6 }}>
+    <View style={shared.row}><NetworkMark chain={item.chain} /><Label size={16} weight="medium" style={shared.flex}>{item.symbol === 'ETH' ? chainName(item.chain) : `${item.symbol} · ${chainName(item.chain)}`}</Label><Label size={16} weight="semibold" style={{ flexShrink: 1, textAlign: 'right' }}>{item.balance === null ? 'Unavailable' : `${item.balance} ${item.symbol}`}</Label></View>
     {!!item.error && <Note error>{item.error}</Note>}
     {!!caveatFor(item.chain, item.symbol) && <Note>{caveatFor(item.chain, item.symbol)}</Note>}
   </View>;
-  return <View style={{ gap: 12 }}>
-    <Card style={{ backgroundColor: c.tint, borderColor: c.tint, alignItems: 'center', gap: 4, paddingVertical: 24 }}>
-      <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 6 }}><Label size={40} weight="semibold" style={{ lineHeight: 48 }}>{total ?? '—'}</Label><Label size={16} weight="semibold">ETH</Label></View>
-      {priced && <Label size={16} color={c.muted} accessibilityLabel={`About ${priced}`}>{priced}</Label>}
-      <View style={[shared.row, { gap: 16 }]}><Label size={13} color={c.muted}>{wallet.loading ? 'Updating balances…' : synced}</Label><LinkButton label="Refresh" accessibilityLabel="Refresh balances" disabled={wallet.loading || wallet.offline} onPress={() => { void wallet.refresh(); }} /></View>
-      {nativeKnown.length < balances.filter(item => item.symbol === 'ETH').length && <Label size={12} color={c.error}>Total excludes a network that could not refresh</Label>}
-    </Card>
-    <Group>{balances.filter(item => item.symbol === 'ETH').map(item => balanceRow(item, chainName(item.chain)))}</Group>
-    {/* Tokens get their own group and their own units. Each row prints the asset's own symbol
-        rather than a hardcoded one, and nothing here is added into the ETH total above — the
-        two are different things and a single number would be meaningless. */}
-    <Group title="Tokens">{tokenBalances.map(item => balanceRow(item, `${item.symbol} · ${chainName(item.chain)}`))}</Group>
-    {!!wallet.error && <Note error>{wallet.error}</Note>}
-    {onActivity && <Button secondary label="Activity" onPress={onActivity} />}
+  const details = <Group>{[...balances.filter(item => item.symbol === 'ETH'), ...balances.filter(item => item.symbol !== 'ETH')].map(row)}</Group>;
+  if (inline) return <View style={{ gap: 12 }}>
+    <WalletCard inline amount={total ?? '—'} unit="ETH" line={line} lineLabel={priced ? `About ${priced}` : undefined} />
+    {details}
+    {!!wallet.error && <View style={shared.between}><Note error>{wallet.error}</Note><LinkButton label="Refresh" accessibilityLabel="Refresh balances" disabled={refresh.disabled} onPress={refresh.onPress} /></View>}
   </View>;
+  return <WalletCard amount={total ?? '—'} unit="ETH" line={line} lineLabel={priced ? `About ${priced}` : undefined} tab={tab}>{details}</WalletCard>;
 }
 export function LiveReceiveCard() {
   const shared = useShared();

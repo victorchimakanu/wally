@@ -27,7 +27,7 @@ const SECTIONS: Section[] = [
 const RAIL_SECTIONS: Section[] = SECTIONS.map(section => section.path === '/chat' ? { path: '/chats', label: 'Chats', icon: section.icon } : section);
 /** Screens reached from a section keep that section highlighted. */
 const OWNER: Record<string, Section['path']> = {
-  '/send': '/wallet', '/receive': '/wallet', '/review': '/wallet', '/scan': '/wallet', '/notifications': '/wallet',
+  '/send': '/wallet', '/receive': '/wallet', '/review': '/wallet', '/scan': '/wallet',
   '/chats': '/chat', '/clear-chats': '/chat',
   '/transaction': '/history', '/export-data': '/history',
   '/asset': '/market',
