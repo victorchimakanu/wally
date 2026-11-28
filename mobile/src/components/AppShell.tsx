@@ -51,33 +51,43 @@ const rowStyle = (c: Palette, base: ViewStyle, selected = false) => (state: Pres
 
 type NavigationProps = { active: Section['path'] | undefined; pathname: string };
 
-/** Desktop: the lockup, the sections with their names, recent chats, and the profile at the foot. */
+/**
+ * Desktop: the lockup, New chat, the sections, a quiet list of recent chats with a way to see
+ * them all, and the account at the foot. Rows are compact (40 px, 15 px labels, 20 px icons),
+ * as a sidebar beside a reading column should be; the mark stays the ring lockup.
+ */
 function Sidebar({ active, pathname, width }: NavigationProps & { width: number }) {
   const c = useColors();
   const s = useStyles();
-  const { state } = useDemo();
+  const { state, newChat } = useDemo();
   const { preferences } = usePreferences();
   const open = useOpenSection();
   return <View style={[s.sidebar, { width: width >= 1400 ? 240 : 224 }]}>
-    <Lockup size={126} style={{ marginBottom: 8 }} />
-    <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }} contentContainerStyle={{ gap: 12 }}>
-      <View accessibilityRole="tablist" style={{ gap: 4 }}>
+    <Lockup size={104} style={{ marginLeft: 6, marginBottom: 12 }} />
+    <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }} contentContainerStyle={{ gap: 2 }}>
+      <Pressable accessibilityRole="button" accessibilityLabel="Start a new chat" onPress={() => router.replace({ pathname: '/chat', params: { id: newChat() } })} style={rowStyle(c, s.sideRow)}>
+        <WallyAsset name="b64e9.svg" size={20} /><Label size={15}>New chat</Label>
+      </Pressable>
+      <View accessibilityRole="tablist" style={{ gap: 2, marginTop: 10 }}>
         {SECTIONS.map(section => {
           const selected = active === section.path;
           return <Pressable key={section.path} accessibilityRole="tab" accessibilityLabel={section.label} accessibilityState={{ selected }} onPress={() => { if (pathname !== section.path) open(section.path); }} style={rowStyle(c, s.sideRow, selected)}>
-            <WallyAsset name={section.icon} size={24} /><Label size={16} weight="medium">{section.label}</Label>
+            <WallyAsset name={section.icon} size={20} /><Label size={15} weight={selected ? 'medium' : 'regular'}>{section.label}</Label>
           </Pressable>;
         })}
       </View>
-      {!!state.chats.length && <View style={{ gap: 2, paddingTop: 8 }}>
-        <Label size={12} weight="medium" color={c.muted} style={{ paddingHorizontal: 8, marginBottom: 6 }}>Recent chats</Label>
-        {state.chats.slice(0, 6).map(chat => <Pressable key={chat.id} accessibilityRole="button" accessibilityLabel={`Open chat ${chat.title}`} onPress={() => router.replace({ pathname: '/chat', params: { id: chat.id } })} style={rowStyle(c, s.chatRow)}>
-          <Label size={16} numberOfLines={1}>{chat.title}</Label>
+      {!!state.chats.length && <View style={{ gap: 2, marginTop: 18 }}>
+        <Label size={12} weight="medium" color={c.muted} style={{ paddingHorizontal: 10, marginBottom: 4 }}>Recent chats</Label>
+        {state.chats.slice(0, 8).map(chat => <Pressable key={chat.id} accessibilityRole="button" accessibilityLabel={`Open chat ${chat.title}`} onPress={() => router.replace({ pathname: '/chat', params: { id: chat.id } })} style={rowStyle(c, s.chatRow)}>
+          <Label size={14} numberOfLines={1}>{chat.title}</Label>
         </Pressable>)}
+        <Pressable accessibilityRole="button" accessibilityLabel="See all chats" onPress={() => router.push('/chats')} style={rowStyle(c, s.chatRow)}>
+          <Label size={14} color={c.muted}>See all</Label>
+        </Pressable>
       </View>}
     </ScrollView>
-    <Pressable accessibilityRole="button" accessibilityLabel="View profile" onPress={() => router.push('/profile')} style={s.profile}>
-      <Avatar size={40} /><Label size={16} numberOfLines={1} style={{ flex: 1 }}>{preferences.name}</Label>
+    <Pressable accessibilityRole="button" accessibilityLabel="View profile" onPress={() => router.push('/profile')} style={rowStyle(c, s.profile)}>
+      <Avatar size={28} /><Label size={14} weight="medium" numberOfLines={1} style={{ flex: 1 }}>{preferences.name}</Label>
     </Pressable>
   </View>;
 }
@@ -125,10 +135,10 @@ export function AppShell({ children }: React.PropsWithChildren) {
 
 const useStyles = makeStyles(c => ({
   frame: { flex: 1, backgroundColor: c.background }, main: { flex: 1, minWidth: 0, minHeight: 0 },
-  sidebar: { borderRightWidth: 1, borderColor: c.line, backgroundColor: c.surface, padding: 20, gap: 12 },
-  sideRow: { flexDirection: 'row', alignItems: 'center', gap: 16, height: 52, paddingHorizontal: 8, borderRadius: 20 },
-  chatRow: { minHeight: 40, justifyContent: 'center', paddingHorizontal: 8, borderRadius: 12 },
-  profile: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 8 },
+  sidebar: { borderRightWidth: 1, borderColor: c.line, backgroundColor: c.surface, paddingHorizontal: 12, paddingTop: 20, paddingBottom: 12, gap: 8 },
+  sideRow: { flexDirection: 'row', alignItems: 'center', gap: 12, height: 40, paddingHorizontal: 10, borderRadius: 12 },
+  chatRow: { minHeight: 34, justifyContent: 'center', paddingHorizontal: 10, borderRadius: 10 },
+  profile: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 44, paddingHorizontal: 10, borderRadius: 12 },
   rail: { width: 88, borderRightWidth: 1, borderColor: c.line, backgroundColor: c.surface, paddingVertical: 24, paddingHorizontal: 16, alignItems: 'center' },
   railItem: { width: 56, height: 56, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
 }));
