@@ -9,7 +9,7 @@ import { useDemo } from '../demo/store';
 import { usePreferences } from '../demo/preferences';
 import { type Palette, makeStyles, useColors } from '../theme';
 
-type Section = { path: '/wallet' | '/chat' | '/market' | '/history' | '/address-book' | '/settings'; label: string; icon: AssetName };
+type Section = { path: '/wallet' | '/chat' | '/chats' | '/market' | '/history' | '/address-book' | '/settings'; label: string; icon: AssetName };
 /** The order the sidebar and rail list them in, from the WallyUI shared navigation. */
 const SECTIONS: Section[] = [
   { path: '/wallet', label: 'Wallet', icon: 'bfa3b.svg' },
@@ -19,6 +19,12 @@ const SECTIONS: Section[] = [
   { path: '/address-book', label: 'Address book', icon: '9a2cd.svg' },
   { path: '/settings', label: 'Settings', icon: 'f2470.svg' },
 ];
+/**
+ * Beside the rail the Wallet/Chat switch is still on screen, and it alone moves between the
+ * wallet and a conversation. So the rail's section is Chats, the list, like the drawer's row;
+ * only the desktop sidebar, which has no switch, opens a conversation directly.
+ */
+const RAIL_SECTIONS: Section[] = SECTIONS.map(section => section.path === '/chat' ? { path: '/chats', label: 'Chats', icon: section.icon } : section);
 /** Screens reached from a section keep that section highlighted. */
 const OWNER: Record<string, Section['path']> = {
   '/send': '/wallet', '/receive': '/wallet', '/review': '/wallet', '/scan': '/wallet', '/notifications': '/wallet',
@@ -28,6 +34,7 @@ const OWNER: Record<string, Section['path']> = {
   '/preferences': '/settings', '/profile': '/settings', '/licences': '/settings', '/problems': '/settings',
   '/recovery-phrase': '/settings', '/reset-wallet': '/settings', '/phone-performance': '/settings',
 };
+const RAIL_OWNER: Record<string, Section['path']> = { ...OWNER, '/chat': '/chats', '/clear-chats': '/chats' };
 /** Onboarding stands on its own, without app navigation. */
 const ONBOARDING = ['/', '/wallet-setup', '/restore-wallet'];
 
@@ -82,7 +89,7 @@ function Rail({ active, pathname }: NavigationProps) {
   const open = useOpenSection();
   return <View style={s.rail}>
     <View accessibilityRole="tablist" style={{ gap: 24, alignItems: 'center' }}>
-      {SECTIONS.map(section => {
+      {RAIL_SECTIONS.map(section => {
         const selected = active === section.path;
         return <Pressable key={section.path} accessibilityRole="tab" accessibilityLabel={section.label} accessibilityState={{ selected }} onPress={() => { if (pathname !== section.path) open(section.path); }} style={rowStyle(c, s.railItem, selected)}>
           <WallyAsset name={section.icon} size={24} />
@@ -104,8 +111,9 @@ export function AppShell({ children }: React.PropsWithChildren) {
   const pathname = usePathname();
   const layout = layoutFor(width);
   const onboarding = ONBOARDING.includes(pathname);
-  const topLevel = SECTIONS.some(section => section.path === pathname);
-  const active = SECTIONS.find(section => section.path === pathname)?.path ?? OWNER[pathname];
+  const sections = layout === 'rail' ? RAIL_SECTIONS : SECTIONS;
+  const topLevel = sections.some(section => section.path === pathname);
+  const active = sections.find(section => section.path === pathname)?.path ?? (layout === 'rail' ? RAIL_OWNER : OWNER)[pathname];
   const navigation = onboarding ? null : layout === 'desktop' ? <Sidebar active={active} pathname={pathname} width={width} /> : layout === 'rail' ? <Rail active={active} pathname={pathname} /> : null;
   return <ShellContext value={{ layout, gutter: gutterFor(layout, width), topLevel }}>
     <View style={[s.frame, !!navigation && { flexDirection: 'row' }]}>

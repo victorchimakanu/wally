@@ -65,11 +65,14 @@ export function Note({ children, error = false }: React.PropsWithChildren<{ erro
 /** Title bar for pushed screens: a back button and one centred title. A tablet adds the avatar on the right, as its designs do. */
 export function Header({ title, back = true }: { title: string; back?: boolean }) {
   const s = useStyles();
-  const { tablet, gutter } = useShell();
+  const { gutter, layout } = useShell();
+  // Only the upright tablet carries the avatar in its headers; beside the rail and the sidebar the
+  // profile is already one tap away at the bottom of the navigation.
+  const avatar = layout === 'tablet';
   return <View style={[s.header, { paddingHorizontal: gutter }]}>
-    {back ? <Pressable accessibilityLabel="Go back" accessibilityRole="button" onPress={() => router.canGoBack() ? router.back() : router.replace('/wallet')} style={s.back}><View style={{ transform: [{ rotate: '180deg' }] }}><WallyAsset name="afc43.svg" /></View></Pressable> : tablet ? <View style={s.back} /> : null}
+    {back ? <Pressable accessibilityLabel="Go back" accessibilityRole="button" onPress={() => router.canGoBack() ? router.back() : router.replace('/wallet')} style={s.back}><View style={{ transform: [{ rotate: '180deg' }] }}><WallyAsset name="afc43.svg" /></View></Pressable> : avatar ? <View style={s.back} /> : null}
     <View style={{ flex: 1, alignItems: 'center' }}><Label weight="semibold" size={16} accessibilityRole="header" numberOfLines={1}>{title}</Label></View>
-    {tablet ? <Pressable accessibilityRole="button" accessibilityLabel="View profile" onPress={() => router.push('/profile')} style={s.back}><Avatar size={40} /></Pressable> : back ? <View style={{ width: 50 }} /> : null}
+    {avatar ? <Pressable accessibilityRole="button" accessibilityLabel="View profile" onPress={() => router.push('/profile')} style={s.back}><Avatar size={40} /></Pressable> : back ? <View style={{ width: 50 }} /> : null}
   </View>;
 }
 /** Testnet or demo, said once in the header instead of on a strip under every screen. */
