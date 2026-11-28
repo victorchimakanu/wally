@@ -7,10 +7,11 @@ import { CURRENCIES } from '../services/preferences-store';
 import { WallyAsset } from './WallyAsset';
 import { WalletOverview } from './WalletOverview';
 import { AssetLogo, AssetRow } from './MarketRows';
+import { Sparkline } from './Sparkline';
 import { useMarket } from '../data/market';
 import { MarketStatus } from './MarketData';
 import { COINS, formatChange, formatPrice } from '../services/market-api';
-import { DEMO_ADDRESS, FEE, draftStatus, money, units, type ChatTool, type Draft, type Message, type Quote, type Transaction } from '../demo/model';
+import { DEMO_ADDRESS, FEE, draftStatus, money, units, type ChatContext, type ChatTool, type Draft, type Message, type Quote, type Transaction } from '../demo/model';
 import { useDemo } from '../demo/store';
 import { usePreferences } from '../demo/preferences';
 import { useColors } from '../theme';
@@ -148,4 +149,25 @@ export function WalletToolsModal({ visible, onClose, onManual, onNewChat, onHist
     <Row title="Manual send" onPress={go(onManual)} />
     <Row title="Receive address" onPress={go(() => router.push('/receive'))} />
   </Group></View></View></Modal>;
+}
+
+/**
+ * What a chat was opened from, above its first turn: the asset screen's asset with its price,
+ * change and week, or the market list. One quiet card, no caption; it belongs to the chat, so
+ * it stays until another chat is started. Tapping it goes back to that screen.
+ */
+export function ChatContextCard({ context }: { context: ChatContext }) {
+  const c = useColors();
+  const shared = useShared();
+  const { data, currency, loading } = useMarket();
+  if (context.kind === 'market') return <Group>{(data?.assets ?? []).map(asset => <AssetRow key={asset.symbol} asset={asset} spark />)}</Group>;
+  const coin = COINS.find(item => item.symbol === context.symbol);
+  const asset = data?.assets.find(item => item.symbol === context.symbol);
+  if (!coin) return null;
+  return <Pressable accessibilityRole="button" accessibilityLabel={`Open ${coin.name}`} onPress={() => router.push({ pathname: '/asset', params: { symbol: coin.symbol } })}>
+    <Card style={{ gap: 12 }}>
+      <View style={shared.row}><AssetLogo symbol={coin.symbol} /><Label size={16} weight="semibold" style={shared.flex}>{coin.name}</Label><View style={{ alignItems: 'flex-end', flexShrink: 1 }}><Label size={16} weight="semibold">{asset ? formatPrice(asset.price, currency) : loading ? 'Loading…' : 'Unavailable'}</Label><Label size={12} color={!asset || asset.change === null ? c.muted : asset.change < 0 ? c.error : c.success}>{formatChange(asset?.change ?? null)}</Label></View></View>
+      <Sparkline id={coin.id} fill height={56} />
+    </Card>
+  </Pressable>;
 }

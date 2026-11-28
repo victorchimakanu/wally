@@ -17,7 +17,9 @@ export type ChatTool =
   | { kind: 'unavailable' | 'timeout' | 'stopped' | 'blocked' | 'insufficient' };
 export type ChatReply = { text: string; draft?: Draft; tool?: ChatTool };
 export type Message = ChatReply & { id: string; role: 'user' | 'assistant'; draftCancelled?: boolean; draftState?: 'active' | 'superseded' | 'cancelled' | 'submitted'; transactionId?: string };
-export type Chat = { id: string; title: string; messages: Message[]; updatedAt: number };
+/** What was on screen when a chat was opened from it: the asset screen's asset, or the market list. */
+export type ChatContext = { kind: 'asset'; symbol: string } | { kind: 'market' };
+export type Chat = { id: string; title: string; messages: Message[]; updatedAt: number; context?: ChatContext };
 export type DemoState = {
   version: 1; welcomed: boolean; balance: number; offline: boolean; aiPaused: boolean;
   failNext: boolean; quoteSeconds: number; transactions: Transaction[]; chats: Chat[];

@@ -12,16 +12,18 @@ import { useMarket } from '../data/market';
 import { MarketStatus, PriceChart } from '../components/MarketData';
 import { usePreferences } from '../demo/preferences';
 import { useDemo } from '../demo/store';
+import type { ChatContext } from '../demo/model';
 import { useColors } from '../theme';
 
-function AskDock({ topic }: { topic?: string }) {
+/** The composer at the foot of a market screen: a question here opens a chat that carries this screen as its context. */
+function AskDock({ topic, context }: { topic?: string; context: ChatContext }) {
   const { state, ai, newChat, sendMessage } = useDemo();
   const [input, setInput] = useState('');
   const [tools, setTools] = useState(false);
   function send() {
     const text = input.trim();
     if (!text) return;
-    const id = newChat();
+    const id = newChat(context);
     Keyboard.dismiss(); setInput('');
     // When the assistant is busy the request stays as an unsent message in the new chat.
     router.push({ pathname: '/chat', params: { id, ...(topic ? { topic } : {}), ...(sendMessage(id, text) ? {} : { prompt: text }) } });
@@ -48,7 +50,7 @@ export function MarketScreen() {
   const detail = layout !== 'phone';
   const up = assets.filter(asset => asset.change !== null && asset.change > 0).length;
   const down = assets.filter(asset => asset.change !== null && asset.change < 0).length;
-  return <Screen title="Market" footer={<AskDock />}>
+  return <Screen title="Market" footer={<AskDock context={{ kind: 'market' }} />}>
     <View style={{ gap: 8 }}>
       {assets.length > 0 && <Label size={13} weight="medium" color={c.muted} accessibilityRole="header" style={{ paddingHorizontal: 16 }}>{`${up} up · ${down} down · 24h`}</Label>}
       {detail && assets.length > 0 && <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 12, paddingHorizontal: 16 }}>
@@ -78,7 +80,7 @@ export function AssetScreen() {
   // Saving sits in the title row beside the logo, as the asset boards place it, not as a
   // full-width button between the chart and the facts.
   const toggleSaved = () => updatePreferences({ saved: saved ? preferences.saved.filter(value => value !== asset.symbol) : [...preferences.saved, asset.symbol] });
-  return <Screen title={asset.name} footer={<AskDock topic={asset.symbol} />}>
+  return <Screen title={asset.name} footer={<AskDock topic={asset.symbol} context={{ kind: 'asset', symbol: asset.symbol }} />}>
     <View style={shared.between}>
       <View style={{ gap: 2, flexShrink: 1 }}><Label size={32} weight="semibold" adjustsFontSizeToFit numberOfLines={1} style={{ lineHeight: 40 }}>{formatPrice(asset.price, currency)}</Label><Label size={14} color={asset.change === null ? c.muted : falling ? c.error : c.success}>{formatChange(asset.change)} · 24h</Label></View>
       <View style={[shared.row, { gap: 16 }]}><LinkButton label={saved ? 'Saved' : 'Save'} accessibilityLabel={saved ? 'Remove from watchlist' : 'Add to watchlist'} onPress={toggleSaved} /><AssetLogo symbol={asset.symbol} /></View>

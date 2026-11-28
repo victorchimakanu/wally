@@ -6,7 +6,7 @@ import { Button, Card, Label, LinkButton, NetworkBadge, Note, Screen, useShared 
 import { WalletOverview } from '../components/WalletOverview';
 import { useShell } from '../components/shell';
 import { ChatComposer, type ChatSuggestion } from '../components/ChatComposer';
-import { DraftChatCard, InlineChatTool, ToolStateCard, WalletToolsModal } from '../components/ChatCards';
+import { ChatContextCard, DraftChatCard, InlineChatTool, ToolStateCard, WalletToolsModal } from '../components/ChatCards';
 import { ChatHistoryPanel } from '../components/ChatHistoryPanel';
 import { ThinkingIndicator } from '../components/ThinkingIndicator';
 import { Lockup } from '../components/WallyAsset';
@@ -105,7 +105,9 @@ function Conversation({ id, prompt, topic }: { id: string; prompt?: string; topi
   </>}>
     {state.offline && <Card style={{ backgroundColor: c.warningTint }}><Label weight="semibold">You’re offline</Label><Note>Drafts are available. Reconnect before reviewing a transfer.</Note></Card>}
     {!chat && <><Label>This conversation is no longer available.</Label><Button label="Start a new chat" onPress={() => router.replace({ pathname: '/chat', params: { id: newChat() } })} /></>}
-    {chat?.messages.length === 0 && <View style={{ flex: 1, justifyContent: 'center', gap: 20 }}><Lockup size={150} style={{ alignSelf: 'center' }} /><Label size={28} weight="semibold" style={shared.center}>What can I help with?</Label></View>}
+    {/* A chat opened from a screen carries that screen above its first turn; one without starts with the prompt. */}
+    {chat?.context && <ChatContextCard context={chat.context} />}
+    {chat?.messages.length === 0 && !chat.context && <View style={{ flex: 1, justifyContent: 'center', gap: 20 }}><Lockup size={150} style={{ alignSelf: 'center' }} /><Label size={28} weight="semibold" style={shared.center}>What can I help with?</Label></View>}
     {/* One reading size for both voices, 16 on 24: a pale bubble for what you said, plain text for the reply. */}
     {turns.map((turn, index) => <View key={turn[0].id} style={{ gap: 12 }}>{turn.map(message => message.role === 'user' ? <View key={message.id} accessibilityLabel="Your request" style={{ alignSelf: 'flex-end', maxWidth: '80%', backgroundColor: c.tint, borderRadius: 24, paddingHorizontal: 16, paddingVertical: 12 }}><Label size={16} style={{ lineHeight: 24, overflowWrap: 'anywhere' } as never}>{message.text}</Label></View> : <View key={message.id} style={{ gap: 12 }}>
       <Label size={16} style={{ lineHeight: 24 }}>{message.text}</Label>

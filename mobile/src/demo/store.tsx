@@ -2,7 +2,7 @@ import { fetch as expoFetch } from 'expo/fetch';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { AppState } from 'react-native';
-import { appendChatMessages, draftStatus, originIsCurrent, initialState, settle, submit, scriptedReply, validateDraft, type DemoState, type Draft, type DraftOrigin, type Quote, type Message } from './model';
+import { appendChatMessages, draftStatus, originIsCurrent, initialState, settle, submit, scriptedReply, validateDraft, type ChatContext, type DemoState, type Draft, type DraftOrigin, type Quote, type Message } from './model';
 import { chatReply, quickWalletReply, requestChat, requestIntent } from '../services/qvac';
 import { getPhoneRuntime, phoneAvailable } from '../services/phone-adapter';
 import type { PhoneMetrics, PhoneRuntime, PhoneStatus } from '../services/phone-runtime';
@@ -27,7 +27,7 @@ type DemoContextValue = {
   loadPhone: (model: PhoneModel, backend: PhoneBackend) => void; releasePhone: () => void;
   draft: Draft; setDraft: (draft: Draft) => void;
   update: (patch: Partial<Pick<DemoState, 'welcomed' | 'offline' | 'aiPaused' | 'failNext' | 'quoteSeconds'>>) => void;
-  newChat: () => string; sendMessage: (chatId: string, text: string) => boolean;
+  newChat: (context?: ChatContext) => string; sendMessage: (chatId: string, text: string) => boolean;
   discardDraft: (chatId: string, messageId: string) => void;
   updateChatDraft: (origin: DraftOrigin, draft: Draft) => string | null;
   prepare: (draft: Draft, origin?: DraftOrigin) => string | null; cancel: () => void;
@@ -168,9 +168,9 @@ export function DemoProvider({ children }: React.PropsWithChildren) {
       }
       commit({ ...current.current, ...patch });
     },
-    newChat() {
+    newChat(context) {
       const chatId = id();
-      commit({ ...current.current, chats: [{ id: chatId, title: 'New conversation', updatedAt: Date.now(), messages: [] }, ...current.current.chats] });
+      commit({ ...current.current, chats: [{ id: chatId, title: 'New conversation', updatedAt: Date.now(), messages: [], ...(context ? { context } : {}) }, ...current.current.chats] });
       return chatId;
     },
     sendMessage(chatId, text) {
