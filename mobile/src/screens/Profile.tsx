@@ -69,7 +69,10 @@ export function AddressBookScreen() {
   const matches = preferences.recipients.filter(item => (item.name + item.address).toLowerCase().includes(search.toLowerCase()));
   return <Screen title="Address book">
     <View style={[shared.row, shared.input]}><WallyAsset name="ddc2c.svg" /><TextInput accessibilityLabel="Search recipients" value={search} onChangeText={setSearch} placeholder="Search" placeholderTextColor={c.muted} style={{ flex: 1, fontFamily: fonts.regular, color: c.ink, fontSize: 16 }} /></View>
-    <Group>{matches.map(item => <Row key={item.id} title={item.name} value={short(item.address)} onPress={() => { setSelected(item.id); setEditing(null); }} />)}</Group>
+    <Group>
+      {editing === null && <Row title="Add recipient" onPress={() => { setEditing('new'); setName(''); setAddress(''); setError(''); }} />}
+      {matches.map(item => <Row key={item.id} title={item.name} value={short(item.address)} onPress={() => { setSelected(item.id); setEditing(null); }} />)}
+    </Group>
     {recipient && editing === null && <Card>
       <Label size={18} weight="semibold">{recipient.name}</Label>
       <Address value={recipient.address} />
@@ -87,6 +90,5 @@ export function AddressBookScreen() {
       <Button secondary label="Cancel" onPress={() => setEditing(null)} />
     </Card>}
     {!!error && <Note error>{error}</Note>}{!!storageError && <Note error>{storageError}</Note>}
-    {editing === null && <Button secondary label="Add recipient" onPress={() => { setEditing('new'); setName(''); setAddress(''); setError(''); }} />}
   </Screen>;
 }

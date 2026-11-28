@@ -42,3 +42,9 @@ Settled and left alone: no taglines or helper text; Send and Receive are the wal
 19. **Dark mode** needs no redesign: the palette holds everywhere; only the Send tile turns white beside the yellow Receive tile on tablets, which item 2's tiles will settle.
 
 Not design: Metro serves each SVG slowly on this machine, so icons appear a few seconds late in every fresh load; the logos in dark mode are fine once loaded.
+
+## Added after review
+
+20. **Chat section, phone and tablets.** Where the Wallet/Chat switch exists, the rail's and the drawer's section is Chats, the list at `/chats`, never a conversation; the switch alone moves between Wallet and the conversation. Fix: a tier-aware section (`RAIL_SECTIONS`, `RAIL_OWNER`) with the conversation keeping Chats highlighted; the desktop sidebar, which has no switch, keeps Chat. The Chats list itself showed a Back arrow beside the rail and a full-width New chat button above the rows: no Back on a rail destination, and an add-action on a list screen is the list's first row (Chats' New chat, Address book's Add recipient).
+21. **Desktop sidebar.** Oversized and undifferentiated: 126 px lockup, 52 px section rows with 24 px icons, recent chats in the same type, no New chat. Fix: compact rows (40 px, 15 px labels, 20 px icons), New chat at the top, a quiet one-line recents list with a way to see all, the account at the foot; the ring lockup stays as the mark.
+22. **Chat page, every tier.** Revisit against the Chat boards and the quiet-wallet notes: plain-text assistant replies, pale user bubbles, an anchored composer; decide the type scale, bubble and card treatment, spacing, the tool and unavailable-model cards, and the empty state.

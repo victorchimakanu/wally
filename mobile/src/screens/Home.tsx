@@ -104,11 +104,14 @@ function RecentActivity() {
   </Group>;
 }
 
+/** The conversations, newest first; a new one is the first row rather than a button over the list. */
 export function ChatsScreen() {
   const { state, newChat } = useDemo();
   return <Screen title="Chats" tab="chats">
-    <Button label="New chat" onPress={() => router.push({ pathname: '/chat', params: { id: newChat() } })} />
-    <Group>{state.chats.map(chat => <Row key={chat.id} title={chat.title} onPress={() => router.push({ pathname: '/chat', params: { id: chat.id } })} />)}</Group>
+    <Group>
+      <Row title="New chat" onPress={() => router.push({ pathname: '/chat', params: { id: newChat() } })} />
+      {state.chats.map(chat => <Row key={chat.id} title={chat.title} onPress={() => router.push({ pathname: '/chat', params: { id: chat.id } })} />)}
+    </Group>
   </Screen>;
 }
 
