@@ -38,7 +38,8 @@ function settingsBuildLine(): string {
  */
 const APPEARANCE_LABELS: Record<Appearance, string> = { system: 'System', light: 'Light', dark: 'Dark' };
 
-export function SettingsScreen() {
+/** The settings groups on their own, so the Profile screen can carry them under the account. */
+export function SettingsGroups() {
   const wallet = useWallet();
   const { state, ai, phone } = useDemo();
   const { preferences, updatePreferences } = usePreferences();
@@ -46,7 +47,7 @@ export function SettingsScreen() {
   const open = (panel: Panel) => router.push({ pathname: '/preferences', params: { panel } });
   const network = wallet.enabled ? 'Testnet' : state.offline ? 'Offline' : 'Demo';
   const assistant = state.aiPaused ? 'Paused' : phone?.phase === 'loading' ? 'Loading' : ai.mode !== 'qvac' ? 'Scripted' : ai.location === 'phone' ? 'This phone' : 'Your computer';
-  return <Screen title="Settings">
+  return <>
     <Group>
       <Row title="Network" value={network} onPress={() => open('connection')} />
       <Row title="Assistant" value={assistant} onPress={() => open('model')} />
@@ -71,7 +72,11 @@ export function SettingsScreen() {
       <Row title="Demo controls" onPress={() => open('demo')} />
     </Group>
     <Group><Row title="Remove this wallet" danger onPress={() => router.push('/reset-wallet')} /></Group>
-  </Screen>;
+  </>;
+}
+
+export function SettingsScreen() {
+  return <Screen title="Settings"><SettingsGroups /></Screen>;
 }
 
 /**

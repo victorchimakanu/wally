@@ -112,15 +112,18 @@ export function AppNavigation({ surface, floating = false }: { surface: 'wallet'
   const insets = useSafeAreaInsets();
   function chat(fresh = false) { const id = fresh ? newChat() : state.chats[0]?.id ?? newChat(); setOpen(false); router.replace({ pathname: '/chat', params: { id } }); }
   function go(path: '/wallet' | '/chats' | '/history' | '/market' | '/settings' | '/profile' | '/address-book') { setOpen(false); router.push(path); }
-  const menu = <Pressable accessibilityRole="button" accessibilityLabel="Open app menu" onPress={() => setOpen(true)} style={[s.menu, floating && s.floatingShadow]}><WallyAsset name="f3b34.svg" /></Pressable>;
+  // The phone's bar is sized for thumbs. A tablet has room, so its switch and menu button shrink
+  // to the Tablet · Home board's proportions instead of reading as oversized controls.
+  const compact = tablet;
+  const menu = <Pressable accessibilityRole="button" accessibilityLabel="Open app menu" onPress={() => setOpen(true)} style={[s.menu, compact && { width: 48, height: 48, borderRadius: 24 }, floating && s.floatingShadow]}><WallyAsset name="f3b34.svg" /></Pressable>;
   return <>
-    {floating ? <Animated.View entering={FadeIn.duration(200)} style={s.floatingMenu}>{menu}</Animated.View> : <View style={[s.navigation, { paddingHorizontal: gutter - 8 }]}>
+    {floating ? layout === 'rail' ? null : <Animated.View entering={FadeIn.duration(200)} style={s.floatingMenu}>{menu}</Animated.View> : <View style={[s.navigation, { paddingHorizontal: gutter - 8 }]}>
       {/* The rail already navigates, so that tier has no menu button; its column stays as the spacer. */}
       <View style={{ width: side, alignItems: 'flex-start' }}><View onLayout={measure('left')} style={shared.row}>{layout !== 'rail' && menu}</View></View>
       <View style={{ flex: 1, minWidth: 0, alignItems: 'center' }}>
-        <View style={s.segment}>{(['wallet', 'chat'] as const).map(value => <Pressable key={value} accessibilityRole="tab" accessibilityLabel={value === 'wallet' ? 'Wallet' : 'Chat'} accessibilityState={{ selected: surface === value }} onPress={() => value === 'wallet' ? router.replace('/wallet') : chat()} style={[s.segmentButton, surface === value && { backgroundColor: c.raised }]}><Label size={17} weight={surface === value ? 'semibold' : 'regular'}>{value === 'wallet' ? 'Wallet' : 'Chat'}</Label></Pressable>)}</View>
+        <View style={[s.segment, compact && { maxWidth: 216, padding: 4 }]}>{(['wallet', 'chat'] as const).map(value => <Pressable key={value} accessibilityRole="tab" accessibilityLabel={value === 'wallet' ? 'Wallet' : 'Chat'} accessibilityState={{ selected: surface === value }} onPress={() => value === 'wallet' ? router.replace('/wallet') : chat()} style={[s.segmentButton, compact && { minHeight: 40, borderRadius: 20 }, surface === value && { backgroundColor: c.raised }]}><Label size={compact ? 15 : 17} weight={surface === value ? 'semibold' : 'regular'}>{value === 'wallet' ? 'Wallet' : 'Chat'}</Label></Pressable>)}</View>
       </View>
-      <View style={{ width: side, alignItems: 'flex-end' }}><View onLayout={measure('right')} style={shared.row}><NetworkBadge />{tablet && <Pressable accessibilityRole="button" accessibilityLabel="View profile" onPress={() => router.push('/profile')} hitSlop={6} style={s.avatar}><Avatar size={40} /></Pressable>}</View></View>
+      <View style={{ width: side, alignItems: 'flex-end' }}><View onLayout={measure('right')} style={shared.row}><NetworkBadge />{layout === 'tablet' && <Pressable accessibilityRole="button" accessibilityLabel="View profile" onPress={() => router.push('/profile')} hitSlop={6} style={s.avatar}><Avatar size={40} /></Pressable>}</View></View>
     </View>}
     <Modal transparent visible={open} animationType="fade" onRequestClose={() => setOpen(false)}>
       <View style={s.modal}>

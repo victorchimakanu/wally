@@ -10,7 +10,9 @@ import { usePreferences } from '../demo/preferences';
 import { useDemo } from '../demo/store';
 import { fonts, useColors } from '../theme';
 import { useWallet } from '../data/wallet';
+import { SettingsGroups } from './Settings';
 
+/** The account and everything you set about it: name, currency, then the settings groups. */
 export function ProfileScreen() {
   const c = useColors();
   const shared = useShared();
@@ -23,8 +25,8 @@ export function ProfileScreen() {
       ? <Card><TextInput accessibilityLabel="Display name" placeholder="Display name" placeholderTextColor={c.muted} value={name} onChangeText={setName} maxLength={40} autoFocus style={[shared.input, { backgroundColor: c.background }]} /><Button label="Save" disabled={!name.trim()} onPress={() => { updatePreferences({ name: name.trim() }); setEditing(false); }} /><Button secondary label="Cancel" onPress={() => setEditing(false)} /></Card>
       : <Button secondary label="Edit name" onPress={() => { setName(preferences.name); setEditing(true); }} />}
     <CurrencyChoice />
-    <Group><Row title="Address book" onPress={() => router.push('/address-book')} /></Group>
     {!!error && <Note error>{error}</Note>}
+    <SettingsGroups />
   </Screen>;
 }
 
