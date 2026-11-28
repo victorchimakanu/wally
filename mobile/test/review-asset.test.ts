@@ -51,6 +51,7 @@ function renderReview(q: LiveQuote | null): Value {
     '../services/tokens': { tokenCaveat: () => null, tokensFor: () => [] },
     '../components/WalletData': { AssetChoice: 'AssetChoice', LiveActivityList: 'LiveActivityList', LiveReceiveCard: 'LiveReceiveCard', NetworkChoice: 'NetworkChoice', WalletStatus: 'WalletStatus' },
     '../components/SearchField': { SearchField: 'SearchField' },
+    '../components/Segmented': { Segmented: 'Segmented' },
     '../data/wallet': { useWallet: () => ({ quote: q, offline: false, confirm: async () => {}, clearQuote: () => {} }) },
     '../demo/store': { useDemo: () => ({ state: { offline: false } }) },
     '../services/wallet-api': { CHAINS, fetchGasPrice: async () => 0n, formatUnits: (v: bigint) => String(v), isAddress: () => true, parseSendAmount: () => 0n, sendableMax: () => 0n },

@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as Linking from 'expo-linking';
-import { Pressable, TextInput, View } from 'react-native';
+import { TextInput, View } from 'react-native';
 import { Address, Button, Card, Detail, Divider, Label, LinkButton, Note, Pill, Screen, useShared } from '../components/ui';
 import { tokenCaveat, tokensFor } from '../services/tokens';
 import { AssetChoice, LiveActivityList, LiveReceiveCard, NetworkChoice, WalletStatus } from '../components/WalletData';
 import { SearchField } from '../components/SearchField';
+import { Segmented } from '../components/Segmented';
 import { useWallet } from '../data/wallet';
 import { useDemo } from '../demo/store';
 import { CHAINS, amountForInput, fetchGasPrice, formatUnits, parseSendAmount, sendableMax, type Chain, type LiveTransaction } from '../services/wallet-api';
@@ -240,12 +241,10 @@ export function LiveReviewScreen() {
 }
 export function LiveReceiveScreen() { return <Screen title="Receive"><LiveReceiveCard /></Screen>; }
 export function LiveHistoryScreen() {
-  const c = useColors();
-  const shared = useShared();
-  const [search, setSearch] = useState(''), [filter, setFilter] = useState('All');
+  const [search, setSearch] = useState(''), [filter, setFilter] = useState<'All' | 'Sent' | 'Received'>('All');
   return <Screen title="Activity">
     <SearchField accessibilityLabel="Search activity" value={search} onChange={setSearch} />
-    <View style={shared.row}>{['All', 'Sent', 'Received'].map(value => <Pressable key={value} accessibilityRole="tab" accessibilityState={{ selected: filter === value }} onPress={() => setFilter(value)} style={{ flex: 1, alignItems: 'center', paddingVertical: 12, backgroundColor: filter === value ? c.tint : c.surface, borderRadius: 18 }}><Label>{value}</Label></Pressable>)}</View>
+    <Segmented options={['All', 'Sent', 'Received'] as const} value={filter} onChange={setFilter} />
     <LiveActivityList search={search} filter={filter} />
   </Screen>;
 }
