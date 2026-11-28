@@ -38,14 +38,15 @@ export function WalletCard({ amount, unit, line, lineLabel, tab, inline = false,
   const [expanded, setExpanded] = useState(false);
   const scale = width / 384;
   const pressable = !!tab?.onPress;
-  // The board's body artwork has the notch cut for the avatar; the bare card paints the same
-  // lilac on a plain rounded body and keeps only the two discs.
+  // The board's body artwork is the shape with the notch cut for the avatar, drawn on a
+  // transparent body so the notch really is a cutout; in dark mode the same shape is tinted to
+  // the palette. The bare card has no avatar, so it paints a plain rounded body instead.
   return <View style={[{ gap: 12 }, inline && { maxWidth: 384 }]}>
     <View onLayout={event => setWidth(event.nativeEvent.layout.width)} style={{ height: (inline ? 224 : 238) * scale }}>
       <View style={{ width: 384, height: 238, position: 'absolute', top: inline ? -13.4 * scale : 0, transformOrigin: 'top left', transform: [{ scale }] }}>
-        <View style={{ position: 'absolute', top: 13.4, width: 384, height: 223.439, overflow: 'hidden', borderRadius: 22.326, backgroundColor: inline && !dark ? c.lilac : c.tint }}>
+        <View style={{ position: 'absolute', top: 13.4, width: 384, height: 223.439, overflow: 'hidden', borderRadius: 22.326, backgroundColor: inline ? (dark ? c.tint : c.lilac) : 'transparent' }}>
+          {!inline && <WallyAsset name="6a869.svg" color={dark ? c.tint : undefined} />}
           {!dark && <>
-            {!inline && <WallyAsset name="6a869.svg" />}
             <WallyAsset name="d7e4c.svg" style={{ position: 'absolute', left: 324.49, top: 5.61, opacity: .55 }} />
             <WallyAsset name="27e99.svg" style={{ position: 'absolute', left: -150.46, top: 5.61, opacity: .55 }} />
           </>}
