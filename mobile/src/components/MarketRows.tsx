@@ -6,13 +6,21 @@ import { WallyAsset } from './WallyAsset';
 import { Group, Label, useShared } from './ui';
 import { formatPrice, formatChange, type MarketAsset } from '../services/market-api';
 import { useMarket } from '../data/market';
-import { useColors } from '../theme';
+import { useColors, useTheme } from '../theme';
 import { usePreferences } from '../demo/preferences';
+/**
+ * In light mode the Figma pastel discs carry an ink glyph. In dark mode those discs would glare
+ * and the glyph would go paper, so the disc takes the palette's deep tint and the glyph the
+ * asset's own colour: amber for Bitcoin, lilac for Ethereum and Solana.
+ */
 export function AssetLogo({ symbol }: { symbol: string }) {
+  const { palette: c, dark } = useTheme();
   if (symbol === 'USDT') return <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: '#26A17B', justifyContent: 'center', alignItems: 'center' }}><Label size={24} color="#FFFFFF" weight="bold">₮</Label></View>;
-  return <View style={{ width: 40, height: 40, justifyContent: 'center', alignItems: 'center', flexShrink: 0 }}>
-    <WallyAsset name={symbol === 'BTC' ? 'bed8f.svg' : symbol === 'SOL' ? '84f09.svg' : '95c95.svg'} size={40} style={{ position: 'absolute' }} />
-    {symbol === 'SOL' ? <Image source={require('../../assets/wallyui/07cc6.png')} style={{ width: 28, height: 28 }} contentFit="contain" /> : <WallyAsset name={symbol === 'BTC' ? '9df87.svg' : 'd3d24.svg'} size={24} />}
+  const disc = dark ? (symbol === 'BTC' ? c.amber : c.tint) : undefined;
+  const glyph = dark ? (symbol === 'BTC' ? c.orange : c.lilac) : undefined;
+  return <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: disc, justifyContent: 'center', alignItems: 'center', flexShrink: 0 }}>
+    {!dark && <WallyAsset name={symbol === 'BTC' ? 'bed8f.svg' : symbol === 'SOL' ? '84f09.svg' : '95c95.svg'} size={40} style={{ position: 'absolute' }} />}
+    {symbol === 'SOL' ? <Image source={require('../../assets/wallyui/07cc6.png')} style={{ width: 28, height: 28 }} contentFit="contain" /> : <WallyAsset name={symbol === 'BTC' ? '9df87.svg' : 'd3d24.svg'} size={24} color={glyph} />}
   </View>;
 }
 /** Opens the asset screen unless a caller, such as a chat card, handles the press. */

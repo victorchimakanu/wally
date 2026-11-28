@@ -10,11 +10,11 @@ export type AssetName = keyof typeof vectorAssets;
  * Single-colour neutral icons (`tone` in the registry) take the palette's colour in dark mode.
  * `tint={false}` keeps the original on a surface that stays light whatever the theme.
  */
-export function WallyAsset({ name, size, style, tint = true }: { name: AssetName; size?: number; style?: StyleProp<ViewStyle>; tint?: boolean }) {
+export function WallyAsset({ name, size, style, tint = true, color }: { name: AssetName; size?: number; style?: StyleProp<ViewStyle>; tint?: boolean; /** Paints a single-colour icon in this colour instead of the palette's. */ color?: string }) {
   const { palette, dark } = useTheme();
   const asset = vectorAssets[name];
   const scale = size ? size / Math.max(asset.width, asset.height) : 1;
-  const tintColor = dark && tint && asset.tone ? palette[asset.tone] : undefined;
+  const tintColor = color ?? (dark && tint && asset.tone ? palette[asset.tone] : undefined);
   return <View style={[{ width: asset.width * scale, height: asset.height * scale, alignItems: 'center', justifyContent: 'center', flexShrink: 0 }, style]}>
     <Image source={asset.source} tintColor={tintColor} accessible={false} contentFit="contain" style={{ width: asset.width, height: asset.height, transform: [{ scale }] }} />
   </View>;

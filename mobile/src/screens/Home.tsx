@@ -1,11 +1,11 @@
-import { CustodyGuard } from '../components/WalletData';
+import { CustodyGuard, LiveActivityCard } from '../components/WalletData';
 import React, { useState } from 'react';
 import { Redirect, router } from 'expo-router';
 import { Pressable, TextInput, View } from 'react-native';
 import { WalletOverview } from '../components/WalletOverview';
 import { Watchlist } from '../components/MarketRows';
 import { Lockup, WallyAsset } from '../components/WallyAsset';
-import { Button, Card, Group, Label, Row, Screen, useShared } from '../components/ui';
+import { Button, Card, Group, Label, LinkButton, Row, Screen, useShared } from '../components/ui';
 import { useShell } from '../components/shell';
 import { useDemo } from '../demo/store';
 import { fonts, makeStyles, useColors } from '../theme';
@@ -47,10 +47,15 @@ export function WalletScreen() {
       <View style={{ flex: 1, minWidth: 0 }}><Watchlist /></View>
     </View>
   </Screen>;
+  // A tablet follows the Tablet · Home board: the card keeps its column, the actions sit beside
+  // it as two tiles with recent activity under them, and the watchlist runs the full width.
   if (tablet) return <Screen tab="wallet" contentStyle={{ gap: 24 }}>
     <View style={{ flexDirection: 'row', gap: 24, alignItems: 'flex-start' }}>
       <View style={{ width: 384, gap: 24 }}>{overview}</View>
-      <View style={{ flex: 1, minWidth: 0, gap: 12 }}><Button label="Send" onPress={send} /><Button accent label="Receive" onPress={receive} /></View>
+      <View style={{ flex: 1, minWidth: 0, gap: 24 }}>
+        <View style={shared.row}><ActionTile label="Send" onPress={send} /><ActionTile label="Receive" accent onPress={receive} /></View>
+        <RecentActivity />
+      </View>
     </View>
     <Watchlist />
   </Screen>;
@@ -62,6 +67,29 @@ export function WalletScreen() {
     </View>
     <Watchlist />
   </Screen>;
+}
+
+/** The wallet's two actions as tiles, the primary in ink and the accent in yellow like the buttons. */
+function ActionTile({ label, accent = false, onPress }: { label: string; accent?: boolean; onPress: () => void }) {
+  const c = useColors();
+  return <Pressable accessibilityRole="button" accessibilityLabel={label} onPress={onPress} style={({ pressed }) => [{ flex: 1, minHeight: 112, borderRadius: 24, padding: 20, justifyContent: 'flex-end', backgroundColor: accent ? c.yellow : c.brand }, pressed && { opacity: 0.85 }]}>
+    <Label size={18} weight="semibold" color={accent ? c.onAccent : c.onBrand}>{label}</Label>
+  </Pressable>;
+}
+
+/** The latest three transfers, with the full list one tap away. Live wallets reuse the activity card. */
+function RecentActivity() {
+  const c = useColors();
+  const shared = useShared();
+  const wallet = useWallet();
+  const { state } = useDemo();
+  if (wallet.enabled) return <LiveActivityCard compact />;
+  const latest = state.transactions.slice(0, 3);
+  const short = (address: string) => `${address.slice(0, 6)}…${address.slice(-4)}`;
+  return <Card>
+    <View style={shared.between}><Label size={18} weight="semibold">Recent activity</Label><LinkButton label="View all" onPress={() => router.push('/history')} /></View>
+    {latest.length === 0 ? <Label size={14} color={c.muted}>No transfers yet.</Label> : <Group>{latest.map(item => <Row key={item.id} title={`To ${short(item.recipient)}`} value={`${item.status === 'failed' ? '' : '−'}${item.amount} USDt`} onPress={() => router.push('/history')} />)}</Group>}
+  </Card>;
 }
 
 export function ChatsScreen() {

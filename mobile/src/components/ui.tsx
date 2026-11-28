@@ -97,8 +97,16 @@ export function AppNavigation({ surface, floating = false }: { surface: 'wallet'
   const c = useColors();
   const s = useStyles();
   const shared = useShared();
-  const { tablet, gutter } = useShell();
+  const { tablet, gutter, layout } = useShell();
   const [open, setOpen] = useState(false);
+  // The two side columns share the wider of their measured widths, so the switch sits dead
+  // centre whatever flanks it: a menu button on one side, a badge and an avatar on the other.
+  const [sides, setSides] = useState({ left: 58, right: 58 });
+  const side = Math.max(sides.left, sides.right);
+  const measure = (key: 'left' | 'right') => (event: { nativeEvent: { layout: { width: number } } }) => {
+    const width = Math.ceil(event.nativeEvent.layout.width);
+    setSides(value => value[key] === width ? value : { ...value, [key]: width });
+  };
   const { state, newChat } = useDemo();
   const { preferences } = usePreferences();
   const insets = useSafeAreaInsets();
@@ -107,10 +115,12 @@ export function AppNavigation({ surface, floating = false }: { surface: 'wallet'
   const menu = <Pressable accessibilityRole="button" accessibilityLabel="Open app menu" onPress={() => setOpen(true)} style={[s.menu, floating && s.floatingShadow]}><WallyAsset name="f3b34.svg" /></Pressable>;
   return <>
     {floating ? <Animated.View entering={FadeIn.duration(200)} style={s.floatingMenu}>{menu}</Animated.View> : <View style={[s.navigation, { paddingHorizontal: gutter - 8 }]}>
-      {menu}
-      <View style={s.segment}>{(['wallet', 'chat'] as const).map(value => <Pressable key={value} accessibilityRole="tab" accessibilityLabel={value === 'wallet' ? 'Wallet' : 'Chat'} accessibilityState={{ selected: surface === value }} onPress={() => value === 'wallet' ? router.replace('/wallet') : chat()} style={[s.segmentButton, surface === value && { backgroundColor: c.raised }]}><Label size={17} weight={surface === value ? 'semibold' : 'regular'}>{value === 'wallet' ? 'Wallet' : 'Chat'}</Label></Pressable>)}</View>
-      <NetworkBadge />
-      {tablet && <Pressable accessibilityRole="button" accessibilityLabel="View profile" onPress={() => router.push('/profile')} style={s.iconButton}><Avatar size={40} /></Pressable>}
+      {/* The rail already navigates, so that tier has no menu button; its column stays as the spacer. */}
+      <View style={{ width: side, alignItems: 'flex-start' }}><View onLayout={measure('left')} style={shared.row}>{layout !== 'rail' && menu}</View></View>
+      <View style={{ flex: 1, minWidth: 0, alignItems: 'center' }}>
+        <View style={s.segment}>{(['wallet', 'chat'] as const).map(value => <Pressable key={value} accessibilityRole="tab" accessibilityLabel={value === 'wallet' ? 'Wallet' : 'Chat'} accessibilityState={{ selected: surface === value }} onPress={() => value === 'wallet' ? router.replace('/wallet') : chat()} style={[s.segmentButton, surface === value && { backgroundColor: c.raised }]}><Label size={17} weight={surface === value ? 'semibold' : 'regular'}>{value === 'wallet' ? 'Wallet' : 'Chat'}</Label></Pressable>)}</View>
+      </View>
+      <View style={{ width: side, alignItems: 'flex-end' }}><View onLayout={measure('right')} style={shared.row}><NetworkBadge />{tablet && <Pressable accessibilityRole="button" accessibilityLabel="View profile" onPress={() => router.push('/profile')} hitSlop={6} style={s.avatar}><Avatar size={40} /></Pressable>}</View></View>
     </View>}
     <Modal transparent visible={open} animationType="fade" onRequestClose={() => setOpen(false)}>
       <View style={s.modal}>
@@ -168,12 +178,13 @@ export function Screen({ children, title, tab, surface, immersive = false, foote
   }, [scrollRequest, autoScroll]);
   const insets = useSafeAreaInsets();
   const { state, storageError } = useDemo();
-  const { wide, gutter, topLevel } = useShell();
+  const { wide, gutter, topLevel, layout } = useShell();
   // Desktop: the sidebar navigates, so main sections get a page heading and chat draws its own.
   // Phone and tablet: Wallet and Chat carry the menu and switch; every other screen is pushed and has Back.
   const header = wide
     ? surface === 'chat' ? null : topLevel || tab === 'wallet' ? <TopBar title={title ?? 'Wallet'} /> : title ? <Header title={title} back={back} /> : null
-    : surface || tab === 'wallet' ? <AppNavigation surface={surface ?? 'wallet'} floating={immersive} /> : title ? <Header title={title} back={back} /> : null;
+    // A section the rail lists is a destination there, not a pushed screen, so it shows no Back.
+    : surface || tab === 'wallet' ? <AppNavigation surface={surface ?? 'wallet'} floating={immersive} /> : title ? <Header title={title} back={back && !(topLevel && layout === 'rail')} /> : null;
   // Desktop content sits at the page's left edge: 696 wide for a list, 1104 for the two-column
   // screens, with an `aside` taking the right 384 of those 1104, as the desktop designs lay out.
   const showAside = wide && !!aside;
@@ -285,7 +296,8 @@ const useStyles = makeStyles(c => ({
   navigation: { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 8, flexDirection: 'row', alignItems: 'center', gap: 12 },
   menu: { width: 58, height: 58, borderRadius: 29, backgroundColor: c.raised, alignItems: 'center', justifyContent: 'center' },
   floatingMenu: { position: 'absolute', top: 8, left: 16, zIndex: 10 }, floatingShadow: { borderWidth: 1, borderColor: c.line, boxShadow: `0 6px 18px ${c.shadow}`, elevation: 6 },
-  segment: { flex: 1, maxWidth: 250, flexDirection: 'row', backgroundColor: c.toggle, borderRadius: 29, padding: 5 },
+  segment: { width: '100%', maxWidth: 250, flexDirection: 'row', backgroundColor: c.toggle, borderRadius: 29, padding: 5 },
+  avatar: { width: 40, height: 40, borderRadius: 20 },
   segmentButton: { flex: 1, minHeight: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center' },
   modal: { flex: 1, backgroundColor: c.overlay }, drawer: { width: '82%', maxWidth: 358, flex: 1, paddingHorizontal: 28, backgroundColor: c.background, borderTopRightRadius: 28, borderBottomRightRadius: 28 },
   drawerRow: { flexDirection: 'row', alignItems: 'center', gap: 20, minHeight: 52, paddingHorizontal: 8 }, iconButton: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },

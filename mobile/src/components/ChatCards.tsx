@@ -132,7 +132,11 @@ export function InlineChatTool({ tool, onRetry, onManual, onAsk }: { tool: ChatT
 }
 
 /** Wallet tools behind the composer's + button. */
-export function WalletToolsModal({ visible, onClose, onManual }: { visible: boolean; onClose: () => void; onManual: () => void }) {
+/** The composer's tools sheet. In a conversation it also holds the chat's own actions. */
+export function WalletToolsModal({ visible, onClose, onManual, onNewChat, onHistory }: { visible: boolean; onClose: () => void; onManual: () => void; onNewChat?: () => void; onHistory?: () => void }) {
   const c = useColors();
-  return <Modal transparent visible={visible} animationType="fade" onRequestClose={onClose}><View style={{ flex: 1, backgroundColor: c.overlay, justifyContent: 'center', alignItems: 'center', padding: 24 }}><Pressable accessibilityRole="button" accessibilityLabel="Dismiss wallet tools" onPress={onClose} style={StyleSheet.absoluteFill} /><Card style={{ width: '100%', maxWidth: 384 }}><Label size={18} weight="bold">Wallet tools</Label><Button secondary label="Manual send" onPress={() => { onClose(); onManual(); }} /><Button secondary label="Receive address" onPress={() => { onClose(); router.push('/receive'); }} /><Button secondary label="Close" onPress={onClose} /></Card></View></Modal>;
+  return <Modal transparent visible={visible} animationType="fade" onRequestClose={onClose}><View style={{ flex: 1, backgroundColor: c.overlay, justifyContent: 'center', alignItems: 'center', padding: 24 }}><Pressable accessibilityRole="button" accessibilityLabel="Dismiss tools" onPress={onClose} style={StyleSheet.absoluteFill} /><Card style={{ width: '100%', maxWidth: 384 }}><Label size={18} weight="bold">Tools</Label>
+    {onNewChat && <Button secondary label="New chat" onPress={() => { onClose(); onNewChat(); }} />}
+    {onHistory && <Button secondary label="Chat history" onPress={() => { onClose(); onHistory(); }} />}
+    <Button secondary label="Manual send" onPress={() => { onClose(); onManual(); }} /><Button secondary label="Receive address" onPress={() => { onClose(); router.push('/receive'); }} /><Button secondary label="Close" onPress={onClose} /></Card></View></Modal>;
 }

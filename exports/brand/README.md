@@ -27,13 +27,14 @@ The brand components in the "Brand · Wally logo (final)" section (`brand/mark`,
 | `app-icons/` | `icon.png` 1024, `favicon.png` 48, `android-icon-foreground.png` 512, `android-icon-monochrome.png` 432, `splash-icon.png` 1024, `android-icon-background.png` 512 (plain midnight). Copies live in `mobile/assets/`. |
 
 The lockup keeps the arrangement from the Figma frame: ring box 363.27 × 273.36, wordmark
-667.37 × 263.41 placed at (388.64, 12.70), total 1056.01 × 276.11.
+667.37 × 263.41 placed at (427.28, 12.70), total 1094.65 × 276.11. The 64 units between the
+ring and the word are deliberate; closer and the two read as one shape.
 
 ## Regenerating
 
 1. In Figma, duplicate `941:27427`, run Outline Stroke on the copy, and export it and `941:27437`
    as SVG. Replace the paths in the five SVGs above (the lockup translates the wordmark by
-   388.64, 12.70). Run `node mobile/scripts/catalog-figma-assets.mjs` from `mobile/` so the asset
+   427.28, 12.70). Run `node mobile/scripts/catalog-figma-assets.mjs` from `mobile/` so the asset
    registry picks up any size change.
 2. Icons: `python exports/brand/make-icons.py DIR` writes one HTML page per PNG into `DIR`, then
    render each with a headless Chromium at the page's size:

@@ -66,6 +66,6 @@ export const vectorAssets = {
   'eab8b.svg': { source: require('../../assets/wallyui/eab8b.svg'), width: 160, height: 160, tone: 'ink' },
   'f2470.svg': { source: require('../../assets/wallyui/f2470.svg'), width: 24, height: 24, tone: 'ink' },
   'f3b34.svg': { source: require('../../assets/wallyui/f3b34.svg'), width: 24, height: 24, tone: 'ink' },
-  'wally-lockup-dark.svg': { source: require('../../assets/wallyui/wally-lockup-dark.svg'), width: 1056.01, height: 276.11, tone: null },
-  'wally-lockup-light.svg': { source: require('../../assets/wallyui/wally-lockup-light.svg'), width: 1056.01, height: 276.11, tone: null },
+  'wally-lockup-dark.svg': { source: require('../../assets/wallyui/wally-lockup-dark.svg'), width: 1094.65, height: 276.11, tone: null },
+  'wally-lockup-light.svg': { source: require('../../assets/wallyui/wally-lockup-light.svg'), width: 1094.65, height: 276.11, tone: null },
 } as const satisfies Record<string, { source: number; width: number; height: number; tone: AssetTone }>;
