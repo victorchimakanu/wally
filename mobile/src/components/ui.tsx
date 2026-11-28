@@ -114,11 +114,11 @@ export function AppNavigation({ surface, floating = false }: { surface: 'wallet'
   const { preferences } = usePreferences();
   const insets = useSafeAreaInsets();
   function chat() { const id = state.chats[0]?.id ?? newChat(); setOpen(false); router.replace({ pathname: '/chat', params: { id } }); }
-  function go(path: '/wallet' | '/chats' | '/history' | '/market' | '/settings' | '/profile' | '/address-book') { setOpen(false); router.push(path); }
+  function go(path: '/wallet' | '/chats' | '/history' | '/market' | '/profile' | '/address-book') { setOpen(false); router.push(path); }
   // The drawer is the shared-components list: the six sections in the sidebar's order, then the
   // profile. New chat and history live in the composer's Tools sheet, so the drawer has no second
   // door to either.
-  const DRAWER = [['Wallet', 'bfa3b.svg', '/wallet'], ['Chats', '49ec3.svg', '/chats'], ['Market', '56a25.svg', '/market'], ['Activity', 'b1b14.svg', '/history'], ['Address book', '9a2cd.svg', '/address-book'], ['Settings', 'f2470.svg', '/settings']] as const;
+  const DRAWER = [['Wallet', 'bfa3b.svg', '/wallet'], ['Chats', '49ec3.svg', '/chats'], ['Market', '56a25.svg', '/market'], ['Activity', 'b1b14.svg', '/history'], ['Address book', '9a2cd.svg', '/address-book']] as const;
   // The phone's bar is sized for thumbs. A tablet has room, so its switch and menu button shrink
   // to the Tablet · Home board's proportions instead of reading as oversized controls.
   const compact = tablet;

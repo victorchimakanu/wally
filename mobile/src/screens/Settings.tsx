@@ -75,9 +75,6 @@ export function SettingsGroups() {
   </>;
 }
 
-export function SettingsScreen() {
-  return <Screen title="Settings"><SettingsGroups /></Screen>;
-}
 
 /**
  * What this build is, where support can find it.

@@ -9,7 +9,7 @@ import { useDemo } from '../demo/store';
 import { usePreferences } from '../demo/preferences';
 import { type Palette, makeStyles, useColors } from '../theme';
 
-type Section = { path: '/wallet' | '/chat' | '/chats' | '/market' | '/history' | '/address-book' | '/settings'; label: string; icon: AssetName };
+type Section = { path: '/wallet' | '/chat' | '/chats' | '/market' | '/history' | '/address-book'; label: string; icon: AssetName };
 /** The order the sidebar and rail list them in, from the WallyUI shared navigation. */
 const SECTIONS: Section[] = [
   { path: '/wallet', label: 'Wallet', icon: 'bfa3b.svg' },
@@ -17,8 +17,9 @@ const SECTIONS: Section[] = [
   { path: '/market', label: 'Market', icon: '56a25.svg' },
   { path: '/history', label: 'Activity', icon: 'b1b14.svg' },
   { path: '/address-book', label: 'Address book', icon: '9a2cd.svg' },
-  { path: '/settings', label: 'Settings', icon: 'f2470.svg' },
 ];
+// Settings has no section of its own: everything you set lives on the Profile screen, which the
+// avatar opens from the bar, the rail, the sidebar and the drawer.
 /**
  * Beside the rail the Wallet/Chat switch is still on screen, and it alone moves between the
  * wallet and a conversation. So the rail's section is Chats, the list, like the drawer's row;
@@ -31,8 +32,6 @@ const OWNER: Record<string, Section['path']> = {
   '/chats': '/chat', '/clear-chats': '/chat',
   '/transaction': '/history', '/export-data': '/history',
   '/asset': '/market',
-  '/preferences': '/settings', '/profile': '/settings', '/licences': '/settings', '/problems': '/settings',
-  '/recovery-phrase': '/settings', '/reset-wallet': '/settings', '/phone-performance': '/settings',
 };
 const RAIL_OWNER: Record<string, Section['path']> = { ...OWNER, '/chat': '/chats', '/clear-chats': '/chats' };
 /** Onboarding stands on its own, without app navigation. */
