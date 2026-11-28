@@ -2,9 +2,10 @@ import React, { useState } from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Keyboard, View } from 'react-native';
 import { Card, Group, Label, LinkButton, Note, Row, Screen, useShared } from '../components/ui';
-import { AssetLogo, AssetRow } from '../components/MarketRows';
+import { AssetLogo, AssetRow, MARKET_COLUMNS } from '../components/MarketRows';
 import { ChatComposer } from '../components/ChatComposer';
 import { Segmented } from '../components/Segmented';
+import { useShell } from '../components/shell';
 import { WalletToolsModal } from '../components/ChatCards';
 import { COINS, formatPrice, formatChange } from '../services/market-api';
 import { useMarket } from '../data/market';
@@ -38,10 +39,23 @@ function AskDock({ topic }: { topic?: string }) {
  */
 export function MarketScreen() {
   const c = useColors();
+  const { layout } = useShell();
   const { data, loading, error } = useMarket();
   const assets = data?.assets ?? [];
+  // Richness from the data the four assets carry: the week as a line in every row, and market
+  // cap and 24h volume as columns wherever a row is wide enough to be a table row, as the
+  // desktop board lays it out. The one line above the list is the day's count, not a sentence.
+  const detail = layout !== 'phone';
+  const up = assets.filter(asset => asset.change !== null && asset.change > 0).length;
+  const down = assets.filter(asset => asset.change !== null && asset.change < 0).length;
   return <Screen title="Market" footer={<AskDock />}>
-    <Group>{assets.map(asset => <AssetRow key={asset.symbol} asset={asset} />)}</Group>
+    <View style={{ gap: 8 }}>
+      {assets.length > 0 && <Label size={13} weight="medium" color={c.muted} accessibilityRole="header" style={{ paddingHorizontal: 16 }}>{`${up} up · ${down} down · 24h`}</Label>}
+      {detail && assets.length > 0 && <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 12, paddingHorizontal: 16 }}>
+        {[['Market cap', MARKET_COLUMNS.figure], ['24h volume', MARKET_COLUMNS.figure], ['Price', MARKET_COLUMNS.price]].map(([caption, width]) => <Label key={caption} size={12} color={c.muted} style={{ width: width as number, textAlign: 'right' }}>{caption}</Label>)}
+      </View>}
+      <Group>{assets.map(asset => <AssetRow key={asset.symbol} asset={asset} spark detail={detail} />)}</Group>
+    </View>
     {!assets.length && <Label color={c.muted}>{loading ? 'Loading prices…' : error && !data ? 'Market data unavailable' : 'No assets'}</Label>}
     <MarketStatus refresh />
   </Screen>;
